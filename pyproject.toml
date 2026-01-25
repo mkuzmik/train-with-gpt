@@ -1,0 +1,15 @@
+[project]
+name = "train-with-gpt"
+version = "0.1.0"
+description = "A simple MCP server example"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+train-with-gpt = "train_with_gpt.server:main"
