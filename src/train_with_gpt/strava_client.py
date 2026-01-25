@@ -423,9 +423,10 @@ class StravaClient:
                 laps = response.json()
                 print(f"[DEBUG] Found {len(laps)} laps", file=sys.stderr)
                 return laps
+            elif response.status_code == 404:
+                print(f"[DEBUG] Activity {activity_id} not found or no laps available", file=sys.stderr)
+                return []  # Return empty list instead of raising exception
             else:
                 error_msg = f"Failed to fetch laps: {response.status_code}"
                 print(f"[DEBUG] {error_msg}", file=sys.stderr)
-                if response.status_code == 404:
-                    raise Exception("Activity not found or no laps available")
                 raise Exception(error_msg)

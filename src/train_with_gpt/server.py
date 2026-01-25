@@ -234,8 +234,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 # Format output
                 activity_id = activity.get('id')
                 stats_str = " | ".join(stats) if stats else "No stats"
-                lines.append(f"\n📅 {date_str}")
-                lines.append(f"🏃 {name} ({activity_type})")
+                lines.append(f"\n📅 {date_str} - {activity_type}")
                 lines.append(f"   {stats_str}")
                 lines.append(f"   🔗 ID: {activity_id}")
             
@@ -247,7 +246,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     
     elif name == "analyze_activity":
         try:
-            activity_id = int(arguments.get("activity_id"))
+            # Handle both string and number inputs
+            activity_id_raw = arguments.get("activity_id")
+            activity_id = int(activity_id_raw) if activity_id_raw else None
+            
+            if not activity_id:
+                return [TextContent(type="text", text="❌ Error: activity_id is required")]
             
             # Fetch zones
             zones_data = await strava.get_athlete_zones()
@@ -332,6 +336,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     lines.append(f"  Lap {i}: {lap_stats_str}")
                 
                 lines.append("")
+            elif laps and len(laps) == 1:
+                lines.append("## ℹ️ Lap Information\n")
+                lines.append("This activity has only one lap (no interval structure detected).\n")
+            else:
+                lines.append("## ℹ️ Lap Information\n")
+                lines.append("No lap data available for this activity. The device may not have recorded laps.\n")
             
             # Heart Rate Analysis
             if has_hr and zones_data.get('heart_rate'):
