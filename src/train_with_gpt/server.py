@@ -10,7 +10,6 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from .strava_client import StravaClient
-from .auth_flow import start_auth_flow
 from .config import config
 
 
@@ -84,23 +83,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                          f"**Config path:** {config.get_config_path()}"
                 )]
             
-            data = await start_auth_flow(client_id, client_secret)
+            data = await strava.connect()
             
-            # Save tokens
-            access_token = data['access_token']
-            refresh_token = data['refresh_token']
-            expires_at = data.get('expires_at')
-            
-            config.save(
-                access_token=access_token,
-                refresh_token=refresh_token,
-                expires_at=expires_at
-            )
-            
-            # Update current instance
-            strava.access_token = access_token
-            strava.refresh_token = refresh_token
-            
+            # Tokens are already saved by strava.connect()
             athlete = data.get('athlete', {})
             athlete_name = f"{athlete.get('firstname', '')} {athlete.get('lastname', '')}".strip()
             

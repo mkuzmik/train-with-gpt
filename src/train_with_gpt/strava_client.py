@@ -1,12 +1,66 @@
-"""Strava API client for fetching activities."""
+"""Strava API client with authentication."""
 
+import asyncio
 import os
 import sys
+import webbrowser
 from datetime import datetime, timedelta
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
+from urllib.parse import urlparse, parse_qs
 import httpx
 
 from .config import config
+
+
+# OAuth settings
+PORT = 8111
+REDIRECT_URI = f"http://localhost:{PORT}/callback"
+SCOPES = "activity:read_all,activity:read,profile:read_all"
+
+# Global for OAuth callback
+auth_code = None
+auth_error = None
+
+
+class OAuthCallbackHandler(BaseHTTPRequestHandler):
+    """Handles OAuth callback from Strava."""
+    
+    def do_GET(self):
+        global auth_code, auth_error
+        
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        
+        if parsed.path == '/callback':
+            if 'error' in params:
+                auth_error = params['error'][0]
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(b'''
+                    <html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
+                    <h1 style="color: red;">Authorization Failed</h1>
+                    <p>You can close this window.</p>
+                    </body></html>
+                ''')
+            elif 'code' in params:
+                auth_code = params['code'][0]
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(b'''
+                    <html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
+                    <h1 style="color: green;">Success!</h1>
+                    <p>Authentication successful. You can close this window.</p>
+                    </body></html>
+                ''')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass
 
 
 class StravaClient:
@@ -29,6 +83,85 @@ class StravaClient:
         
         if not self.access_token:
             print("Warning: STRAVA_ACCESS_TOKEN not set", file=sys.stderr)
+    
+    async def connect(self) -> dict:
+        """
+        Run OAuth flow to connect Strava account.
+        Opens browser, waits for callback, exchanges code for tokens.
+        
+        Returns:
+            dict with access_token, refresh_token, expires_at, athlete info
+        """
+        global auth_code, auth_error
+        auth_code = None
+        auth_error = None
+        
+        if not self.client_id or not self.client_secret:
+            raise ValueError("Client credentials not configured")
+        
+        auth_url = (
+            f"https://www.strava.com/oauth/authorize?"
+            f"client_id={self.client_id}&"
+            f"response_type=code&"
+            f"redirect_uri={REDIRECT_URI}&"
+            f"approval_prompt=force&"
+            f"scope={SCOPES}"
+        )
+        
+        print(f"[AUTH] Starting local server on port {PORT}...", file=sys.stderr)
+        server = HTTPServer(('localhost', PORT), OAuthCallbackHandler)
+        
+        print(f"[AUTH] Opening browser for authorization...", file=sys.stderr)
+        webbrowser.open(auth_url)
+        
+        # Wait for callback
+        timeout_count = 0
+        max_timeout = 300  # 5 minutes
+        
+        while auth_code is None and auth_error is None and timeout_count < max_timeout:
+            server.handle_request()
+            await asyncio.sleep(0.1)
+            timeout_count += 1
+        
+        server.server_close()
+        
+        if timeout_count >= max_timeout:
+            raise TimeoutError("Authentication timed out after 5 minutes")
+        
+        if auth_error:
+            raise ValueError(f"Authorization failed: {auth_error}")
+        
+        if not auth_code:
+            raise ValueError("No authorization code received")
+        
+        print("[AUTH] Authorization code received, exchanging for tokens...", file=sys.stderr)
+        
+        # Exchange code for tokens
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self.TOKEN_URL,
+                data={
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "code": auth_code,
+                    "grant_type": "authorization_code",
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+        
+        # Update and save tokens
+        self.access_token = data['access_token']
+        self.refresh_token = data['refresh_token']
+        expires_at = data.get('expires_at')
+        
+        config.save(
+            access_token=self.access_token,
+            refresh_token=self.refresh_token,
+            expires_at=expires_at
+        )
+        
+        return data
     
     async def refresh_access_token(self) -> str:
         """Refresh the access token using the refresh token."""
@@ -59,8 +192,7 @@ class StravaClient:
             self.refresh_token = new_refresh_token
             
             # Save to config
-            from .config import config as global_config
-            global_config.save(
+            config.save(
                 access_token=new_access_token,
                 refresh_token=new_refresh_token,
                 expires_at=expires_at
