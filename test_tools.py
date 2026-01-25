@@ -46,9 +46,9 @@ async def show_help():
 
 async def main():
     """Run tool test based on arguments."""
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or sys.argv[1] in ["--help", "-h", "help"]:
         await show_help()
-        sys.exit(1)
+        sys.exit(0 if len(sys.argv) >= 2 else 1)
     
     tool_name = sys.argv[1]
     

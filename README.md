@@ -1,12 +1,20 @@
 # Train With GPT
 
-A Model Context Protocol (MCP) server for analyzing Strava training data.
+A Model Context Protocol (MCP) server for training analysis and coaching suggestions. Currently supports Strava as a data source.
 
 ## Features
 
-This server provides tools for:
-- **connect_strava**: Authenticate with Strava (opens browser)
-- **get_last_week_activities**: Fetches activities from the last 7 days
+This server provides tools for training analysis:
+- **connect_strava**: Authenticate with Strava (opens browser for OAuth)
+- **get_last_week_activities**: Fetches activities from the last 7 days with detailed metrics:
+  - Distance, duration, and pace/speed
+  - Elevation gain
+  - Heart rate (average and max)
+  - Power output (cycling)
+  - Cadence
+  - Temperature
+
+Note: Currently supports Strava. Additional data sources planned for future releases.
 
 ## Quick Start
 
@@ -16,7 +24,7 @@ This server provides tools for:
 pip install -e .
 ```
 
-### 2. Configure Strava API Credentials
+### 2. Configure Data Source (Strava)
 
 **Create a Strava API application:**
 1. Go to https://www.strava.com/settings/api
@@ -53,15 +61,19 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "train-with-gpt": {
-      "command": "/Users/mat/.pyenv/shims/python",
+      "command": "/path/to/python",
       "args": ["-m", "train_with_gpt.server"],
-      "cwd": "/Users/mat/Code/train-with-gpt"
+      "cwd": "/path/to/train-with-gpt"
     }
   }
 }
 ```
 
-### 4. Connect Your Strava Account
+Replace:
+- `/path/to/python` with your Python path (e.g., `which python` or `~/.pyenv/shims/python`)
+- `/path/to/train-with-gpt` with your project directory
+
+### 4. Connect Your Data Source
 
 In Claude, say: **"Connect my Strava account"**
 
@@ -78,22 +90,31 @@ Once connected, ask Claude:
 
 ## Development
 
-Project structure:
-```
-train-with-gpt/
-├── pyproject.toml
-├── README.md
-├── .env.example
-└── src/
-    └── train_with_gpt/
-        ├── __init__.py
-        ├── server.py
-        └── strava_client.py
+### Testing Tools
+
+Test individual tools during development:
+
+```bash
+# List all available tools
+python test_tools.py --help
+
+# Test a specific tool
+python test_tools.py get_last_week_activities
+
+# Test with arguments
+python test_tools.py connect_strava '{"force": true}'
 ```
 
 ## Extending
 
-To add more tools:
+### Adding New Data Sources
+The architecture supports multiple data sources. To add a new source:
+1. Create a new client module (similar to `strava_client.py`)
+2. Implement OAuth/authentication flow
+3. Add tools in `server.py` for the new source
+
+### Adding New Tools
+To add more tools for existing sources:
 1. Add methods to `strava_client.py` for API calls
 2. Add tool definition in `list_tools()` in `server.py`
 3. Add tool handler in `call_tool()` in `server.py`
