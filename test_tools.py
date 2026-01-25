@@ -3,19 +3,20 @@
 
 import asyncio
 import sys
-from train_with_gpt.server import call_tool
+import json
+from train_with_gpt.server import call_tool, list_tools
 
 
-async def test_connect():
-    """Test connect_strava tool."""
-    print("Testing connect_strava...")
-    print("-" * 50)
-    print("This will open your browser for authentication.")
-    print("Press Ctrl+C to cancel.")
+async def test_tool(tool_name: str, arguments: dict = None):
+    """Test any MCP tool."""
+    if arguments is None:
+        arguments = {}
+    
+    print(f"Testing {tool_name}...")
     print("-" * 50)
     
     try:
-        result = await call_tool("connect_strava", {})
+        result = await call_tool(tool_name, arguments)
         for content in result:
             print(content.text)
     except Exception as e:
@@ -24,38 +25,43 @@ async def test_connect():
         traceback.print_exc()
 
 
-async def test_get_last_week():
-    """Test get_last_week_activities tool."""
-    print("\nTesting get_last_week_activities...")
-    print("-" * 50)
+async def show_help():
+    """Display help with available tools."""
+    print("Usage:")
+    print("  python test_tools.py <tool_name> [arguments_json]")
+    print("")
+    print("Available tools:")
     
-    try:
-        result = await call_tool("get_last_week_activities", {})
-        for content in result:
-            print(content.text)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
+    tools = await list_tools()
+    for tool in tools:
+        print(f"  • {tool.name}")
+        print(f"    {tool.description}")
+    
+    print("")
+    print("Examples:")
+    print("  python test_tools.py get_last_week_activities")
+    print("  python test_tools.py connect_strava")
+    print('  python test_tools.py some_tool \'{"arg1": "value1"}\'')
 
 
 async def main():
-    """Run tests based on argument."""
+    """Run tool test based on arguments."""
     if len(sys.argv) < 2:
-        print("Usage:")
-        print("  python test_tools.py connect     - Test Strava connection")
-        print("  python test_tools.py activities  - Test fetching activities")
+        await show_help()
         sys.exit(1)
     
-    command = sys.argv[1]
+    tool_name = sys.argv[1]
     
-    if command == "connect":
-        await test_connect()
-    elif command == "activities":
-        await test_get_last_week()
-    else:
-        print(f"Unknown command: {command}")
-        sys.exit(1)
+    # Parse arguments if provided
+    arguments = {}
+    if len(sys.argv) > 2:
+        try:
+            arguments = json.loads(sys.argv[2])
+        except json.JSONDecodeError:
+            print(f"Error: Invalid JSON arguments: {sys.argv[2]}")
+            sys.exit(1)
+    
+    await test_tool(tool_name, arguments)
 
 
 if __name__ == "__main__":
