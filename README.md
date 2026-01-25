@@ -11,8 +11,15 @@ This server provides tools for training analysis:
   - Elevation gain
   - Heart rate (average and max)
   - Power output (cycling)
-  - Cadence
+  - Cadence (spm for running, rpm for cycling)
   - Temperature
+  - Activity ID for detailed analysis
+- **analyze_activity**: Deep dive analysis of a specific activity:
+  - Lap-by-lap breakdown with metrics for each lap
+  - Heart rate zone distribution (uses your Strava zones)
+  - Power zone distribution (for cycling)
+  - Automatic detection of interval workouts
+  - Coaching insights based on workout type
 
 Note: Currently supports Strava. Additional data sources planned for future releases.
 
@@ -87,6 +94,13 @@ This will:
 Once connected, ask Claude:
 - "Show me my trainings from the last week"
 - "Get my recent training activities"
+- "Analyze activity 17130571886" (use ID from activity list)
+- "What kind of workout was my run on January 21?"
+
+The analyze_activity tool will:
+- Show time spent in each heart rate/power zone
+- Detect intervals automatically
+- Provide coaching insights about your workout type
 
 ## Development
 

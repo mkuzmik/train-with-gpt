@@ -74,6 +74,7 @@ class StravaClient:
         self.refresh_token = config.refresh_token
         self.client_id = config.client_id
         self.client_secret = config.client_secret
+        self.zones_cache = None  # Cache for athlete zones
         
         print(f"[DEBUG] Loaded credentials:", file=sys.stderr)
         print(f"  ACCESS_TOKEN: {self.access_token[:10] if self.access_token else 'NOT SET'}...", file=sys.stderr)
@@ -310,3 +311,121 @@ class StravaClient:
             )
             response.raise_for_status()
             return response.json()
+    
+    async def get_athlete_zones(self, force_refresh: bool = False):
+        """
+        Get athlete's heart rate and power zones from Strava.
+        Caches the result unless force_refresh is True.
+        
+        Returns dict with 'heart_rate' and 'power' zone configurations.
+        """
+        if self.zones_cache and not force_refresh:
+            return self.zones_cache
+        
+        url = f"{self.BASE_URL}/athlete/zones"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        
+        print(f"[DEBUG] Fetching athlete zones from: {url}", file=sys.stderr)
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=30.0)
+            
+            print(f"[DEBUG] Zones response status: {response.status_code}", file=sys.stderr)
+            
+            if response.status_code == 401:
+                print("[DEBUG] 401 error, attempting token refresh", file=sys.stderr)
+                await self.refresh_access_token()
+                headers = {"Authorization": f"Bearer {self.access_token}"}
+                response = await client.get(url, headers=headers, timeout=30.0)
+            
+            if response.status_code == 200:
+                self.zones_cache = response.json()
+                return self.zones_cache
+            else:
+                error_msg = f"Failed to fetch zones: {response.status_code}"
+                print(f"[DEBUG] {error_msg}", file=sys.stderr)
+                raise Exception(error_msg)
+    
+    async def get_activity_streams(self, activity_id: int, stream_types: list[str] = None):
+        """
+        Get detailed stream data for an activity.
+        
+        Args:
+            activity_id: Strava activity ID
+            stream_types: List of stream types to fetch. Options:
+                - time, latlng, distance, altitude, velocity_smooth,
+                - heartrate, cadence, watts, temp, moving, grade_smooth
+                Default: ['time', 'heartrate', 'velocity_smooth', 'cadence', 'watts', 'altitude']
+        
+        Returns dict with stream data arrays.
+        """
+        if stream_types is None:
+            stream_types = ['time', 'heartrate', 'velocity_smooth', 'cadence', 'watts', 'altitude']
+        
+        stream_keys = ','.join(stream_types)
+        url = f"{self.BASE_URL}/activities/{activity_id}/streams"
+        params = {
+            'keys': stream_keys,
+            'key_by_type': 'true'
+        }
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        
+        print(f"[DEBUG] Fetching streams for activity {activity_id}", file=sys.stderr)
+        print(f"[DEBUG] Stream types: {stream_keys}", file=sys.stderr)
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=params, timeout=30.0)
+            
+            print(f"[DEBUG] Streams response status: {response.status_code}", file=sys.stderr)
+            
+            if response.status_code == 401:
+                print("[DEBUG] 401 error, attempting token refresh", file=sys.stderr)
+                await self.refresh_access_token()
+                headers = {"Authorization": f"Bearer {self.access_token}"}
+                response = await client.get(url, headers=headers, params=params, timeout=30.0)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                error_msg = f"Failed to fetch streams: {response.status_code}"
+                print(f"[DEBUG] {error_msg}", file=sys.stderr)
+                if response.status_code == 404:
+                    raise Exception("Activity not found or no stream data available")
+                raise Exception(error_msg)
+    
+    async def get_activity_laps(self, activity_id: int):
+        """
+        Get lap data for an activity.
+        
+        Args:
+            activity_id: Strava activity ID
+        
+        Returns:
+            List of lap objects with metrics for each lap.
+        """
+        url = f"{self.BASE_URL}/activities/{activity_id}/laps"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        
+        print(f"[DEBUG] Fetching laps for activity {activity_id}", file=sys.stderr)
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=30.0)
+            
+            print(f"[DEBUG] Laps response status: {response.status_code}", file=sys.stderr)
+            
+            if response.status_code == 401:
+                print("[DEBUG] 401 error, attempting token refresh", file=sys.stderr)
+                await self.refresh_access_token()
+                headers = {"Authorization": f"Bearer {self.access_token}"}
+                response = await client.get(url, headers=headers, timeout=30.0)
+            
+            if response.status_code == 200:
+                laps = response.json()
+                print(f"[DEBUG] Found {len(laps)} laps", file=sys.stderr)
+                return laps
+            else:
+                error_msg = f"Failed to fetch laps: {response.status_code}"
+                print(f"[DEBUG] {error_msg}", file=sys.stderr)
+                if response.status_code == 404:
+                    raise Exception("Activity not found or no laps available")
+                raise Exception(error_msg)
