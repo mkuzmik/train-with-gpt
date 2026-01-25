@@ -20,6 +20,8 @@ This server provides tools for training analysis:
   - Power zone distribution (for cycling)
   - Automatic detection of interval workouts
   - Coaching insights based on workout type
+- **discuss_goals**: Get framework for having a goal-setting conversation
+- **save_goals**: Save training goals to persistent storage
 
 Note: Currently supports Strava. Additional data sources planned for future releases.
 
