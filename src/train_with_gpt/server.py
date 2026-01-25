@@ -419,51 +419,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 
                 lines.append("")
             
-            # Coaching insights
-            lines.append("## 💡 Insights\n")
-            
-            # Analyze lap patterns if available
-            if laps and len(laps) > 1:
-                # Calculate variance in pace/HR across laps to detect intervals
-                hr_values = [lap.get('average_heartrate', 0) for lap in laps if lap.get('average_heartrate')]
-                if len(hr_values) > 1:
-                    hr_range = max(hr_values) - min(hr_values)
-                    if hr_range > 20:
-                        # Identify hard vs easy laps
-                        median_hr = sorted(hr_values)[len(hr_values)//2]
-                        hard_laps = sum(1 for hr in hr_values if hr > median_hr + 10)
-                        easy_laps = sum(1 for hr in hr_values if hr < median_hr - 10)
-                        
-                        if hard_laps >= 3:
-                            lines.append(f"🔥 Interval workout detected: {hard_laps} hard effort lap(s)")
-                        if easy_laps >= 2:
-                            lines.append(f"💨 Recovery laps detected: {easy_laps} recovery lap(s)")
-            
-            if has_hr and zones_data.get('heart_rate'):
-                zone_dist = calculate_zone_distribution(streams['heartrate']['data'], 
-                                                       [z.get('max', 0) for z in zones_data['heart_rate'].get('zones', [])[:-1]])
-                
-                # Calculate which zones dominate
-                zone_percentages = {z: (t / total_time * 100) if total_time > 0 else 0 
-                                   for z, t in zone_dist.items()}
-                
-                # Zone 1-2: Recovery/Base
-                low_zones = zone_percentages.get(1, 0) + zone_percentages.get(2, 0)
-                # Zone 3-4: Threshold/Tempo
-                mid_zones = zone_percentages.get(3, 0) + zone_percentages.get(4, 0)
-                # Zone 5+: VO2 Max/Anaerobic
-                high_zones = sum(zone_percentages.get(z, 0) for z in range(5, 10))
-                
-                if low_zones > 70:
-                    lines.append("✅ Great base/recovery workout - majority in Zone 1-2")
-                elif mid_zones > 50:
-                    lines.append("🎯 Solid threshold/tempo work - focused on Zone 3-4")
-                elif high_zones > 20:
-                    lines.append("🔥 High-intensity session - significant time in Zone 5+")
-            
-            if not has_hr and not has_power:
-                lines.append("ℹ️ No heart rate or power data available for detailed analysis")
-            
             return [TextContent(type="text", text="\n".join(lines))]
         
         except Exception as e:
