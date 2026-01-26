@@ -83,6 +83,20 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="setup_training_repo",
+            description="Configure the local git repository path where training notes and goals will be stored. Must be called before using read_goals or save_goals.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Absolute path to the local git repository for training notes",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        ),
+        Tool(
             name="discuss_goals",
             description="Get guidance on how to have a structured goal-setting conversation with the user. Returns a framework for discussing training goals.",
             inputSchema={
@@ -180,6 +194,41 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 text=f"❌ Error connecting to Strava: {str(e)}\n\n"
                      f"Please try again or check the server logs for details."
             )]
+    
+    elif name == "setup_training_repo":
+        try:
+            from pathlib import Path
+            import subprocess
+            
+            repo_path = arguments.get("repo_path", "")
+            if not repo_path:
+                return [TextContent(type="text", text="❌ Error: No repository path provided")]
+            
+            # Expand user path and convert to absolute
+            repo_path = Path(repo_path).expanduser().absolute()
+            
+            # Verify it exists and is a directory
+            if not repo_path.exists():
+                return [TextContent(type="text", text=f"❌ Error: Path does not exist: {repo_path}")]
+            
+            if not repo_path.is_dir():
+                return [TextContent(type="text", text=f"❌ Error: Path is not a directory: {repo_path}")]
+            
+            # Verify it's a git repository
+            git_dir = repo_path / ".git"
+            if not git_dir.exists():
+                return [TextContent(type="text", text=f"❌ Error: Not a git repository: {repo_path}\n\nPlease initialize it with: git init")]
+            
+            # Save to config
+            config.save(training_repo_path=str(repo_path))
+            
+            return [TextContent(type="text", text=f"✅ Training repository configured: {repo_path}\n\nYou can now use **read_goals** and **save_goals** to manage your training notes in this git repository.")]
+        
+        except Exception as e:
+            print(f"Error setting up training repo: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
     
     elif name == "get_last_week_activities":
         try:
@@ -549,6 +598,15 @@ This natural format captures nuance and context better than rigid structure."""
     elif name == "save_goals":
         try:
             from pathlib import Path
+            import subprocess
+            
+            # Check if training repo is configured
+            if not config.training_repo_path:
+                return [TextContent(type="text", text="❌ Error: Training repository not configured.\n\nPlease use **setup_training_repo** first to set the location of your training notes repository.")]
+            
+            repo_path = Path(config.training_repo_path)
+            if not repo_path.exists():
+                return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
             
             goals_text = arguments.get("goals_text", "")
             if not goals_text:
@@ -562,15 +620,33 @@ Saved: {timestamp}
 {goals_text}
 """
             
-            # Save to config directory
-            config_dir = Path.home() / ".config" / "train-with-gpt"
-            config_dir.mkdir(parents=True, exist_ok=True)
-            goals_file = config_dir / "goals.txt"
-            
+            # Write to goals.md in the repo
+            goals_file = repo_path / "goals.md"
             with open(goals_file, 'w') as f:
                 f.write(content)
             
-            return [TextContent(type="text", text=f"✅ Goals saved successfully to {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
+            # Git commit
+            try:
+                subprocess.run(
+                    ["git", "add", "goals.md"],
+                    cwd=repo_path,
+                    check=True,
+                    capture_output=True
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", f"Update training goals - {timestamp}"],
+                    cwd=repo_path,
+                    check=True,
+                    capture_output=True
+                )
+                
+                return [TextContent(type="text", text=f"✅ Goals saved and committed to repository: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
+            except subprocess.CalledProcessError as e:
+                # If commit fails (e.g., no changes), still report success for the write
+                if "nothing to commit" in e.stderr.decode('utf-8', errors='ignore').lower():
+                    return [TextContent(type="text", text=f"✅ Goals saved to repository: {goals_file}\n\n(No changes to commit - content unchanged)")]
+                else:
+                    raise
         
         except Exception as e:
             print(f"Error saving goals: {e}", file=sys.stderr)
@@ -581,15 +657,46 @@ Saved: {timestamp}
     elif name == "read_goals":
         try:
             from pathlib import Path
+            import subprocess
             
-            config_dir = Path.home() / ".config" / "train-with-gpt"
-            goals_file = config_dir / "goals.txt"
+            # Check if training repo is configured
+            if not config.training_repo_path:
+                return [TextContent(type="text", text="❌ Error: Training repository not configured.\n\nPlease use **setup_training_repo** first to set the location of your training notes repository.")]
+            
+            repo_path = Path(config.training_repo_path)
+            if not repo_path.exists():
+                return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
+            
+            # Git pull first to get latest
+            try:
+                result = subprocess.run(
+                    ["git", "pull"],
+                    cwd=repo_path,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                pull_output = result.stdout.strip()
+            except subprocess.CalledProcessError as e:
+                # Continue even if pull fails (e.g., no remote configured, no tracking branch)
+                error_msg = e.stderr.strip() if e.stderr else str(e)
+                # Only show error if it's not about missing remote/tracking
+                if "no tracking information" not in error_msg.lower() and "no remote" not in error_msg.lower():
+                    pull_output = f"(Note: git pull had issues - {error_msg})"
+                else:
+                    pull_output = None
+            
+            goals_file = repo_path / "goals.md"
             
             if not goals_file.exists():
                 return [TextContent(type="text", text="ℹ️ No goals saved yet.\n\nUse **discuss_goals** to start a conversation about training goals, then **save_goals** to save them.")]
             
             with open(goals_file, 'r') as f:
                 content = f.read()
+            
+            # Add pull info if there were updates
+            if pull_output and "already up to date" not in pull_output.lower():
+                content = f"_{pull_output}_\n\n{content}"
             
             return [TextContent(type="text", text=content)]
         

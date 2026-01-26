@@ -20,6 +20,7 @@ class Config:
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.expires_at: Optional[int] = None
+        self.training_repo_path: Optional[str] = None
         
     def load(self):
         """Load config from file and environment variables."""
@@ -32,6 +33,7 @@ class Config:
         self.access_token = os.getenv("STRAVA_ACCESS_TOKEN") or file_config.get("accessToken")
         self.refresh_token = os.getenv("STRAVA_REFRESH_TOKEN") or file_config.get("refreshToken")
         self.expires_at = file_config.get("expiresAt")
+        self.training_repo_path = file_config.get("trainingRepoPath")
         
         print(f"[CONFIG] Loaded from: {CONFIG_FILE}", file=sys.stderr)
         print(f"[CONFIG] Client ID: {self.client_id or 'NOT SET'}", file=sys.stderr)
@@ -77,6 +79,10 @@ class Config:
         if "expires_at" in kwargs:
             existing["expiresAt"] = kwargs["expires_at"]
             self.expires_at = kwargs["expires_at"]
+        
+        if "training_repo_path" in kwargs:
+            existing["trainingRepoPath"] = kwargs["training_repo_path"]
+            self.training_repo_path = kwargs["training_repo_path"]
         
         # Write to file
         with open(CONFIG_FILE, 'w') as f:
