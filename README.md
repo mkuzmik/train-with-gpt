@@ -106,7 +106,29 @@ The analyze_activity tool will:
 
 ## Development
 
-### Testing Tools
+### Running Tests
+
+**Install development dependencies:**
+```bash
+pip install -e ".[dev]"
+```
+
+**Run all tests:**
+```bash
+pytest tests/ -v
+```
+
+**Run specific test file:**
+```bash
+pytest tests/test_server.py -v
+```
+
+**Run specific test:**
+```bash
+pytest tests/test_server.py::test_setup_training_repo_success -v
+```
+
+### Testing Tools Manually
 
 Test individual tools during development:
 
@@ -118,8 +140,138 @@ python test_tools.py --help
 python test_tools.py get_last_week_activities
 
 # Test with arguments
-python test_tools.py connect_strava '{"force": true}'
+python test_tools.py setup_training_repo '{"repo_path": "/path/to/repo"}'
 ```
+
+### Continuous Integration
+
+Tests run automatically via GitHub Actions on:
+- Every push to main branch
+- Every pull request
+
+The CI pipeline tests against Python 3.10, 3.11, and 3.12.
+
+**⚠️ IMPORTANT: All tests must pass before merging PRs.**
+
+### Writing Tests
+
+**Critical Rules:**
+
+✅ **MUST DO:**
+1. **All tests must pass before committing** - Run `pytest tests/ -v`
+2. **Add tests for new features** - New tool? Add test in `tests/test_server.py`
+3. **Test both success and failure cases** - Happy path + error conditions
+4. **Use mocking for external dependencies** - No real API calls, no real filesystem modifications
+5. **Keep tests isolated** - Use `tempfile.TemporaryDirectory()` and patch config
+
+❌ **MUST NOT DO:**
+1. **Never skip tests** without documenting why with `@pytest.mark.skip(reason="...")`
+2. **Never make real API calls** in tests - Always mock `httpx` calls
+3. **Never commit commented-out tests** - Fix or remove them
+4. **Never ignore test failures** - Fix the test or fix the code
+
+**Test Structure:**
+
+```python
+@pytest.mark.asyncio  # Required for async tests
+async def test_new_tool_success():
+    """Test new_tool with valid inputs."""
+    with patch('train_with_gpt.server.dependency') as mock_dep:
+        # Setup
+        mock_dep.return_value = "expected_value"
+        
+        # Execute
+        result = await call_tool("new_tool", {"arg": "value"})
+        
+        # Assert
+        assert len(result) == 1
+        assert "✅" in result[0].text
+
+@pytest.mark.asyncio
+async def test_new_tool_error_case():
+    """Test new_tool with missing required argument."""
+    result = await call_tool("new_tool", {})
+    
+    assert "❌" in result[0].text
+    assert "required" in result[0].text.lower()
+```
+
+**Common Mocking Patterns:**
+
+```python
+# Mock config
+with patch('train_with_gpt.server.config') as mock_config:
+    mock_config.training_repo_path = "/tmp/test"
+    # Run test
+
+# Mock HTTP requests (Strava API)
+with patch('httpx.AsyncClient.get', new_callable=AsyncMock) as mock_get:
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"data": "value"}
+    mock_get.return_value = mock_response
+    # Run test
+
+# Mock subprocess (git commands)
+with patch('subprocess.run') as mock_run:
+    mock_run.return_value = MagicMock(returncode=0, stdout="Success")
+    # Run test
+
+# Mock filesystem
+with tempfile.TemporaryDirectory() as tmpdir:
+    test_file = Path(tmpdir) / "test.txt"
+    test_file.write_text("content")
+    # Run test with isolated filesystem
+```
+
+**When Adding a New Tool:**
+
+1. Add tool name to `test_list_tools` in `tests/test_server.py`
+2. Add `test_{tool_name}_success` for the happy path
+3. Add `test_{tool_name}_error` for each error condition
+4. Mock all external dependencies (API calls, git, filesystem)
+
+**Common Pitfalls:**
+
+```python
+# ❌ WRONG - Forgetting @pytest.mark.asyncio
+async def test_something():
+    result = await call_tool(...)
+
+# ✅ CORRECT
+@pytest.mark.asyncio
+async def test_something():
+    result = await call_tool(...)
+
+# ❌ WRONG - Making real API call
+async def test_get_activities():
+    activities = await client.get_activities()
+
+# ✅ CORRECT - Mocking the API call
+async def test_get_activities():
+    with patch('httpx.AsyncClient.get', new_callable=AsyncMock) as mock:
+        mock.return_value.json.return_value = []
+        activities = await client.get_activities()
+```
+
+**Debugging Failed Tests:**
+
+```bash
+# Verbose output with full traceback
+pytest tests/test_server.py::test_name -vv --tb=long
+
+# Show print statements
+pytest tests/test_server.py -v -s
+
+# Drop into debugger on failure
+pytest tests/ --pdb
+```
+
+**Test Files:**
+- `tests/test_config.py` - Configuration management
+- `tests/test_server.py` - MCP server tools (add new tool tests here)
+- `tests/test_strava_client.py` - Strava API client
+
+See test file headers for specific guidance on testing each module.
 
 ## Extending
 

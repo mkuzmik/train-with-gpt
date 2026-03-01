@@ -1,4 +1,23 @@
-"""Tests for configuration management."""
+"""Tests for configuration management.
+
+IMPORTANT: Config is global state - tests must be isolated!
+
+Test Coverage:
+- Initialization with None values
+- Save and load operations
+- File-based configuration
+- Environment variable overrides
+
+When adding new config fields:
+1. Update test_config_initialization to check new field
+2. Update test_config_save_and_load to test saving new field
+3. Update test_config_load_from_file to test loading new field
+4. If field can be overridden by env var, add to test_config_env_vars_override_file
+
+Always use temporary directories and patch CONFIG_FILE to avoid modifying real config.
+
+See TESTING.md for detailed guidelines.
+"""
 
 import json
 import tempfile

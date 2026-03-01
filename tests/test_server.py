@@ -1,4 +1,23 @@
-"""Tests for MCP server tools."""
+"""Tests for MCP server tools.
+
+IMPORTANT: When modifying or adding tools, update these tests!
+
+Test Coverage:
+- Tool listing (test_list_tools)
+- setup_training_repo: success, validation errors
+- save_goals: success, missing repo, git operations
+- read_goals: success, missing repo, missing file, git pull
+- discuss_goals: guidance content
+
+When adding a new tool:
+1. Add tool name to test_list_tools
+2. Add test_{tool_name}_success for happy path
+3. Add test_{tool_name}_error_case for each error condition
+4. Mock all external dependencies (httpx, subprocess, filesystem)
+5. Use temporary directories for file operations
+
+See TESTING.md for detailed guidelines.
+"""
 
 import json
 import tempfile

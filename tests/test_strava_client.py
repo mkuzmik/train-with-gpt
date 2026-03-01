@@ -1,4 +1,25 @@
-"""Tests for Strava client."""
+"""Tests for Strava client.
+
+IMPORTANT: Never make real Strava API calls in tests!
+
+Test Coverage:
+- Client initialization with/without credentials
+- Activity fetching (mocked)
+- Zone distribution calculation
+
+When adding new Strava API methods:
+1. Add test for successful API call (mock httpx)
+2. Add test for API errors (network, auth, 404, etc.)
+3. Add test for data parsing/transformation
+4. Always mock httpx.AsyncClient to avoid real API calls
+
+For helper functions (like calculate_zone_distribution):
+- Test with various input data
+- Test edge cases (empty data, single value, etc.)
+- No mocking needed for pure functions
+
+See TESTING.md for detailed guidelines.
+"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
