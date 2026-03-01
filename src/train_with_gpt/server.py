@@ -640,7 +640,26 @@ Saved: {timestamp}
                     capture_output=True
                 )
                 
-                return [TextContent(type="text", text=f"✅ Goals saved and committed to repository: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
+                # Git push
+                push_status = ""
+                try:
+                    subprocess.run(
+                        ["git", "push"],
+                        cwd=repo_path,
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    push_status = " and pushed to remote"
+                except subprocess.CalledProcessError as push_error:
+                    # Push failed - note it but don't fail the whole operation
+                    error_msg = push_error.stderr.strip() if push_error.stderr else str(push_error)
+                    if "no upstream branch" in error_msg.lower() or "no configured push destination" in error_msg.lower():
+                        push_status = "\n\n⚠️ Note: Could not push (no remote configured). Changes are saved locally."
+                    else:
+                        push_status = f"\n\n⚠️ Note: Could not push to remote: {error_msg}"
+                
+                return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
             except subprocess.CalledProcessError as e:
                 # If commit fails (e.g., no changes), still report success for the write
                 if "nothing to commit" in e.stderr.decode('utf-8', errors='ignore').lower():
