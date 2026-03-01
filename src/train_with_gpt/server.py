@@ -4,7 +4,9 @@
 import asyncio
 import sys
 import os
+import subprocess
 from datetime import datetime
+from pathlib import Path
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
@@ -44,8 +46,94 @@ def calculate_zone_distribution(stream_data: list, zone_boundaries: list) -> dic
     return zone_time
 
 
+def git_pull(repo_path: Path) -> str:
+    """
+    Perform git pull in the repository.
+    
+    Returns:
+        Pull status message or None if no message needed
+    """
+    try:
+        result = subprocess.run(
+            ["git", "pull"],
+            cwd=repo_path,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        pull_output = result.stdout.strip()
+        return pull_output if pull_output and "already up to date" not in pull_output.lower() else None
+    except subprocess.CalledProcessError as e:
+        error_msg = e.stderr.strip() if e.stderr else str(e)
+        # Handle bytes or string
+        if isinstance(error_msg, bytes):
+            error_msg = error_msg.decode('utf-8', errors='ignore')
+        # Only show error if it's not about missing remote/tracking
+        if "no tracking information" not in error_msg.lower() and "no remote" not in error_msg.lower():
+            return f"(Note: git pull had issues - {error_msg})"
+        return None
+
+
+def git_add_commit_push(repo_path: Path, file_path: str, commit_message: str) -> str:
+    """
+    Add, commit, and push changes to git repository.
+    
+    Args:
+        repo_path: Path to git repository
+        file_path: Path to file relative to repo (e.g., "goals.md" or "notes/file.md")
+        commit_message: Git commit message
+    
+    Returns:
+        Status message about the operation
+    """
+    try:
+        # Git add
+        subprocess.run(
+            ["git", "add", file_path],
+            cwd=repo_path,
+            check=True,
+            capture_output=True
+        )
+        
+        # Git commit
+        subprocess.run(
+            ["git", "commit", "-m", commit_message],
+            cwd=repo_path,
+            check=True,
+            capture_output=True
+        )
+        
+        # Git push
+        push_status = ""
+        try:
+            subprocess.run(
+                ["git", "push"],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            push_status = " and pushed to remote"
+        except subprocess.CalledProcessError as push_error:
+            error_msg = push_error.stderr.strip() if push_error.stderr else str(push_error)
+            if "no upstream branch" in error_msg.lower() or "no configured push destination" in error_msg.lower():
+                push_status = "\n\n⚠️ Note: Could not push (no remote configured). Changes are saved locally."
+            else:
+                push_status = f"\n\n⚠️ Note: Could not push to remote: {error_msg}"
+        
+        return push_status
+        
+    except subprocess.CalledProcessError as e:
+        # If commit fails (e.g., no changes), check if it's because nothing to commit
+        if "nothing to commit" in e.stderr.decode('utf-8', errors='ignore').lower():
+            return "\n\n(No changes to commit - content unchanged)"
+        else:
+            raise
+
+
 app = Server("train-with-gpt")
 strava = StravaClient()
+
 
 
 @app.list_tools()
@@ -126,6 +214,33 @@ async def list_tools() -> list[Tool]:
                 "properties": {},
             },
         ),
+        Tool(
+            name="save_consultation_notes",
+            description="Save consultation notes from the current conversation. Creates a new timestamped file in the notes/ directory. Each consultation is immutable once saved.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "notes": {
+                        "type": "string",
+                        "description": "Natural language summary of the consultation including discussion topics, recommendations, and next steps",
+                    },
+                },
+                "required": ["notes"],
+            },
+        ),
+        Tool(
+            name="read_consultation_notes",
+            description="Read previous consultation notes. Returns all past consultations to provide context and continuity across sessions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "number",
+                        "description": "Optional limit on number of most recent consultations to return (default: 10)",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -197,9 +312,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     
     elif name == "setup_training_repo":
         try:
-            from pathlib import Path
-            import subprocess
-            
             repo_path = arguments.get("repo_path", "")
             if not repo_path:
                 return [TextContent(type="text", text="❌ Error: No repository path provided")]
@@ -597,9 +709,6 @@ This natural format captures nuance and context better than rigid structure."""
     
     elif name == "save_goals":
         try:
-            from pathlib import Path
-            import subprocess
-            
             # Check if training repo is configured
             if not config.training_repo_path:
                 return [TextContent(type="text", text="❌ Error: Training repository not configured.\n\nPlease use **setup_training_repo** first to set the location of your training notes repository.")]
@@ -625,47 +734,10 @@ Saved: {timestamp}
             with open(goals_file, 'w') as f:
                 f.write(content)
             
-            # Git commit
-            try:
-                subprocess.run(
-                    ["git", "add", "goals.md"],
-                    cwd=repo_path,
-                    check=True,
-                    capture_output=True
-                )
-                subprocess.run(
-                    ["git", "commit", "-m", f"Update training goals - {timestamp}"],
-                    cwd=repo_path,
-                    check=True,
-                    capture_output=True
-                )
-                
-                # Git push
-                push_status = ""
-                try:
-                    subprocess.run(
-                        ["git", "push"],
-                        cwd=repo_path,
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
-                    push_status = " and pushed to remote"
-                except subprocess.CalledProcessError as push_error:
-                    # Push failed - note it but don't fail the whole operation
-                    error_msg = push_error.stderr.strip() if push_error.stderr else str(push_error)
-                    if "no upstream branch" in error_msg.lower() or "no configured push destination" in error_msg.lower():
-                        push_status = "\n\n⚠️ Note: Could not push (no remote configured). Changes are saved locally."
-                    else:
-                        push_status = f"\n\n⚠️ Note: Could not push to remote: {error_msg}"
-                
-                return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
-            except subprocess.CalledProcessError as e:
-                # If commit fails (e.g., no changes), still report success for the write
-                if "nothing to commit" in e.stderr.decode('utf-8', errors='ignore').lower():
-                    return [TextContent(type="text", text=f"✅ Goals saved to repository: {goals_file}\n\n(No changes to commit - content unchanged)")]
-                else:
-                    raise
+            # Git add, commit, and push
+            push_status = git_add_commit_push(repo_path, "goals.md", f"Update training goals - {timestamp}")
+            
+            return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
         
         except Exception as e:
             print(f"Error saving goals: {e}", file=sys.stderr)
@@ -675,9 +747,6 @@ Saved: {timestamp}
     
     elif name == "read_goals":
         try:
-            from pathlib import Path
-            import subprocess
-            
             # Check if training repo is configured
             if not config.training_repo_path:
                 return [TextContent(type="text", text="❌ Error: Training repository not configured.\n\nPlease use **setup_training_repo** first to set the location of your training notes repository.")]
@@ -687,23 +756,7 @@ Saved: {timestamp}
                 return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
             
             # Git pull first to get latest
-            try:
-                result = subprocess.run(
-                    ["git", "pull"],
-                    cwd=repo_path,
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-                pull_output = result.stdout.strip()
-            except subprocess.CalledProcessError as e:
-                # Continue even if pull fails (e.g., no remote configured, no tracking branch)
-                error_msg = e.stderr.strip() if e.stderr else str(e)
-                # Only show error if it's not about missing remote/tracking
-                if "no tracking information" not in error_msg.lower() and "no remote" not in error_msg.lower():
-                    pull_output = f"(Note: git pull had issues - {error_msg})"
-                else:
-                    pull_output = None
+            pull_output = git_pull(repo_path)
             
             goals_file = repo_path / "goals.md"
             
@@ -714,13 +767,111 @@ Saved: {timestamp}
                 content = f.read()
             
             # Add pull info if there were updates
-            if pull_output and "already up to date" not in pull_output.lower():
+            if pull_output:
                 content = f"_{pull_output}_\n\n{content}"
             
             return [TextContent(type="text", text=content)]
         
         except Exception as e:
             print(f"Error reading goals: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+    
+    elif name == "save_consultation_notes":
+        try:
+            # Check if training repo is configured
+            if not config.training_repo_path:
+                return [TextContent(type="text", text="❌ Error: Training repository not configured.\n\nPlease use **setup_training_repo** first to set the location of your training notes repository.")]
+            
+            repo_path = Path(config.training_repo_path)
+            if not repo_path.exists():
+                return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
+            
+            notes = arguments.get("notes", "")
+            if not notes:
+                return [TextContent(type="text", text="❌ Error: No notes provided")]
+            
+            # Create notes directory if it doesn't exist
+            notes_dir = repo_path / "notes"
+            notes_dir.mkdir(exist_ok=True)
+            
+            # Create timestamped filename
+            timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            timestamp_display = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            notes_file = notes_dir / f"{timestamp}.md"
+            
+            # Write consultation notes
+            content = f"""# Consultation Notes
+Date: {timestamp_display}
+
+{notes}
+"""
+            
+            with open(notes_file, 'w') as f:
+                f.write(content)
+            
+            # Git add, commit, and push
+            relative_path = f"notes/{timestamp}.md"
+            push_status = git_add_commit_push(repo_path, relative_path, f"Add consultation notes - {timestamp_display}")
+            
+            return [TextContent(type="text", text=f"✅ Consultation notes saved, committed{push_status}: {notes_file}\n\nThese notes are now part of your training history and can be referenced in future consultations.")]
+        
+        except Exception as e:
+            print(f"Error saving consultation notes: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+    
+    elif name == "read_consultation_notes":
+        try:
+            # Check if training repo is configured
+            if not config.training_repo_path:
+                return [TextContent(type="text", text="❌ Error: Training repository not configured.\n\nPlease use **setup_training_repo** first to set the location of your training notes repository.")]
+            
+            repo_path = Path(config.training_repo_path)
+            if not repo_path.exists():
+                return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
+            
+            # Git pull first to get latest
+            pull_output = git_pull(repo_path)
+            
+            notes_dir = repo_path / "notes"
+            
+            if not notes_dir.exists():
+                return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]
+            
+            # Get all .md files in notes directory
+            note_files = sorted(notes_dir.glob("*.md"), reverse=True)  # Most recent first
+            
+            if not note_files:
+                return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]
+            
+            # Apply limit if provided
+            limit = arguments.get("limit", 10)
+            note_files = note_files[:limit]
+            
+            # Read all notes
+            all_notes = []
+            for note_file in note_files:
+                with open(note_file, 'r') as f:
+                    all_notes.append(f.read())
+            
+            # Combine notes with separator
+            content = "\n\n---\n\n".join(all_notes)
+            
+            # Add pull info if there were updates
+            if pull_output:
+                content = f"_{pull_output}_\n\n{content}"
+            
+            summary = f"Found {len(note_files)} consultation note(s)"
+            if len(sorted(notes_dir.glob("*.md"))) > limit:
+                summary += f" (showing {limit} most recent)"
+            
+            return [TextContent(type="text", text=f"{summary}\n\n{content}")]
+        
+        except Exception as e:
+            print(f"Error reading consultation notes: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc()
             return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
