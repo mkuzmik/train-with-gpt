@@ -88,7 +88,7 @@ async def test_get_activities_last_week():
 @pytest.mark.asyncio
 async def test_calculate_zone_distribution():
     """Test zone distribution calculation."""
-    from train_with_gpt.server import calculate_zone_distribution
+    from train_with_gpt.helpers import calculate_zone_distribution
     
     # Test data: HR values
     hr_data = [100, 120, 140, 160, 180, 160, 140, 120]

@@ -58,7 +58,7 @@ async def test_setup_training_repo_success():
         git_dir = repo_path / ".git"
         git_dir.mkdir()
         
-        with patch('train_with_gpt.server.config') as mock_config:
+        with patch('train_with_gpt.tools.setup_training_repo.config') as mock_config:
             result = await call_tool("setup_training_repo", {
                 "repo_path": str(repo_path)
             })
@@ -97,7 +97,7 @@ async def test_setup_training_repo_not_git():
 @pytest.mark.asyncio
 async def test_save_goals_without_repo_configured():
     """Test saving goals when no repository is configured."""
-    with patch('train_with_gpt.server.config') as mock_config:
+    with patch('train_with_gpt.tools.save_goals.config') as mock_config:
         mock_config.training_repo_path = None
         
         result = await call_tool("save_goals", {
@@ -116,8 +116,8 @@ async def test_save_goals_success():
         repo_path = Path(tmpdir)
         (repo_path / ".git").mkdir()
         
-        with patch('train_with_gpt.server.config') as mock_config, \
-             patch('subprocess.run') as mock_run:
+        with patch('train_with_gpt.tools.save_goals.config') as mock_config, \
+             patch('train_with_gpt.helpers.subprocess.run') as mock_run:
             mock_config.training_repo_path = str(repo_path)
             mock_run.return_value = MagicMock(returncode=0)
             
@@ -139,7 +139,7 @@ async def test_save_goals_success():
 @pytest.mark.asyncio
 async def test_read_goals_without_repo_configured():
     """Test reading goals when no repository is configured."""
-    with patch('train_with_gpt.server.config') as mock_config:
+    with patch('train_with_gpt.tools.read_goals.config') as mock_config:
         mock_config.training_repo_path = None
         
         result = await call_tool("read_goals", {})
@@ -156,8 +156,8 @@ async def test_read_goals_file_not_exists():
         repo_path = Path(tmpdir)
         (repo_path / ".git").mkdir()
         
-        with patch('train_with_gpt.server.config') as mock_config, \
-             patch('subprocess.run') as mock_run:
+        with patch('train_with_gpt.tools.read_goals.config') as mock_config, \
+             patch('train_with_gpt.helpers.subprocess.run') as mock_run:
             mock_config.training_repo_path = str(repo_path)
             mock_run.return_value = MagicMock(
                 returncode=1,
@@ -179,12 +179,12 @@ async def test_read_goals_success():
         goals_file = repo_path / "goals.md"
         goals_file.write_text("# Training Goals\n\nRun 5k in under 20 minutes")
         
-        with patch('train_with_gpt.server.config') as mock_config, \
-             patch('subprocess.run') as mock_run:
+        with patch('train_with_gpt.tools.read_goals.config') as mock_config, \
+             patch('train_with_gpt.helpers.subprocess.run') as mock_run:
             mock_config.training_repo_path = str(repo_path)
             # Make git pull raise CalledProcessError with "no tracking" message
             mock_run.side_effect = [
-                MagicMock(returncode=1, stderr="no tracking information for the current branch")
+                subprocess.CalledProcessError(1, ['git', 'pull'], stderr=b"no tracking information for the current branch")
             ]
             
             result = await call_tool("read_goals", {})
@@ -208,7 +208,7 @@ async def test_discuss_goals_returns_guidance():
 @pytest.mark.asyncio
 async def test_save_consultation_notes_without_repo_configured():
     """Test saving consultation notes when no repository is configured."""
-    with patch('train_with_gpt.server.config') as mock_config:
+    with patch('train_with_gpt.tools.save_consultation_notes.config') as mock_config:
         mock_config.training_repo_path = None
         
         result = await call_tool("save_consultation_notes", {
@@ -227,8 +227,8 @@ async def test_save_consultation_notes_success():
         repo_path = Path(tmpdir)
         (repo_path / ".git").mkdir()
         
-        with patch('train_with_gpt.server.config') as mock_config, \
-             patch('subprocess.run') as mock_run:
+        with patch('train_with_gpt.tools.save_consultation_notes.config') as mock_config, \
+             patch('train_with_gpt.helpers.subprocess.run') as mock_run:
             mock_config.training_repo_path = str(repo_path)
             mock_run.return_value = MagicMock(returncode=0)
             
@@ -257,7 +257,7 @@ async def test_save_consultation_notes_success():
 @pytest.mark.asyncio
 async def test_read_consultation_notes_without_repo_configured():
     """Test reading consultation notes when no repository is configured."""
-    with patch('train_with_gpt.server.config') as mock_config:
+    with patch('train_with_gpt.tools.read_consultation_notes.config') as mock_config:
         mock_config.training_repo_path = None
         
         result = await call_tool("read_consultation_notes", {})
@@ -274,11 +274,11 @@ async def test_read_consultation_notes_no_notes():
         repo_path = Path(tmpdir)
         (repo_path / ".git").mkdir()
         
-        with patch('train_with_gpt.server.config') as mock_config, \
-             patch('subprocess.run') as mock_run:
+        with patch('train_with_gpt.tools.read_consultation_notes.config') as mock_config, \
+             patch('train_with_gpt.helpers.subprocess.run') as mock_run:
             mock_config.training_repo_path = str(repo_path)
             mock_run.side_effect = [
-                MagicMock(returncode=1, stderr="no tracking information")
+                subprocess.CalledProcessError(1, ['git', 'pull'], stderr=b"no tracking information")
             ]
             
             result = await call_tool("read_consultation_notes", {})
@@ -303,13 +303,13 @@ async def test_read_consultation_notes_success():
         note2 = notes_dir / "2026-01-02-10-00-00.md"
         note2.write_text("# Consultation Notes\nDate: 2026-01-02 10:00:00\n\nSecond consultation")
         
-        with patch('train_with_gpt.server.config') as mock_config, \
-             patch('train_with_gpt.server.subprocess.run') as mock_run:
+        with patch('train_with_gpt.tools.read_consultation_notes.config') as mock_config, \
+             patch('train_with_gpt.helpers.subprocess.run') as mock_run:
             mock_config.training_repo_path = str(repo_path)
             # Mock git pull to return CalledProcessError with "no tracking" message
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, ['git', 'pull'], stderr=b"no tracking information"
-            )
+            mock_run.side_effect = [
+                subprocess.CalledProcessError(1, ['git', 'pull'], stderr=b"no tracking information")
+            ]
             
             result = await call_tool("read_consultation_notes", {})
             
@@ -337,13 +337,13 @@ async def test_read_consultation_notes_with_limit():
             note = notes_dir / f"2026-01-0{i+1}-10-00-00.md"
             note.write_text(f"# Consultation Notes\nDate: 2026-01-0{i+1}\n\nConsultation {i+1}")
         
-        with patch('train_with_gpt.server.config') as mock_config, \
-             patch('train_with_gpt.server.subprocess.run') as mock_run:
+        with patch('train_with_gpt.tools.read_consultation_notes.config') as mock_config, \
+             patch('train_with_gpt.helpers.subprocess.run') as mock_run:
             mock_config.training_repo_path = str(repo_path)
             # Mock git pull to return CalledProcessError with "no tracking" message
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, ['git', 'pull'], stderr=b"no tracking information"
-            )
+            mock_run.side_effect = [
+                subprocess.CalledProcessError(1, ['git', 'pull'], stderr=b"no tracking information")
+            ]
             
             result = await call_tool("read_consultation_notes", {"limit": 2})
             
