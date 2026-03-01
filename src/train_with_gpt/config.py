@@ -21,6 +21,8 @@ class Config:
         self.refresh_token: Optional[str] = None
         self.expires_at: Optional[int] = None
         self.training_repo_path: Optional[str] = None
+        self.garmin_email: Optional[str] = None
+        self.garmin_password: Optional[str] = None
         
     def load(self):
         """Load config from file and environment variables."""
@@ -34,6 +36,8 @@ class Config:
         self.refresh_token = os.getenv("STRAVA_REFRESH_TOKEN") or file_config.get("refreshToken")
         self.expires_at = file_config.get("expiresAt")
         self.training_repo_path = file_config.get("trainingRepoPath")
+        self.garmin_email = os.getenv("GARMIN_EMAIL") or file_config.get("garminEmail")
+        self.garmin_password = os.getenv("GARMIN_PASSWORD") or file_config.get("garminPassword")
         
         print(f"[CONFIG] Loaded from: {CONFIG_FILE}", file=sys.stderr)
         print(f"[CONFIG] Client ID: {self.client_id or 'NOT SET'}", file=sys.stderr)
@@ -83,6 +87,14 @@ class Config:
         if "training_repo_path" in kwargs:
             existing["trainingRepoPath"] = kwargs["training_repo_path"]
             self.training_repo_path = kwargs["training_repo_path"]
+        
+        if "garmin_email" in kwargs:
+            existing["garminEmail"] = kwargs["garmin_email"]
+            self.garmin_email = kwargs["garmin_email"]
+        
+        if "garmin_password" in kwargs:
+            existing["garminPassword"] = kwargs["garmin_password"]
+            self.garmin_password = kwargs["garmin_password"]
         
         # Write to file
         with open(CONFIG_FILE, 'w') as f:

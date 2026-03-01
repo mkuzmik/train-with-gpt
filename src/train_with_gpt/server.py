@@ -7,6 +7,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from .strava_client import StravaClient
+from .garmin_client import GarminClient
 from .tools import (
     setup_training_repo_tool,
     setup_training_repo_handler,
@@ -18,6 +19,8 @@ from .tools import (
     get_activities_handler,
     get_current_date_tool,
     get_current_date_handler,
+    get_sleep_data_tool,
+    get_sleep_data_handler,
     analyze_activity_tool,
     analyze_activity_handler,
     discuss_goals_tool,
@@ -35,6 +38,7 @@ from .tools import (
 
 app = Server("train-with-gpt")
 strava = StravaClient()
+garmin = GarminClient()
 
 
 
@@ -46,6 +50,7 @@ async def list_tools() -> list[Tool]:
         start_consultation_tool(),
         get_current_date_tool(),
         get_activities_tool(),
+        get_sleep_data_tool(),
         analyze_activity_tool(),
         setup_training_repo_tool(),
         discuss_goals_tool(),
@@ -69,6 +74,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await get_current_date_handler(arguments)
     elif name == "get_activities":
         return await get_activities_handler(arguments, strava)
+    elif name == "get_sleep_data":
+        return await get_sleep_data_handler(arguments, garmin)
     elif name == "analyze_activity":
         return await analyze_activity_handler(arguments, strava)
     elif name == "discuss_goals":

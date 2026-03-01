@@ -1,15 +1,16 @@
 # Train With GPT
 
-A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. Connects to your Strava data and maintains context about your goals and training history across conversations.
+A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. Connects to your Strava and Garmin data and maintains context about your goals and training history across conversations.
 
 ## What This Does
 
 - **Training Analysis**: View and analyze your Strava activities with detailed metrics and zone distribution
+- **Sleep & Health Tracking**: Access Garmin Connect sleep data, stages, and quality scores
 - **Goal Tracking**: Set training goals and have them persist across conversations
 - **Consultation History**: Claude remembers past conversations and provides continuity
 - **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
 
-Currently supports Strava, with more data sources planned.
+Supports Strava (activities) and Garmin Connect (sleep/health data).
 
 ## Quick Start
 
@@ -19,34 +20,50 @@ Currently supports Strava, with more data sources planned.
 pip install -e .
 ```
 
-### 2. Configure Data Source (Strava)
+### 2. Configure Data Sources
 
-**Create a Strava API application:**
+**Strava (for activities):**
+
 1. Go to https://www.strava.com/settings/api
 2. Create an application with:
    - Authorization Callback Domain: `localhost`
 3. Note your Client ID and Client Secret
 
+**Garmin Connect (for sleep & health data):**
+
+Garmin uses OAuth authentication with MFA (Multi-Factor Authentication) support.
+
+**One-time setup:**
+```bash
+cd /path/to/train-with-gpt
+python3 ./setup_garmin.py
+```
+
+This will:
+1. Read credentials from your config file
+2. Prompt for your MFA code (if enabled)
+3. Save OAuth tokens to `~/.garminconnect` (valid 1 year)
+
+After setup, tokens are automatically used - no repeated authentication needed!
+
 **Save credentials to config file:**
 
-Option 1 - Use a text editor:
 ```bash
 mkdir -p ~/.config/train-with-gpt
-nano ~/.config/train-with-gpt/config.json
-```
-
-Add this content:
-```json
+cat > ~/.config/train-with-gpt/config.json << 'EOF'
 {
-  "clientId": "YOUR_CLIENT_ID",
-  "clientSecret": "YOUR_CLIENT_SECRET"
+  "clientId": "YOUR_STRAVA_CLIENT_ID",
+  "clientSecret": "YOUR_STRAVA_CLIENT_SECRET",
+  "garminEmail": "your-garmin@email.com",
+  "garminPassword": "your-garmin-password"
 }
+EOF
+chmod 600 ~/.config/train-with-gpt/config.json
 ```
 
-Option 2 - One-liner (replace values first):
-```bash
-mkdir -p ~/.config/train-with-gpt && echo '{"clientId":"YOUR_CLIENT_ID","clientSecret":"YOUR_CLIENT_SECRET"}' > ~/.config/train-with-gpt/config.json
-```
+Replace the placeholder values with your actual credentials. The `chmod 600` restricts file access to you only.
+
+**Note:** Garmin uses OAuth tokens (valid 1 year) saved to `~/.garminconnect`. Your credentials are only used for initial authentication.
 
 ### 3. Configure Claude Desktop
 
@@ -74,11 +91,22 @@ Restart Claude Desktop.
 
 ### First Time Setup
 
-**Step 1: Connect Strava**
+**Step 1: Connect Data Sources**
 
+**For Strava (activities):**
 Say to Claude: **"Connect my Strava account"**
 - Opens browser for authentication
 - Saves tokens automatically
+
+**For Garmin (sleep & health):**
+Run setup script once:
+```bash
+cd /path/to/train-with-gpt
+python3 ./setup_garmin.py
+```
+- Handles MFA authentication
+- Saves OAuth tokens (valid 1 year)
+- After this, just use `get_sleep_data` directly in Claude!
 
 **Step 2: Set Up Training Repository** (Recommended)
 
@@ -126,6 +154,12 @@ This tells Claude to:
 - "Analyze activity 17130571886" (use ID from activity list)
 - Claude shows: zone distribution, interval detection, coaching insights
 
+**Reviewing Sleep & Recovery (Garmin)**
+
+- "Show me my sleep from last night"
+- "How was my sleep on January 15?"
+- Claude shows: sleep stages, duration, quality score, SpO2, restlessness
+
 **Continuing Conversations**
 
 At the end of a session:
@@ -163,6 +197,30 @@ You: "Save notes from this consultation"
 
 Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 ```
+
+## Troubleshooting
+
+### Garmin Authentication Issues
+
+**Problem:** "OAuth1 token is required for OAuth2 refresh"  
+**Solution:** Your Garmin account likely has MFA enabled. Run the setup script:
+```bash
+python3 ./setup_garmin.py
+```
+
+**Problem:** Garmin connection fails  
+**Solution:** 
+1. Check credentials in `~/.config/train-with-gpt/config.json`
+2. Verify MFA code is correct
+3. Delete `~/.garminconnect` and run `setup_garmin.py` again
+
+**Problem:** "Connect my Garmin account" does nothing  
+**Solution:** There's no connect tool needed! Just run `setup_garmin.py` and use `get_sleep_data` directly
+
+### Strava Authentication Issues
+
+**Problem:** Browser doesn't open for Strava auth  
+**Solution:** Check that port 8111 is not in use, and firewall allows localhost connections
 
 ## Development
 
