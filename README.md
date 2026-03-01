@@ -1,31 +1,15 @@
 # Train With GPT
 
-A Model Context Protocol (MCP) server for training analysis and coaching suggestions. Currently supports Strava as a data source.
+A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. Connects to your Strava data and maintains context about your goals and training history across conversations.
 
-## Features
+## What This Does
 
-This server provides tools for training analysis:
-- **connect_strava**: Authenticate with Strava (opens browser for OAuth)
-- **get_current_date**: Get current date and day of week (helps LLM understand temporal context)
-- **get_activities**: Fetches activities with flexible date filtering:
-  - Default: Last 7 days
-  - Specific date: `{"start_date": "2024-01-15", "end_date": "2024-01-15"}`
-  - Date range: `{"start_date": "2024-01-15", "end_date": "2024-01-20"}`
-  - Shows: Distance, duration, pace/speed, elevation, heart rate, power, cadence, temperature
-- **analyze_activity**: Deep dive analysis of a specific activity:
-  - Lap-by-lap breakdown with metrics for each lap
-  - Heart rate zone distribution (uses your Strava zones)
-  - Power zone distribution (for cycling)
-  - Automatic detection of interval workouts
-  - Coaching insights based on workout type
-- **setup_training_repo**: Configure a local git repository for training notes
-- **discuss_goals**: Get framework for having a goal-setting conversation
-- **save_goals**: Save training goals to git repository (with auto-commit/push)
-- **read_goals**: Read saved training goals
-- **save_consultation_notes**: Save consultation notes as timestamped files (immutable)
-- **read_consultation_notes**: Read past consultations with optional limit
+- **Training Analysis**: View and analyze your Strava activities with detailed metrics and zone distribution
+- **Goal Tracking**: Set training goals and have them persist across conversations
+- **Consultation History**: Claude remembers past conversations and provides continuity
+- **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
 
-Note: Currently supports Strava. Additional data sources planned for future releases.
+Currently supports Strava, with more data sources planned.
 
 ## Quick Start
 
@@ -84,27 +68,101 @@ Replace:
 - `/path/to/python` with your Python path (e.g., `which python` or `~/.pyenv/shims/python`)
 - `/path/to/train-with-gpt` with your project directory
 
-### 4. Connect Your Data Source
-
-In Claude, say: **"Connect my Strava account"**
-
-This will:
-1. Open your browser for Strava authentication
-2. Save your access tokens automatically
-3. You're ready to use!
+Restart Claude Desktop.
 
 ## Usage
 
-Once connected, ask Claude:
-- "Show me my trainings from the last week"
-- "Get my recent training activities"
-- "Analyze activity 17130571886" (use ID from activity list)
-- "What kind of workout was my run on January 21?"
+### First Time Setup
 
-The analyze_activity tool will:
-- Show time spent in each heart rate/power zone
-- Detect intervals automatically
-- Provide coaching insights about your workout type
+**Step 1: Connect Strava**
+
+Say to Claude: **"Connect my Strava account"**
+- Opens browser for authentication
+- Saves tokens automatically
+
+**Step 2: Set Up Training Repository** (Recommended)
+
+Create a git repository for your training notes:
+```bash
+mkdir ~/training-notes
+cd ~/training-notes
+git init
+```
+
+Then tell Claude: **"Setup my training repository at ~/training-notes"**
+
+This enables goal tracking and consultation history across sessions.
+
+**Step 3: Set Your Goals**
+
+Say: **"Let's discuss my training goals"**
+- Claude will guide you through setting clear goals
+- Your goals are saved and referenced in future conversations
+- Say **"Save these goals"** when ready
+
+---
+
+### Using the Coach
+
+**Starting a Conversation**
+
+Best practice: **"Start a consultation"**
+
+This tells Claude to:
+1. Check today's date
+2. Review your goals
+3. Read recent consultation notes
+4. Act as a thoughtful coach (asking ONE question at a time)
+
+**Reviewing Your Training**
+
+- "Show me my activities from last week"
+- "Show me my runs from January 15 to 20"
+- "What did I do yesterday?"
+
+**Analyzing Workouts**
+
+- "Analyze my most recent run" 
+- "Analyze activity 17130571886" (use ID from activity list)
+- Claude shows: zone distribution, interval detection, coaching insights
+
+**Continuing Conversations**
+
+At the end of a session:
+- **"Save notes from this consultation"** - Creates timestamped record
+- **"What did we discuss last time?"** - Reviews recent consultations
+
+Your goals and consultation notes persist across conversations, giving Claude full context.
+
+---
+
+### Example Workflow
+
+```
+You: "Start a consultation"
+
+Claude: [Reads goals, reviews notes, checks date]
+        "I see your goal is to run a sub-4 hour marathon in June.
+         Last week we discussed building your long runs. 
+         How are you feeling today?"
+
+You: "Show me my runs from the past week"
+
+Claude: [Shows activities with metrics]
+        "I see three runs. Would you like me to analyze 
+         the interval workout from Thursday?"
+
+You: "Yes, analyze that one"
+
+Claude: [Shows zone distribution, detects intervals]
+        "This looks like a threshold workout..."
+
+[Conversation continues...]
+
+You: "Save notes from this consultation"
+
+Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
+```
 
 ## Development
 

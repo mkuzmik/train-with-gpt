@@ -39,6 +39,7 @@ async def test_list_tools():
     tool_names = [t.name for t in tools]
     
     assert "connect_strava" in tool_names
+    assert "start_consultation" in tool_names
     assert "get_current_date" in tool_names
     assert "get_activities" in tool_names
     assert "analyze_activity" in tool_names
@@ -481,5 +482,20 @@ async def test_get_activities_start_after_end():
     assert len(result) == 1
     assert "❌" in result[0].text
     assert "cannot be after" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_start_consultation():
+    """Test starting a consultation session."""
+    result = await call_tool("start_consultation", {})
+    
+    assert len(result) == 1
+    assert "Starting Training Consultation Session" in result[0].text
+    assert "get_current_date" in result[0].text
+    assert "read_goals" in result[0].text
+    assert "read_consultation_notes" in result[0].text
+    assert "ONE question at a time" in result[0].text
+    assert "Your Role:" in result[0].text
+
 
 

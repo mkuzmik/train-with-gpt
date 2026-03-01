@@ -2,6 +2,7 @@
 
 from .setup_training_repo import setup_training_repo_tool, setup_training_repo_handler
 from .connect_strava import connect_strava_tool, connect_strava_handler
+from .start_consultation import start_consultation_tool, start_consultation_handler
 from .get_activities import get_activities_tool, get_activities_handler
 from .get_current_date import get_current_date_tool, get_current_date_handler
 from .analyze_activity import analyze_activity_tool, analyze_activity_handler
@@ -16,6 +17,8 @@ __all__ = [
     "setup_training_repo_handler",
     "connect_strava_tool",
     "connect_strava_handler",
+    "start_consultation_tool",
+    "start_consultation_handler",
     "get_activities_tool",
     "get_activities_handler",
     "get_current_date_tool",

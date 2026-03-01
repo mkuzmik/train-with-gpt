@@ -12,6 +12,8 @@ from .tools import (
     setup_training_repo_handler,
     connect_strava_tool,
     connect_strava_handler,
+    start_consultation_tool,
+    start_consultation_handler,
     get_activities_tool,
     get_activities_handler,
     get_current_date_tool,
@@ -41,6 +43,7 @@ async def list_tools() -> list[Tool]:
     """List available tools."""
     return [
         connect_strava_tool(),
+        start_consultation_tool(),
         get_current_date_tool(),
         get_activities_tool(),
         analyze_activity_tool(),
@@ -60,6 +63,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await connect_strava_handler(arguments, strava)
     elif name == "setup_training_repo":
         return await setup_training_repo_handler(arguments)
+    elif name == "start_consultation":
+        return await start_consultation_handler(arguments)
     elif name == "get_current_date":
         return await get_current_date_handler(arguments)
     elif name == "get_activities":
