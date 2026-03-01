@@ -6,22 +6,24 @@ A Model Context Protocol (MCP) server for training analysis and coaching suggest
 
 This server provides tools for training analysis:
 - **connect_strava**: Authenticate with Strava (opens browser for OAuth)
-- **get_last_week_activities**: Fetches activities from the last 7 days with detailed metrics:
-  - Distance, duration, and pace/speed
-  - Elevation gain
-  - Heart rate (average and max)
-  - Power output (cycling)
-  - Cadence (spm for running, rpm for cycling)
-  - Temperature
-  - Activity ID for detailed analysis
+- **get_current_date**: Get current date and day of week (helps LLM understand temporal context)
+- **get_activities**: Fetches activities with flexible date filtering:
+  - Default: Last 7 days
+  - Specific date: `{"start_date": "2024-01-15", "end_date": "2024-01-15"}`
+  - Date range: `{"start_date": "2024-01-15", "end_date": "2024-01-20"}`
+  - Shows: Distance, duration, pace/speed, elevation, heart rate, power, cadence, temperature
 - **analyze_activity**: Deep dive analysis of a specific activity:
   - Lap-by-lap breakdown with metrics for each lap
   - Heart rate zone distribution (uses your Strava zones)
   - Power zone distribution (for cycling)
   - Automatic detection of interval workouts
   - Coaching insights based on workout type
+- **setup_training_repo**: Configure a local git repository for training notes
 - **discuss_goals**: Get framework for having a goal-setting conversation
-- **save_goals**: Save training goals to persistent storage
+- **save_goals**: Save training goals to git repository (with auto-commit/push)
+- **read_goals**: Read saved training goals
+- **save_consultation_notes**: Save consultation notes as timestamped files (immutable)
+- **read_consultation_notes**: Read past consultations with optional limit
 
 Note: Currently supports Strava. Additional data sources planned for future releases.
 

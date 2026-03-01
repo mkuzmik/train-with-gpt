@@ -2,7 +2,8 @@
 
 from .setup_training_repo import setup_training_repo_tool, setup_training_repo_handler
 from .connect_strava import connect_strava_tool, connect_strava_handler
-from .get_last_week_activities import get_last_week_activities_tool, get_last_week_activities_handler
+from .get_activities import get_activities_tool, get_activities_handler
+from .get_current_date import get_current_date_tool, get_current_date_handler
 from .analyze_activity import analyze_activity_tool, analyze_activity_handler
 from .discuss_goals import discuss_goals_tool, discuss_goals_handler
 from .save_goals import save_goals_tool, save_goals_handler
@@ -15,8 +16,10 @@ __all__ = [
     "setup_training_repo_handler",
     "connect_strava_tool",
     "connect_strava_handler",
-    "get_last_week_activities_tool",
-    "get_last_week_activities_handler",
+    "get_activities_tool",
+    "get_activities_handler",
+    "get_current_date_tool",
+    "get_current_date_handler",
     "analyze_activity_tool",
     "analyze_activity_handler",
     "discuss_goals_tool",

@@ -12,8 +12,10 @@ from .tools import (
     setup_training_repo_handler,
     connect_strava_tool,
     connect_strava_handler,
-    get_last_week_activities_tool,
-    get_last_week_activities_handler,
+    get_activities_tool,
+    get_activities_handler,
+    get_current_date_tool,
+    get_current_date_handler,
     analyze_activity_tool,
     analyze_activity_handler,
     discuss_goals_tool,
@@ -39,7 +41,8 @@ async def list_tools() -> list[Tool]:
     """List available tools."""
     return [
         connect_strava_tool(),
-        get_last_week_activities_tool(),
+        get_current_date_tool(),
+        get_activities_tool(),
         analyze_activity_tool(),
         setup_training_repo_tool(),
         discuss_goals_tool(),
@@ -57,8 +60,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await connect_strava_handler(arguments, strava)
     elif name == "setup_training_repo":
         return await setup_training_repo_handler(arguments)
-    elif name == "get_last_week_activities":
-        return await get_last_week_activities_handler(arguments, strava)
+    elif name == "get_current_date":
+        return await get_current_date_handler(arguments)
+    elif name == "get_activities":
+        return await get_activities_handler(arguments, strava)
     elif name == "analyze_activity":
         return await analyze_activity_handler(arguments, strava)
     elif name == "discuss_goals":

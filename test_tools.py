@@ -39,7 +39,9 @@ async def show_help():
     
     print("")
     print("Examples:")
-    print("  python test_tools.py get_last_week_activities")
+    print("  python test_tools.py get_current_date")
+    print("  python test_tools.py get_activities")
+    print("  python test_tools.py get_activities '{\"start_date\": \"2024-01-15\", \"end_date\": \"2024-01-20\"}'")
     print("  python test_tools.py connect_strava")
     print('  python test_tools.py some_tool \'{"arg1": "value1"}\'')
 

@@ -39,7 +39,8 @@ async def test_list_tools():
     tool_names = [t.name for t in tools]
     
     assert "connect_strava" in tool_names
-    assert "get_last_week_activities" in tool_names
+    assert "get_current_date" in tool_names
+    assert "get_activities" in tool_names
     assert "analyze_activity" in tool_names
     assert "setup_training_repo" in tool_names
     assert "discuss_goals" in tool_names
@@ -352,4 +353,133 @@ async def test_read_consultation_notes_with_limit():
             assert "Consultation 3" in result[0].text
             assert "Consultation 2" in result[0].text
             assert "Consultation 1" not in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_get_current_date():
+    """Test getting current date."""
+    result = await call_tool("get_current_date", {})
+    
+    assert len(result) == 1
+    assert "📅 Current date:" in result[0].text
+    assert "Use this date as reference" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_get_activities_default_last_week():
+    """Test getting activities with default (last 7 days)."""
+    mock_activities = [
+        {
+            "id": 123,
+            "name": "Morning Run",
+            "start_date": "2026-02-25T08:00:00Z",
+            "sport_type": "Run",
+            "distance": 5000,
+            "moving_time": 1800,
+        }
+    ]
+    
+    with patch('train_with_gpt.tools.get_activities.StravaClient') as MockStrava:
+        mock_strava = MockStrava.return_value
+        mock_strava.get_activities = AsyncMock(return_value=mock_activities)
+        
+        # Override the strava instance in the module
+        import train_with_gpt.server as server_module
+        original_strava = server_module.strava
+        server_module.strava = mock_strava
+        
+        try:
+            result = await call_tool("get_activities", {})
+            
+            assert len(result) == 1
+            assert "Found 1 activities for last 7 days" in result[0].text
+            assert "Morning Run" in result[0].text
+        finally:
+            server_module.strava = original_strava
+
+
+@pytest.mark.asyncio
+async def test_get_activities_specific_date():
+    """Test getting activities from a specific date."""
+    mock_activities = [
+        {
+            "id": 456,
+            "name": "Evening Bike",
+            "start_date": "2026-02-20T18:00:00Z",
+            "sport_type": "Ride",
+            "distance": 20000,
+            "moving_time": 3600,
+        }
+    ]
+    
+    with patch('train_with_gpt.tools.get_activities.StravaClient') as MockStrava:
+        mock_strava = MockStrava.return_value
+        mock_strava.get_activities = AsyncMock(return_value=mock_activities)
+        
+        import train_with_gpt.server as server_module
+        original_strava = server_module.strava
+        server_module.strava = mock_strava
+        
+        try:
+            result = await call_tool("get_activities", {
+                "start_date": "2026-02-20",
+                "end_date": "2026-02-20"
+            })
+            
+            assert len(result) == 1
+            assert "Found 1 activities for 2026-02-20" in result[0].text
+            assert "Evening Bike" in result[0].text
+        finally:
+            server_module.strava = original_strava
+
+
+@pytest.mark.asyncio
+async def test_get_activities_date_range():
+    """Test getting activities from a date range."""
+    mock_activities = []
+    
+    with patch('train_with_gpt.tools.get_activities.StravaClient') as MockStrava:
+        mock_strava = MockStrava.return_value
+        mock_strava.get_activities = AsyncMock(return_value=mock_activities)
+        
+        import train_with_gpt.server as server_module
+        original_strava = server_module.strava
+        server_module.strava = mock_strava
+        
+        try:
+            result = await call_tool("get_activities", {
+                "start_date": "2026-02-15",
+                "end_date": "2026-02-20"
+            })
+            
+            assert len(result) == 1
+            assert "No activities found for 2026-02-15 to 2026-02-20" in result[0].text
+        finally:
+            server_module.strava = original_strava
+
+
+@pytest.mark.asyncio
+async def test_get_activities_invalid_date_format():
+    """Test getting activities with invalid date format."""
+    result = await call_tool("get_activities", {
+        "start_date": "02/20/2026"
+    })
+    
+    assert len(result) == 1
+    assert "❌ Invalid start_date format" in result[0].text
+    assert "Use YYYY-MM-DD" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_get_activities_start_after_end():
+    """Test getting activities with start_date after end_date."""
+    result = await call_tool("get_activities", {
+        "start_date": "2026-02-25",
+        "end_date": "2026-02-20"
+    })
+    
+    assert len(result) == 1
+    assert "❌" in result[0].text
+    assert "cannot be after" in result[0].text
+
 
