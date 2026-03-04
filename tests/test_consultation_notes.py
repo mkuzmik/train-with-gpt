@@ -15,7 +15,7 @@ async def test_save_and_read_consultation_notes():
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_path = Path(tmpdir)
         (repo_path / ".git").mkdir()
-        notes_dir = repo_path / "consultation-notes"
+        notes_dir = repo_path / "notes"
         notes_dir.mkdir()
         
         # Setup repo
@@ -60,7 +60,7 @@ async def test_read_consultation_notes_with_limit():
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_path = Path(tmpdir)
         (repo_path / ".git").mkdir()
-        notes_dir = repo_path / "consultation-notes"
+        notes_dir = repo_path / "notes"
         notes_dir.mkdir()
         
         await call_tool("setup_training_repo", {"repo_path": str(repo_path)})
@@ -74,7 +74,35 @@ async def test_read_consultation_notes_with_limit():
             result = await call_tool("read_consultation_notes", {"limit": 3})
         
         assert len(result) == 1
+        output = result[0].text
         # Should show only 3 most recent
+        assert "showing 3 most recent" in output.lower()
+
+
+@pytest.mark.asyncio
+async def test_read_consultation_notes_default_no_limit():
+    """Test that by default all notes are returned."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo_path = Path(tmpdir)
+        (repo_path / ".git").mkdir()
+        notes_dir = repo_path / "notes"
+        notes_dir.mkdir()
+        
+        await call_tool("setup_training_repo", {"repo_path": str(repo_path)})
+        
+        # Create multiple notes
+        for i in range(8):
+            note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
+            note_file.write_text(f"Note {i+1}")
+        
+        with patch('subprocess.run'):
+            result = await call_tool("read_consultation_notes", {})
+        
+        assert len(result) == 1
+        output = result[0].text
+        # Should show all 8 notes without limit message
+        assert "Found 8 consultation note(s)" in output
+        assert "showing" not in output.lower()  # No "showing X of Y" message
 
 
 @pytest.mark.asyncio

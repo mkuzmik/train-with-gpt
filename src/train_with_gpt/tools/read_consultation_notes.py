@@ -12,13 +12,13 @@ def read_consultation_notes_tool() -> Tool:
     """Return the read_consultation_notes tool definition."""
     return Tool(
         name="read_consultation_notes",
-        description="Read previous consultation notes. Returns all past consultations to provide context and continuity across sessions.",
+        description="Read all previous consultation notes to provide complete context and continuity across all sessions.",
         inputSchema={
             "type": "object",
             "properties": {
                 "limit": {
                     "type": "number",
-                    "description": "Optional limit on number of most recent consultations to return (default: 10)",
+                    "description": "Optional limit on number of most recent consultations to return. By default, returns ALL notes.",
                 },
             },
         },
@@ -50,9 +50,10 @@ async def read_consultation_notes_handler(arguments: dict) -> list[TextContent]:
         if not note_files:
             return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]
         
-        # Apply limit if provided
-        limit = arguments.get("limit", 10)
-        note_files = note_files[:limit]
+        # Apply limit if provided (default: no limit, return all)
+        limit = arguments.get("limit")
+        if limit:
+            note_files = note_files[:limit]
         
         # Read all notes
         all_notes = []
@@ -68,8 +69,9 @@ async def read_consultation_notes_handler(arguments: dict) -> list[TextContent]:
             content = f"_{pull_output}_\n\n{content}"
         
         summary = f"Found {len(note_files)} consultation note(s)"
-        if len(sorted(notes_dir.glob("*.md"))) > limit:
-            summary += f" (showing {limit} most recent)"
+        total_notes = len(sorted(notes_dir.glob("*.md")))
+        if limit and total_notes > limit:
+            summary += f" (showing {limit} most recent of {total_notes} total)"
         
         return [TextContent(type="text", text=f"{summary}\n\n{content}")]
     

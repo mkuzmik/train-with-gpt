@@ -31,8 +31,8 @@ async def start_consultation_handler(arguments: dict) -> list[TextContent]:
    - Reference these goals throughout the conversation
    - If goals don't exist yet, use discuss_goals to help create them
 
-3. **read_consultation_notes** (limit: 3-5 recent)
-   - Review recent consultation history for continuity
+3. **read_consultation_notes**
+   - Review ALL previous consultation history for full context
    - Understand what was discussed and decided previously
    - Look for patterns, progress, and follow-up items
    - If no notes exist, this is a fresh start
