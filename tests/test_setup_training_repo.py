@@ -3,6 +3,7 @@
 import pytest
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from train_with_gpt.server import call_tool
 
@@ -10,17 +11,24 @@ from train_with_gpt.server import call_tool
 @pytest.mark.asyncio
 async def test_setup_training_repo_success():
     """Test successful repository setup."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir)
-        (repo_path / ".git").mkdir()
-        
-        result = await call_tool("setup_training_repo", {
-            "repo_path": str(repo_path)
-        })
-        
-        assert len(result) == 1
-        assert str(repo_path) in result[0].text
-        assert "success" in result[0].text.lower() or "configured" in result[0].text.lower()
+    from train_with_gpt.config import config
+    old_repo_path = config.training_repo_path
+    
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_path = Path(tmpdir)
+            (repo_path / ".git").mkdir()
+            
+            with patch('train_with_gpt.config.config.save'):
+                result = await call_tool("setup_training_repo", {
+                    "repo_path": str(repo_path)
+                })
+            
+            assert len(result) == 1
+            assert str(repo_path) in result[0].text
+            assert "success" in result[0].text.lower() or "configured" in result[0].text.lower()
+    finally:
+        config.training_repo_path = old_repo_path
 
 
 @pytest.mark.asyncio

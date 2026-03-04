@@ -27,41 +27,36 @@ async def test_discuss_goals():
 
 
 @pytest.mark.asyncio
-async def test_save_and_read_goals_workflow():
+async def test_save_and_read_goals_workflow(training_repo):
     """Test complete goals workflow: save → read."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir)
-        (repo_path / ".git").mkdir()
-        
-        # Setup repo
-        await call_tool("setup_training_repo", {"repo_path": str(repo_path)})
-        
-        goals_content = """# Training Goals 2024
+    repo_path = training_repo
+    
+    goals_content = """# Training Goals 2024
 
 ## Marathon Goal
 - Run under 4 hours
 - Build to 60km/week
 """
-        
-        # Save goals
-        with patch('subprocess.run'):
-            result = await call_tool("save_goals", {"goals_text": goals_content})
-        
-        assert len(result) == 1
-        assert "saved" in result[0].text.lower() or "success" in result[0].text.lower()
-        
-        # Verify file was created
-        goals_file = repo_path / "goals.md"
-        goals_file.write_text(goals_content)
-        
-        # Read goals back
-        with patch('subprocess.run'):
-            result = await call_tool("read_goals", {})
-        
-        assert len(result) == 1
-        output = result[0].text
-        assert "Marathon Goal" in output
-        assert "4 hours" in output
+    
+    # Save goals
+    with patch('subprocess.run'):
+        result = await call_tool("save_goals", {"goals_text": goals_content})
+    
+    assert len(result) == 1
+    assert "saved" in result[0].text.lower() or "success" in result[0].text.lower()
+    
+    # Verify file was created
+    goals_file = repo_path / "goals.md"
+    goals_file.write_text(goals_content)
+    
+    # Read goals back
+    with patch('subprocess.run'):
+        result = await call_tool("read_goals", {})
+    
+    assert len(result) == 1
+    output = result[0].text
+    assert "Marathon Goal" in output
+    assert "4 hours" in output
 
 
 @pytest.mark.asyncio
@@ -84,16 +79,10 @@ async def test_save_goals_without_repo():
 
 
 @pytest.mark.asyncio
-async def test_read_goals_file_not_exists():
+async def test_read_goals_file_not_exists(training_repo):
     """Test reading goals when file doesn't exist."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir)
-        (repo_path / ".git").mkdir()
-        
-        await call_tool("setup_training_repo", {"repo_path": str(repo_path)})
-        
-        with patch('subprocess.run'):
-            result = await call_tool("read_goals", {})
-        
-        assert len(result) == 1
-        assert "no goals" in result[0].text.lower() or "not found" in result[0].text.lower()
+    with patch('subprocess.run'):
+        result = await call_tool("read_goals", {})
+    
+    assert len(result) == 1
+    assert "no goals" in result[0].text.lower() or "not found" in result[0].text.lower()

@@ -10,18 +10,13 @@ from train_with_gpt.server import call_tool
 
 
 @pytest.mark.asyncio
-async def test_save_and_read_consultation_notes():
+async def test_save_and_read_consultation_notes(training_repo):
     """Test complete consultation notes workflow."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir)
-        (repo_path / ".git").mkdir()
-        notes_dir = repo_path / "notes"
-        notes_dir.mkdir()
-        
-        # Setup repo
-        await call_tool("setup_training_repo", {"repo_path": str(repo_path)})
-        
-        note_content = """Discussed marathon training plan.
+    repo_path = training_repo
+    notes_dir = repo_path / "notes"
+    notes_dir.mkdir()
+    
+    note_content = """Discussed marathon training plan.
 
 Key Points:
 - Increase mileage gradually
@@ -30,79 +25,71 @@ Key Points:
 Next Steps:
 - Start with 40km/week
 """
-        
-        # Save note
-        with patch('subprocess.run'):
-            result = await call_tool("save_consultation_notes", {
-                "notes": note_content
-            })
-        
-        assert len(result) == 1
-        assert "saved" in result[0].text.lower() or "success" in result[0].text.lower()
-        
-        # Create mock note file
-        note_file = notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}_consultation.md"
-        note_file.write_text(note_content)
-        
-        # Read notes back
-        with patch('subprocess.run'):
-            result = await call_tool("read_consultation_notes", {})
-        
-        assert len(result) == 1
-        output = result[0].text
-        assert "marathon" in output.lower()
-        assert "40km/week" in output
+    
+    # Save note
+    with patch('subprocess.run'):
+        result = await call_tool("save_consultation_notes", {
+            "notes": note_content
+        })
+    
+    assert len(result) == 1
+    assert "saved" in result[0].text.lower() or "success" in result[0].text.lower()
+    
+    # Create mock note file
+    note_file = notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}_consultation.md"
+    note_file.write_text(note_content)
+    
+    # Read notes back
+    with patch('subprocess.run'):
+        result = await call_tool("read_consultation_notes", {})
+    
+    assert len(result) == 1
+    output = result[0].text
+    assert "marathon" in output.lower()
+    assert "40km/week" in output
 
 
 @pytest.mark.asyncio
-async def test_read_consultation_notes_with_limit():
+async def test_read_consultation_notes_with_limit(training_repo):
     """Test reading limited number of recent notes."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir)
-        (repo_path / ".git").mkdir()
-        notes_dir = repo_path / "notes"
-        notes_dir.mkdir()
-        
-        await call_tool("setup_training_repo", {"repo_path": str(repo_path)})
-        
-        # Create multiple notes
-        for i in range(5):
-            note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
-            note_file.write_text(f"Note {i+1}")
-        
-        with patch('subprocess.run'):
-            result = await call_tool("read_consultation_notes", {"limit": 3})
-        
-        assert len(result) == 1
-        output = result[0].text
-        # Should show only 3 most recent
-        assert "showing 3 most recent" in output.lower()
+    repo_path = training_repo
+    notes_dir = repo_path / "notes"
+    notes_dir.mkdir()
+    
+    # Create multiple notes
+    for i in range(5):
+        note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
+        note_file.write_text(f"Note {i+1}")
+    
+    with patch('subprocess.run'):
+        result = await call_tool("read_consultation_notes", {"limit": 3})
+    
+    assert len(result) == 1
+    output = result[0].text
+    # Should show only 3 most recent
+    assert "showing 3 most recent" in output.lower()
 
 
 @pytest.mark.asyncio
-async def test_read_consultation_notes_default_no_limit():
+async def test_read_consultation_notes_default_no_limit(training_repo):
     """Test that by default all notes are returned."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir)
-        (repo_path / ".git").mkdir()
-        notes_dir = repo_path / "notes"
-        notes_dir.mkdir()
-        
-        await call_tool("setup_training_repo", {"repo_path": str(repo_path)})
-        
-        # Create multiple notes
-        for i in range(8):
-            note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
-            note_file.write_text(f"Note {i+1}")
-        
-        with patch('subprocess.run'):
-            result = await call_tool("read_consultation_notes", {})
-        
-        assert len(result) == 1
-        output = result[0].text
-        # Should show all 8 notes without limit message
-        assert "Found 8 consultation note(s)" in output
-        assert "showing" not in output.lower()  # No "showing X of Y" message
+    repo_path = training_repo
+    notes_dir = repo_path / "notes"
+    notes_dir.mkdir()
+    
+    # Create multiple notes
+    for i in range(8):
+        note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
+        note_file.write_text(f"Note {i+1}")
+    
+    with patch('subprocess.run'):
+        result = await call_tool("read_consultation_notes", {})
+    
+    assert len(result) == 1
+    output = result[0].text
+    # Should show all 8 notes without limit message
+    assert "Found 8 consultation note(s)" in output
+    assert "showing" not in output.lower()  # No "showing X of Y" message
 
 
 @pytest.mark.asyncio
