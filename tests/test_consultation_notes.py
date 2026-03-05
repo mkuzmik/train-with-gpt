@@ -50,8 +50,8 @@ Next Steps:
 
 
 @pytest.mark.asyncio
-async def test_read_consultation_notes_with_limit(training_repo):
-    """Test reading limited number of recent notes."""
+async def test_read_consultation_notes_multiple(training_repo):
+    """Test reading multiple notes returns all of them."""
     repo_path = training_repo
     notes_dir = repo_path / "notes"
     notes_dir.mkdir()
@@ -62,17 +62,20 @@ async def test_read_consultation_notes_with_limit(training_repo):
         note_file.write_text(f"Note {i+1}")
     
     with patch('subprocess.run'):
-        result = await call_tool("read_consultation_notes", {"limit": 3})
+        result = await call_tool("read_consultation_notes", {})
     
     assert len(result) == 1
     output = result[0].text
-    # Should show only 3 most recent
-    assert "showing 3 most recent" in output.lower()
+    # Should show all 5 notes
+    assert "Found 5 consultation note(s)" in output
+    # Verify all notes are present
+    for i in range(5):
+        assert f"Note {i+1}" in output
 
 
 @pytest.mark.asyncio
-async def test_read_consultation_notes_default_no_limit(training_repo):
-    """Test that by default all notes are returned."""
+async def test_read_consultation_notes_all(training_repo):
+    """Test that all notes are returned."""
     repo_path = training_repo
     notes_dir = repo_path / "notes"
     notes_dir.mkdir()
@@ -87,9 +90,11 @@ async def test_read_consultation_notes_default_no_limit(training_repo):
     
     assert len(result) == 1
     output = result[0].text
-    # Should show all 8 notes without limit message
+    # Should show all 8 notes
     assert "Found 8 consultation note(s)" in output
-    assert "showing" not in output.lower()  # No "showing X of Y" message
+    # Verify no limit message
+    assert "showing" not in output.lower()
+    assert "most recent" not in output.lower()
 
 
 @pytest.mark.asyncio

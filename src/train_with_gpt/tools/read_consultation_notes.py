@@ -12,15 +12,10 @@ def read_consultation_notes_tool() -> Tool:
     """Return the read_consultation_notes tool definition."""
     return Tool(
         name="read_consultation_notes",
-        description="Read all previous consultation notes to provide complete context and continuity across all sessions.",
+        description="Read all previous consultation notes to provide complete context and continuity across all sessions. Always returns ALL notes.",
         inputSchema={
             "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "number",
-                    "description": "Optional limit on number of most recent consultations to return. By default, returns ALL notes.",
-                },
-            },
+            "properties": {},
         },
     )
 
@@ -50,11 +45,6 @@ async def read_consultation_notes_handler(arguments: dict) -> list[TextContent]:
         if not note_files:
             return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]
         
-        # Apply limit if provided (default: no limit, return all)
-        limit = arguments.get("limit")
-        if limit:
-            note_files = note_files[:limit]
-        
         # Read all notes
         all_notes = []
         for note_file in note_files:
@@ -69,9 +59,6 @@ async def read_consultation_notes_handler(arguments: dict) -> list[TextContent]:
             content = f"_{pull_output}_\n\n{content}"
         
         summary = f"Found {len(note_files)} consultation note(s)"
-        total_notes = len(sorted(notes_dir.glob("*.md")))
-        if limit and total_notes > limit:
-            summary += f" (showing {limit} most recent of {total_notes} total)"
         
         return [TextContent(type="text", text=f"{summary}\n\n{content}")]
     
