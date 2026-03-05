@@ -104,7 +104,6 @@ async def get_activities_handler(arguments: dict, strava: StravaClient) -> list[
         for activity in activities:
             # Basic info
             date_str = datetime.fromisoformat(activity['start_date'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M')
-            name = activity.get('name', 'Untitled')
             activity_type = activity.get('sport_type') or activity.get('type', 'Unknown')
             
             # Performance metrics
@@ -175,7 +174,7 @@ async def get_activities_handler(arguments: dict, strava: StravaClient) -> list[
             # Format output
             activity_id = activity.get('id')
             stats_str = " | ".join(stats) if stats else "No stats"
-            lines.append(f"\n📅 {date_str} - {name}")
+            lines.append(f"\n📅 {date_str}")
             lines.append(f"   🏃 {activity_type}")
             lines.append(f"   {stats_str}")
             lines.append(f"   🔗 ID: {activity_id}")

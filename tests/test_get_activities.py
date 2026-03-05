@@ -69,9 +69,7 @@ async def test_get_activities_default_last_week(mock_strava_auth):
     assert len(result) == 1
     output = result[0].text
     
-    # Verify both activities are in output
-    assert "Morning Run" in output
-    assert "Evening Ride" in output
+    # Verify both activities are in output (check types, not names)
     assert "Run" in output
     assert "Ride" in output
     # Distance is shown (in some format)
@@ -103,7 +101,8 @@ async def test_get_activities_with_date_range(mock_strava_auth):
     })
     
     assert len(result) == 1
-    assert "Training Run" in result[0].text
+    assert "Run" in result[0].text
+    assert "5.00km" in result[0].text
 
 
 @pytest.mark.asyncio
