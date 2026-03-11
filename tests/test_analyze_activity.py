@@ -75,8 +75,10 @@ async def test_analyze_activity_basic(mock_strava_auth):
             {
                 "name": "Lap 1",
                 "distance": 5000,
-                "moving_time": 1800,
-                "average_heartrate": 150
+                "elapsed_time": 1800,
+                "average_heartrate": 150,
+                "min_heartrate": 140,
+                "max_heartrate": 165
             }
         ])
     )

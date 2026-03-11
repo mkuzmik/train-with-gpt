@@ -59,7 +59,14 @@ async def analyze_activity_handler(arguments: dict, strava: StravaClient) -> lis
         # Laps Analysis
         if laps and len(laps) > 1:  # More than 1 lap means intervals/structured workout
             lines.append("## 🏁 Laps / Intervals")
-            lines.append("(Distance | Time | Pace/Speed | Heart Rate avg/max | Power | Cadence)\n")
+            lines.append("(Distance | Time | Pace/Speed | Heart Rate min/avg/max | Power | Cadence)\n")
+            
+            # Calculate cumulative lap times for stream data lookup
+            lap_end_times = []
+            cumulative_time = 0
+            for lap in laps:
+                cumulative_time += lap.get('elapsed_time', 0)
+                lap_end_times.append(cumulative_time)
             
             for i, lap in enumerate(laps, 1):
                 lap_stats = []
@@ -89,14 +96,38 @@ async def analyze_activity_handler(arguments: dict, strava: StravaClient) -> lis
                         speed_kmh = avg_speed * 3.6
                         lap_stats.append(f"⏱️ {speed_kmh:.1f}km/h")
                 
-                # Heart Rate
+                # Heart Rate - calculate min/max from streams if not in lap data
+                min_hr = lap.get('min_heartrate')
                 avg_hr = lap.get('average_heartrate')
                 max_hr = lap.get('max_heartrate')
+                
+                # If we don't have min/max from lap data, calculate from streams
+                if has_hr and (not min_hr or not max_hr):
+                    hr_data = streams['heartrate']['data']
+                    lap_start_time = lap_end_times[i-2] if i > 1 else 0
+                    lap_end_time = lap_end_times[i-1]
+                    
+                    # Find HR values within this lap's time range
+                    lap_hr_values = []
+                    for j, t in enumerate(time_data):
+                        if lap_start_time <= t <= lap_end_time and j < len(hr_data):
+                            if hr_data[j]:  # Skip None values
+                                lap_hr_values.append(hr_data[j])
+                    
+                    if lap_hr_values:
+                        if not min_hr:
+                            min_hr = min(lap_hr_values)
+                        if not max_hr:
+                            max_hr = max(lap_hr_values)
+                
                 if avg_hr:
+                    hr_parts = []
+                    if min_hr:
+                        hr_parts.append(f"min:{min_hr:.0f}")
+                    hr_parts.append(f"avg:{avg_hr:.0f}")
                     if max_hr:
-                        lap_stats.append(f"❤️ {avg_hr:.0f}/{max_hr:.0f} bpm")
-                    else:
-                        lap_stats.append(f"❤️ {avg_hr:.0f} bpm")
+                        hr_parts.append(f"max:{max_hr:.0f}")
+                    lap_stats.append(f"❤️ {'/'.join(hr_parts)} bpm")
                 
                 # Power
                 avg_watts = lap.get('average_watts')
