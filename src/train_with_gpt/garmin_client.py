@@ -114,4 +114,65 @@ class GarminClient:
         except Exception as e:
             print(f"[DEBUG] Error fetching sleep data: {e}", file=sys.stderr)
             raise ValueError(f"Failed to get sleep data: {str(e)}")
+    
+    async def get_hrv_data(self, date: str) -> dict:
+        """
+        Get HRV (Heart Rate Variability) data for a specific date.
+        
+        Automatically connects if not already logged in.
+        
+        Args:
+            date: Date in YYYY-MM-DD format
+        
+        Returns:
+            dict with HRV metrics
+        """
+        # Auto-login if not connected
+        if not self.client:
+            await self.login()
+        
+        try:
+            print(f"[DEBUG] Fetching HRV data for {date}", file=sys.stderr)
+            
+            # Get HRV data from Garmin
+            hrv_data = self.client.get_hrv_data(date)
+            
+            print(f"[DEBUG] HRV data retrieved successfully", file=sys.stderr)
+            
+            return hrv_data
+        
+        except Exception as e:
+            print(f"[DEBUG] Error fetching HRV data: {e}", file=sys.stderr)
+            raise ValueError(f"Failed to get HRV data: {str(e)}")
+    
+    async def get_heart_rates(self, date: str) -> dict:
+        """
+        Get heart rate data including resting heart rate for a specific date.
+        
+        Automatically connects if not already logged in.
+        
+        Args:
+            date: Date in YYYY-MM-DD format
+        
+        Returns:
+            dict with heart rate metrics including resting HR
+        """
+        # Auto-login if not connected
+        if not self.client:
+            await self.login()
+        
+        try:
+            print(f"[DEBUG] Fetching heart rate data for {date}", file=sys.stderr)
+            
+            # Get heart rate data from Garmin
+            hr_data = self.client.get_heart_rates(date)
+            
+            print(f"[DEBUG] Heart rate data retrieved successfully", file=sys.stderr)
+            
+            return hr_data
+        
+        except Exception as e:
+            print(f"[DEBUG] Error fetching heart rate data: {e}", file=sys.stderr)
+            raise ValueError(f"Failed to get heart rate data: {str(e)}")
+
 

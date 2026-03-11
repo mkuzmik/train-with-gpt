@@ -6,6 +6,8 @@ from .start_consultation import start_consultation_tool, start_consultation_hand
 from .get_activities import get_activities_tool, get_activities_handler
 from .get_current_date import get_current_date_tool, get_current_date_handler
 from .get_sleep_data import get_sleep_data_tool, get_sleep_data_handler
+from .get_hrv_data import get_hrv_data_tool, get_hrv_data_handler
+from .get_resting_heart_rate import get_resting_heart_rate_tool, get_resting_heart_rate_handler
 from .analyze_activity import analyze_activity_tool, analyze_activity_handler
 from .discuss_goals import discuss_goals_tool, discuss_goals_handler
 from .save_goals import save_goals_tool, save_goals_handler
@@ -26,6 +28,10 @@ __all__ = [
     "get_current_date_handler",
     "get_sleep_data_tool",
     "get_sleep_data_handler",
+    "get_hrv_data_tool",
+    "get_hrv_data_handler",
+    "get_resting_heart_rate_tool",
+    "get_resting_heart_rate_handler",
     "analyze_activity_tool",
     "analyze_activity_handler",
     "discuss_goals_tool",
