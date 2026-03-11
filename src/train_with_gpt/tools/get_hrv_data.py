@@ -117,15 +117,32 @@ async def get_hrv_data_handler(arguments: dict, garmin: GarminClient) -> list[Te
                 lines.append(f"   📊 {weekly_str}")
             lines.append("")
         
-        # Summary statistics
+        # Summary statistics with rolling averages
         if hrv_records:
-            avg_hrv = sum(r["last_night_avg"] for r in hrv_records) / len(hrv_records)
+            # Current period average
+            period_avg = sum(r["last_night_avg"] for r in hrv_records) / len(hrv_records)
             min_hrv = min(r["last_night_avg"] for r in hrv_records)
             max_hrv = max(r["last_night_avg"] for r in hrv_records)
             
             lines.append(f"📊 Summary:")
-            lines.append(f"   Average HRV: {avg_hrv:.1f}ms")
+            lines.append(f"   Period Average: {period_avg:.1f}ms ({len(hrv_records)} days)")
             lines.append(f"   Range: {min_hrv}ms - {max_hrv}ms")
+            
+            # Calculate rolling averages if we have enough data
+            if len(hrv_records) >= 7:
+                last_7_days = hrv_records[:7]  # Most recent 7 days
+                avg_7d = sum(r["last_night_avg"] for r in last_7_days) / len(last_7_days)
+                lines.append(f"   7-day Rolling Avg: {avg_7d:.1f}ms")
+            
+            if len(hrv_records) >= 14:
+                last_14_days = hrv_records[:14]  # Most recent 14 days
+                avg_14d = sum(r["last_night_avg"] for r in last_14_days) / len(last_14_days)
+                lines.append(f"   14-day Rolling Avg: {avg_14d:.1f}ms")
+            
+            if len(hrv_records) >= 28:
+                last_28_days = hrv_records[:28]  # Most recent 28 days (4 weeks)
+                avg_28d = sum(r["last_night_avg"] for r in last_28_days) / len(last_28_days)
+                lines.append(f"   28-day Rolling Avg: {avg_28d:.1f}ms")
         
         return [TextContent(type="text", text="\n".join(lines))]
     
