@@ -79,10 +79,11 @@ async def get_hrv_data_handler(arguments: dict, garmin: GarminClient) -> list[Te
                 hrv_data = await garmin.get_hrv_data(date_str)
                 
                 if hrv_data:
-                    # HRV metrics
-                    last_night_avg = hrv_data.get("lastNightAvg")
-                    weekly_avg = hrv_data.get("weeklyAvg")
-                    status = hrv_data.get("status")
+                    # HRV metrics are nested in hrvSummary
+                    hrv_summary = hrv_data.get("hrvSummary", {})
+                    last_night_avg = hrv_summary.get("lastNightAvg")
+                    weekly_avg = hrv_summary.get("weeklyAvg")
+                    status = hrv_summary.get("status")
                     
                     if last_night_avg is not None:
                         hrv_records.append({

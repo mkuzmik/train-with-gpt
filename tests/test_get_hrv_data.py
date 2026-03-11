@@ -20,9 +20,11 @@ def mock_garmin_auth():
 async def test_get_hrv_data_single_day(mock_garmin_auth):
     """Test fetching HRV data for a single day."""
     mock_hrv_data = {
-        "lastNightAvg": 52,
-        "weeklyAvg": 50,
-        "status": "BALANCED",
+        "hrvSummary": {
+            "lastNightAvg": 52,
+            "weeklyAvg": 50,
+            "status": "BALANCED",
+        }
     }
     
     mock_garmin_auth.get_hrv_data.return_value = mock_hrv_data
@@ -43,9 +45,9 @@ async def test_get_hrv_data_date_range(mock_garmin_auth):
     """Test fetching HRV data for multiple days."""
     async def mock_get_hrv(date):
         if date == "2024-01-15":
-            return {"lastNightAvg": 52, "weeklyAvg": 50, "status": "BALANCED"}
+            return {"hrvSummary": {"lastNightAvg": 52, "weeklyAvg": 50, "status": "BALANCED"}}
         elif date == "2024-01-16":
-            return {"lastNightAvg": 48, "weeklyAvg": 50, "status": "UNBALANCED"}
+            return {"hrvSummary": {"lastNightAvg": 48, "weeklyAvg": 50, "status": "UNBALANCED"}}
         return None
     
     mock_garmin_auth.get_hrv_data.side_effect = mock_get_hrv
