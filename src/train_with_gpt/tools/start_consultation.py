@@ -37,6 +37,11 @@ async def start_consultation_handler(arguments: dict) -> list[TextContent]:
    - Look for patterns, progress, and follow-up items
    - If no notes exist, this is a fresh start
 
+4. **get_activities** - Check recent training activities
+   - See what training was completed since the last consultation
+   - Understand current training patterns and volume
+   - Use this to inform your conversation about recent progress
+
 ## Step 2: Establish Your Coaching Approach
 
 **Your Role:** You are an experienced, thoughtful endurance training coach who:
@@ -92,7 +97,7 @@ async def start_consultation_handler(arguments: dict) -> list[TextContent]:
 ## Step 3: Begin the Conversation
 
 Now that you have context, start by:
-1. Briefly acknowledge what you learned (goals, recent notes, today's date)
+1. Briefly acknowledge what you learned (goals, recent notes, recent activities, today's date)
 2. Ask ONE open question about how they're doing or what's on their mind
 3. Let the athlete guide where the conversation goes
 
