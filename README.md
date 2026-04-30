@@ -1,52 +1,41 @@
 # Train With GPT
 
-A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. Connects to your Strava and Garmin data and maintains context about your goals and training history across conversations.
+A Model Context Protocol (MCP) server that acts as your personal endurance training coach. Connects to your Strava and Garmin data and maintains context about your goals and training history across conversations.
+
+Works with any MCP-compatible client — OpenCode, Claude Desktop, or others.
 
 ## What This Does
 
 - **Training Analysis**: View and analyze your Strava activities with detailed metrics and zone distribution
-- **Sleep & Health Tracking**: Access Garmin Connect sleep data, stages, and quality scores
+- **Sleep & Health Tracking**: Access Garmin Connect sleep, HRV, and resting heart rate data
 - **Goal Tracking**: Set training goals and have them persist across conversations
-- **Consultation History**: Claude remembers past conversations and provides continuity
-- **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
+- **Consultation History**: Remembers past conversations and provides continuity
+- **Smart Coaching**: Acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
 
 Supports Strava (activities) and Garmin Connect (sleep/health data).
 
 ## Quick Start
 
-### 1. Install
+### 1. Clone and Install
 
 ```bash
+git clone https://github.com/mkuzmik/train-with-gpt.git
+cd train-with-gpt
+```
+
+Install with `uv` (recommended) or `pip`:
+
+```bash
+# Using uv
+uv sync
+
+# Or using pip
 pip install -e .
 ```
 
-### 2. Configure Data Sources
+### 2. Configure Credentials
 
-**Strava (for activities):**
-
-1. Go to https://www.strava.com/settings/api
-2. Create an application with:
-   - Authorization Callback Domain: `localhost`
-3. Note your Client ID and Client Secret
-
-**Garmin Connect (for sleep & health data):**
-
-Garmin uses OAuth authentication with MFA (Multi-Factor Authentication) support.
-
-**One-time setup:**
-```bash
-cd /path/to/train-with-gpt
-python3 ./setup_garmin.py
-```
-
-This will:
-1. Read credentials from your config file
-2. Prompt for your MFA code (if enabled)
-3. Save OAuth tokens to `~/.garminconnect` (valid 1 year)
-
-After setup, tokens are automatically used - no repeated authentication needed!
-
-**Save credentials to config file:**
+Create the config file:
 
 ```bash
 mkdir -p ~/.config/train-with-gpt
@@ -61,11 +50,41 @@ EOF
 chmod 600 ~/.config/train-with-gpt/config.json
 ```
 
-Replace the placeholder values with your actual credentials. The `chmod 600` restricts file access to you only.
+**Strava**: Get your Client ID and Secret from https://www.strava.com/settings/api. Create an app with Authorization Callback Domain set to `localhost`.
 
-**Note:** Garmin uses OAuth tokens (valid 1 year) saved to `~/.garminconnect`. Your credentials are only used for initial authentication.
+**Garmin**: Use your Garmin Connect email and password. These are only used for initial OAuth token generation.
 
-### 3. Configure Claude Desktop
+### 3. Set Up Garmin Authentication
+
+Garmin requires a one-time interactive setup (MFA support):
+
+```bash
+.venv/bin/python3 ./setup_garmin.py
+```
+
+This saves OAuth tokens to `~/.garminconnect` (valid 1 year). After this, no repeated authentication is needed.
+
+### 4. Configure Your MCP Client
+
+#### OpenCode
+
+Create `opencode.json` in the project root:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "train-with-gpt": {
+      "type": "local",
+      "command": [".venv/bin/python", "-m", "train_with_gpt.server"]
+    }
+  }
+}
+```
+
+Then start OpenCode from the project directory. Strava auth happens via the `connect_strava` tool — just ask "Connect my Strava account".
+
+#### Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -73,17 +92,13 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "train-with-gpt": {
-      "command": "/path/to/python",
+      "command": "/path/to/train-with-gpt/.venv/bin/python",
       "args": ["-m", "train_with_gpt.server"],
       "cwd": "/path/to/train-with-gpt"
     }
   }
 }
 ```
-
-Replace:
-- `/path/to/python` with your Python path (e.g., `which python` or `~/.pyenv/shims/python`)
-- `/path/to/train-with-gpt` with your project directory
 
 Restart Claude Desktop.
 
@@ -94,19 +109,12 @@ Restart Claude Desktop.
 **Step 1: Connect Data Sources**
 
 **For Strava (activities):**
-Say to Claude: **"Connect my Strava account"**
+Say: **"Connect my Strava account"**
 - Opens browser for authentication
 - Saves tokens automatically
 
 **For Garmin (sleep & health):**
-Run setup script once:
-```bash
-cd /path/to/train-with-gpt
-python3 ./setup_garmin.py
-```
-- Handles MFA authentication
-- Saves OAuth tokens (valid 1 year)
-- After this, just use `get_sleep_data` directly in Claude!
+Run setup script once (see Quick Start step 3). After that, just use `get_sleep_data` directly.
 
 **Step 2: Set Up Training Repository** (Recommended)
 
@@ -117,14 +125,14 @@ cd ~/training-notes
 git init
 ```
 
-Then tell Claude: **"Setup my training repository at ~/training-notes"**
+Then tell your agent: **"Setup my training repository at ~/training-notes"**
 
 This enables goal tracking and consultation history across sessions.
 
 **Step 3: Set Your Goals**
 
 Say: **"Let's discuss my training goals"**
-- Claude will guide you through setting clear goals
+- The agent will guide you through setting clear goals
 - Your goals are saved and referenced in future conversations
 - Say **"Save these goals"** when ready
 
@@ -136,7 +144,7 @@ Say: **"Let's discuss my training goals"**
 
 Best practice: **"Start a consultation"**
 
-This tells Claude to:
+This tells the agent to:
 1. Check today's date
 2. Review your goals
 3. Read recent consultation notes
@@ -152,13 +160,13 @@ This tells Claude to:
 
 - "Analyze my most recent run" 
 - "Analyze activity 17130571886" (use ID from activity list)
-- Claude shows: zone distribution, interval detection, coaching insights
+- Shows: zone distribution, interval detection, coaching insights
 
 **Reviewing Sleep & Recovery (Garmin)**
 
 - "Show me my sleep from last night"
 - "How was my sleep on January 15?"
-- Claude shows: sleep stages, duration, quality score, SpO2, restlessness
+- Shows: sleep stages, duration, quality score, SpO2, restlessness
 
 **Continuing Conversations**
 
@@ -166,7 +174,7 @@ At the end of a session:
 - **"Save notes from this consultation"** - Creates timestamped record
 - **"What did we discuss last time?"** - Reviews recent consultations
 
-Your goals and consultation notes persist across conversations, giving Claude full context.
+Your goals and consultation notes persist across conversations, giving the agent full context.
 
 ---
 
@@ -175,27 +183,27 @@ Your goals and consultation notes persist across conversations, giving Claude fu
 ```
 You: "Start a consultation"
 
-Claude: [Reads goals, reviews notes, checks date]
-        "I see your goal is to run a sub-4 hour marathon in June.
-         Last week we discussed building your long runs. 
-         How are you feeling today?"
+Agent: [Reads goals, reviews notes, checks date]
+         "I see your goal is to run a sub-4 hour marathon in June.
+          Last week we discussed building your long runs. 
+          How are you feeling today?"
 
 You: "Show me my runs from the past week"
 
-Claude: [Shows activities with metrics]
-        "I see three runs. Would you like me to analyze 
-         the interval workout from Thursday?"
+Agent: [Shows activities with metrics]
+         "I see three runs. Would you like me to analyze 
+          the interval workout from Thursday?"
 
 You: "Yes, analyze that one"
 
-Claude: [Shows zone distribution, detects intervals]
-        "This looks like a threshold workout..."
+Agent: [Shows zone distribution, detects intervals]
+         "This looks like a threshold workout..."
 
 [Conversation continues...]
 
 You: "Save notes from this consultation"
 
-Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
+Agent: Saved to training-notes/notes/2024-01-28-10-30-15.md
 ```
 
 ## Troubleshooting
@@ -228,6 +236,10 @@ python3 ./setup_garmin.py
 
 **Install development dependencies:**
 ```bash
+# Using uv
+uv sync --dev
+
+# Or using pip
 pip install -e ".[dev]"
 ```
 
