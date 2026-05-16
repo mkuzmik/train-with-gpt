@@ -27,6 +27,8 @@ from .tools import (
     get_resting_heart_rate_handler,
     analyze_activity_tool,
     analyze_activity_handler,
+    analyze_lap_tool,
+    analyze_lap_handler,
     discuss_goals_tool,
     discuss_goals_handler,
     save_goals_tool,
@@ -58,6 +60,7 @@ async def list_tools() -> list[Tool]:
         get_hrv_data_tool(),
         get_resting_heart_rate_tool(),
         analyze_activity_tool(),
+        analyze_lap_tool(),
         setup_training_repo_tool(),
         discuss_goals_tool(),
         save_goals_tool(),
@@ -88,6 +91,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await get_resting_heart_rate_handler(arguments, garmin)
     elif name == "analyze_activity":
         return await analyze_activity_handler(arguments, strava)
+    elif name == "analyze_lap":
+        return await analyze_lap_handler(arguments, strava)
     elif name == "discuss_goals":
         return await discuss_goals_handler(arguments)
     elif name == "save_goals":
