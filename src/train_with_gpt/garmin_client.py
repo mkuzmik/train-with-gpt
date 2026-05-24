@@ -63,7 +63,7 @@ class GarminClient:
             
             # Save tokens for future use
             self.token_store.mkdir(parents=True, exist_ok=True)
-            self.client.garth.dump(str(self.token_store))
+            self.client.client.dump(str(self.token_store))
             
             print(f"✅ Garmin Connect login successful, tokens saved", file=sys.stderr)
             

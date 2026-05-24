@@ -55,10 +55,13 @@ Saved: {timestamp}
         with open(goals_file, 'w') as f:
             f.write(content)
         
-        # Git add, commit, and push
-        push_status = git_add_commit_push(repo_path, "goals.md", f"Update training goals - {timestamp}")
+        # Git add, commit, and push (only for git storage type)
+        if config.storage_type == "git":
+            push_status = git_add_commit_push(repo_path, "goals.md", f"Update training goals - {timestamp}")
+        else:
+            push_status = " (saved to directory, synced externally)"
         
-        return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
+        return [TextContent(type="text", text=f"✅ Goals saved{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
     
     except Exception as e:
         print(f"Error saving goals: {e}", file=sys.stderr)

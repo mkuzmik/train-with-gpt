@@ -31,8 +31,10 @@ async def read_goals_handler(arguments: dict) -> list[TextContent]:
         if not repo_path.exists():
             return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
         
-        # Git pull first to get latest
-        pull_output = git_pull(repo_path)
+        # Git pull first to get latest (only for git storage type)
+        pull_output = None
+        if config.storage_type == "git":
+            pull_output = git_pull(repo_path)
         
         goals_file = repo_path / "goals.md"
         

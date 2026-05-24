@@ -61,7 +61,7 @@ def main():
         
         # Save tokens
         token_store.mkdir(parents=True, exist_ok=True)
-        client.garth.dump(str(token_store))
+        client.client.dump(str(token_store))
         
         # Verify by getting profile
         profile = client.get_full_name()
