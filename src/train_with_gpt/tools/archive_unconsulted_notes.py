@@ -1,6 +1,7 @@
 """Archive unconsulted notes tool."""
 
 import sys
+import subprocess
 from pathlib import Path
 from mcp.types import Tool, TextContent
 
@@ -11,7 +12,7 @@ def archive_unconsulted_notes_tool() -> Tool:
     """Return the archive_unconsulted_notes tool definition."""
     return Tool(
         name="archive_unconsulted_notes",
-        description="Move all notes from _not_consulted to _not_consulted/_archived after they have been processed in a consultation. Call this after reading and discussing unconsulted notes.",
+        description="Delete all notes from _not_consulted after they have been processed in a consultation. Moves them to the system trash. Call this after reading and discussing unconsulted notes.",
         inputSchema={
             "type": "object",
             "properties": {},
@@ -36,18 +37,22 @@ async def archive_unconsulted_notes_handler(arguments: dict) -> list[TextContent
         if not note_files:
             return [TextContent(type="text", text="ℹ️ No notes to archive.")]
 
-        # Create archive directory
-        archive_dir = unconsulted_dir / "_archived"
-        archive_dir.mkdir(exist_ok=True)
-
-        # Move files
+        # Move files to system trash using macOS `trash` command
         moved = []
         for note_file in note_files:
-            dest = archive_dir / note_file.name
-            note_file.rename(dest)
-            moved.append(note_file.name)
+            try:
+                subprocess.run(
+                    ["osascript", "-e", f'tell application "Finder" to delete POSIX file "{note_file}"'],
+                    check=True,
+                    capture_output=True,
+                )
+                moved.append(note_file.name)
+            except subprocess.CalledProcessError:
+                # Fallback: just delete if trash fails
+                note_file.unlink()
+                moved.append(note_file.name)
 
-        return [TextContent(type="text", text=f"✅ Archived {len(moved)} note(s) to _not_consulted/_archived/:\n\n" + "\n".join(f"- {f}" for f in moved))]
+        return [TextContent(type="text", text=f"✅ Moved {len(moved)} note(s) to trash:\n\n" + "\n".join(f"- {f}" for f in moved))]
 
     except Exception as e:
         print(f"Error archiving unconsulted notes: {e}", file=sys.stderr)
