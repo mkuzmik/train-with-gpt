@@ -21,6 +21,7 @@ class Config:
         self.refresh_token: Optional[str] = None
         self.expires_at: Optional[int] = None
         self.training_repo_path: Optional[str] = None
+        self.storage_type: str = "git"  # "git" or "directory"
         self.garmin_email: Optional[str] = None
         self.garmin_password: Optional[str] = None
         
@@ -36,6 +37,7 @@ class Config:
         self.refresh_token = os.getenv("STRAVA_REFRESH_TOKEN") or file_config.get("refreshToken")
         self.expires_at = file_config.get("expiresAt")
         self.training_repo_path = file_config.get("trainingRepoPath")
+        self.storage_type = file_config.get("storageType", "git")
         self.garmin_email = os.getenv("GARMIN_EMAIL") or file_config.get("garminEmail")
         self.garmin_password = os.getenv("GARMIN_PASSWORD") or file_config.get("garminPassword")
         
@@ -87,6 +89,10 @@ class Config:
         if "training_repo_path" in kwargs:
             existing["trainingRepoPath"] = kwargs["training_repo_path"]
             self.training_repo_path = kwargs["training_repo_path"]
+        
+        if "storage_type" in kwargs:
+            existing["storageType"] = kwargs["storage_type"]
+            self.storage_type = kwargs["storage_type"]
         
         if "garmin_email" in kwargs:
             existing["garminEmail"] = kwargs["garmin_email"]

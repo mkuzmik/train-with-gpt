@@ -61,11 +61,14 @@ Date: {timestamp_display}
         with open(notes_file, 'w') as f:
             f.write(content)
         
-        # Git add, commit, and push
-        relative_path = f"notes/{timestamp}.md"
-        push_status = git_add_commit_push(repo_path, relative_path, f"Add consultation notes - {timestamp_display}")
+        # Git add, commit, and push (only for git storage type)
+        if config.storage_type == "git":
+            relative_path = f"notes/{timestamp}.md"
+            push_status = git_add_commit_push(repo_path, relative_path, f"Add consultation notes - {timestamp_display}")
+        else:
+            push_status = " (saved to directory, synced externally)"
         
-        return [TextContent(type="text", text=f"✅ Consultation notes saved, committed{push_status}: {notes_file}\n\nThese notes are now part of your training history and can be referenced in future consultations.")]
+        return [TextContent(type="text", text=f"✅ Consultation notes saved{push_status}: {notes_file}\n\nThese notes are now part of your training history and can be referenced in future consultations.")]
     
     except Exception as e:
         print(f"Error saving consultation notes: {e}", file=sys.stderr)
