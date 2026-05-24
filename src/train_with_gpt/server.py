@@ -37,6 +37,10 @@ from .tools import (
     save_consultation_notes_handler,
     read_consultation_notes_tool,
     read_consultation_notes_handler,
+    read_unconsulted_notes_tool,
+    read_unconsulted_notes_handler,
+    archive_unconsulted_notes_tool,
+    archive_unconsulted_notes_handler,
 )
 
 
@@ -64,6 +68,8 @@ async def list_tools() -> list[Tool]:
         read_goals_tool(),
         save_consultation_notes_tool(),
         read_consultation_notes_tool(),
+        read_unconsulted_notes_tool(),
+        archive_unconsulted_notes_tool(),
     ]
 
 
@@ -98,6 +104,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await save_consultation_notes_handler(arguments)
     elif name == "read_consultation_notes":
         return await read_consultation_notes_handler(arguments)
+    elif name == "read_unconsulted_notes":
+        return await read_unconsulted_notes_handler(arguments)
+    elif name == "archive_unconsulted_notes":
+        return await archive_unconsulted_notes_handler(arguments)
     
     raise ValueError(f"Unknown tool: {name}")
 
