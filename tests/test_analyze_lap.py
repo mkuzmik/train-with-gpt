@@ -25,6 +25,13 @@ def mock_strava_auth(monkeypatch):
     yield
 
 
+def _mock_activity_details(activity_id: str, sport_type: str = "Run"):
+    """Register the activity-details mock (used to determine running vs. cycling)."""
+    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}").mock(
+        return_value=Response(200, json={"id": int(activity_id), "type": sport_type})
+    )
+
+
 def _mock_laps(activity_id: str):
     """Register two-lap mock for the given activity."""
     respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/laps").mock(
@@ -73,6 +80,7 @@ def _mock_streams(activity_id: str):
 async def test_analyze_lap_success(mock_strava_auth):
     """Happy path: split lap 1 of a 2-lap run into 4 segments."""
     activity_id = "111111"
+    _mock_activity_details(activity_id)
     _mock_laps(activity_id)
     _mock_streams(activity_id)
 
@@ -98,6 +106,7 @@ async def test_analyze_lap_success(mock_strava_auth):
 async def test_analyze_lap_second_lap(mock_strava_auth):
     """Verify lap_number 2 is correctly analysed."""
     activity_id = "222222"
+    _mock_activity_details(activity_id)
     _mock_laps(activity_id)
     _mock_streams(activity_id)
 
@@ -145,6 +154,7 @@ async def test_analyze_lap_missing_num_splits(mock_strava_auth):
 async def test_analyze_lap_invalid_lap_number(mock_strava_auth):
     """lap_number beyond available laps returns an error."""
     activity_id = "333333"
+    _mock_activity_details(activity_id)
     _mock_laps(activity_id)
     _mock_streams(activity_id)
 
@@ -173,9 +183,56 @@ async def test_analyze_lap_num_splits_too_small(mock_strava_auth):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_analyze_lap_fast_running_uses_pace_not_speed(mock_strava_auth):
+    """A fast running lap (>21.6 km/h) must still show min/km pace, not km/h."""
+    activity_id = "555555"
+    _mock_activity_details(activity_id, sport_type="Run")
+
+    # 6.5 m/s ≈ 23.4 km/h ≈ 2:34/km — faster than the old 6.0 m/s speed heuristic,
+    # which used to misclassify this as cycling.
+    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/laps").mock(
+        return_value=Response(200, json=[
+            {
+                "name": "Lap 1",
+                "distance": 1000,
+                "elapsed_time": 154,
+                "average_speed": 6.5,
+                "average_heartrate": 175,
+                "average_cadence": 95,
+            },
+        ])
+    )
+    n = 154
+    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/streams").mock(
+        return_value=Response(200, json={
+            "time":             {"data": list(range(n))},
+            "distance":         {"data": [i * 6.5 for i in range(n)]},
+            "heartrate":        {"data": [175] * n},
+            "velocity_smooth":  {"data": [6.5] * n},
+            "cadence":          {"data": [95] * n},
+            "watts":            {"data": [None] * n},
+        })
+    )
+
+    result = await call_tool("analyze_lap", {
+        "activity_id": activity_id,
+        "lap_number": 1,
+        "num_splits": 2,
+    })
+
+    text = result[0].text
+    assert "/km" in text
+    assert "km/h" not in text
+    assert "spm" in text
+    assert "rpm" not in text
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_analyze_lap_no_laps(mock_strava_auth):
     """Activity with no laps returns a friendly error."""
     activity_id = "444444"
+    _mock_activity_details(activity_id)
     respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/laps").mock(
         return_value=Response(200, json=[])
     )

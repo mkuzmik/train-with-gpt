@@ -37,8 +37,12 @@ async def analyze_activity_handler(arguments: dict, strava: StravaClient) -> lis
         
         # Fetch zones
         zones_data = await strava.get_athlete_zones()
-        
-        # Fetch streams and laps
+
+        # Fetch activity details (for sport type), streams and laps
+        activity_details = await strava.get_activity_details(activity_id)
+        activity_type = activity_details.get('sport_type') or activity_details.get('type', 'Unknown')
+        is_running = activity_type in ['Run', 'Walk', 'Hike']
+
         streams = await strava.get_activity_streams(activity_id)
         laps = await strava.get_activity_laps(activity_id)
         
@@ -86,13 +90,12 @@ async def analyze_activity_handler(arguments: dict, strava: StravaClient) -> lis
                 # Pace/Speed
                 avg_speed = lap.get('average_speed')
                 if avg_speed and distance > 0:
-                    # Determine activity type - use 6.0 m/s (21.6 km/h) as threshold
-                    if avg_speed < 6.0:  # Likely running
+                    if is_running:
                         pace_min_per_km = (elapsed / 60) / distance
                         pace_min = int(pace_min_per_km)
                         pace_sec = int((pace_min_per_km - pace_min) * 60)
                         lap_stats.append(f"⏱️ {pace_min}:{pace_sec:02d}/km")
-                    else:  # Likely cycling
+                    else:
                         speed_kmh = avg_speed * 3.6
                         lap_stats.append(f"⏱️ {speed_kmh:.1f}km/h")
                 
@@ -137,11 +140,10 @@ async def analyze_activity_handler(arguments: dict, strava: StravaClient) -> lis
                 # Cadence
                 avg_cadence = lap.get('average_cadence')
                 if avg_cadence:
-                    # Check if running or cycling based on speed (6.0 m/s = ~21.6 km/h)
-                    if avg_speed and avg_speed < 6.0:  # Running
+                    if is_running:
                         cadence_value = avg_cadence * 2  # Strava returns strides/min
                         lap_stats.append(f"🔄 {cadence_value:.0f} spm")
-                    else:  # Cycling
+                    else:
                         lap_stats.append(f"🔄 {avg_cadence:.0f} rpm")
                 
                 # Format lap line

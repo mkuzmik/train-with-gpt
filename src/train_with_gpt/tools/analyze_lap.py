@@ -59,7 +59,11 @@ async def analyze_lap_handler(arguments: dict, strava: StravaClient) -> list[Tex
         if num_splits < 2:
             return [TextContent(type="text", text="❌ Error: num_splits must be >= 2")]
 
-        # Fetch laps and streams in parallel would be ideal, but StravaClient is sequential per call.
+        # Fetch activity details (for sport type), laps and streams
+        activity_details = await strava.get_activity_details(activity_id)
+        activity_type = activity_details.get('sport_type') or activity_details.get('type', 'Unknown')
+        is_running = activity_type in ['Run', 'Walk', 'Hike']
+
         laps = await strava.get_activity_laps(activity_id)
 
         if not laps:
@@ -118,10 +122,6 @@ async def analyze_lap_handler(arguments: dict, strava: StravaClient) -> list[Tex
         def stream_vals(key, indices):
             data = streams.get(key, {}).get('data', [])
             return [data[i] for i in indices if i < len(data) and data[i] is not None]
-
-        selected_lap = laps[lap_number - 1]
-        avg_speed_lap = selected_lap.get('average_speed')
-        is_running = avg_speed_lap is not None and avg_speed_lap < 6.0
 
         lines = [
             f"🔍 Lap {lap_number} Analysis — Activity {activity_id}",

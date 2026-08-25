@@ -95,6 +95,66 @@ async def test_analyze_activity_basic(mock_strava_auth):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_analyze_activity_fast_running_uses_pace_not_speed(mock_strava_auth):
+    """A fast running lap (>21.6 km/h) must still show min/km pace, not km/h."""
+    activity_id = "654321"
+
+    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}").mock(
+        return_value=Response(200, json={
+            "id": 654321,
+            "name": "Sprint Reps",
+            "type": "Run",
+            "distance": 3000,
+            "moving_time": 462,
+            "start_date_local": "2024-01-15T07:00:00Z",
+        })
+    )
+
+    respx.get("https://www.strava.com/api/v3/athlete/zones").mock(
+        return_value=Response(200, json={"heart_rate": {"zones": []}})
+    )
+
+    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/streams").mock(
+        return_value=Response(200, json={
+            "time": {"data": [0, 60, 120]},
+            "heartrate": {"data": [175, 180, 178]},
+        })
+    )
+
+    # 6.5 m/s ≈ 23.4 km/h ≈ 2:34/km — faster than the old 6.0 m/s speed heuristic,
+    # which used to misclassify this as cycling.
+    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/laps").mock(
+        return_value=Response(200, json=[
+            {
+                "name": "Lap 1",
+                "distance": 1000,
+                "elapsed_time": 154,
+                "average_speed": 6.5,
+                "average_heartrate": 175,
+                "average_cadence": 95,
+            },
+            {
+                "name": "Lap 2",
+                "distance": 1000,
+                "elapsed_time": 154,
+                "average_speed": 6.5,
+                "average_heartrate": 178,
+                "average_cadence": 95,
+            },
+        ])
+    )
+
+    result = await call_tool("analyze_activity", {"activity_id": activity_id})
+    text = result[0].text
+
+    assert "/km" in text
+    assert "km/h" not in text
+    assert "spm" in text
+    assert "rpm" not in text
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_analyze_activity_not_found(mock_strava_auth):
     """Test handling of non-existent activity."""
     respx.get("https://www.strava.com/api/v3/activities/999999").mock(
