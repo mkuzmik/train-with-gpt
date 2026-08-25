@@ -203,3 +203,97 @@ async def test_list_consultation_notes_no_repo():
         assert "not configured" in result[0].text.lower() or "setup" in result[0].text.lower()
     finally:
         config.training_repo_path = old_path
+
+
+@pytest.mark.asyncio
+async def test_search_consultation_notes_finds_match(training_repo):
+    """Test that a matching keyword returns the note's date and a snippet."""
+    repo_path = training_repo
+    notes_dir = repo_path / "notes"
+    notes_dir.mkdir()
+
+    (notes_dir / "2024-01-15-08-00-00.md").write_text(
+        "Discussed marathon training plan.\n\nMentioned some calf tightness after the long run.\n"
+    )
+    (notes_dir / "2024-01-20-08-00-00.md").write_text(
+        "Follow-up check-in, mileage on track. No issues to report.\n"
+    )
+
+    with patch('subprocess.run'):
+        result = await call_tool("search_consultation_notes", {"query": "calf"})
+
+    assert len(result) == 1
+    output = result[0].text
+    assert "1 match(es)" in output
+    assert "2024-01-15" in output
+    assert "calf tightness" in output
+    assert "2024-01-20" not in output
+
+
+@pytest.mark.asyncio
+async def test_search_consultation_notes_multiple_notes(training_repo):
+    """Test that matches across multiple notes are all returned, newest first."""
+    repo_path = training_repo
+    notes_dir = repo_path / "notes"
+    notes_dir.mkdir()
+
+    (notes_dir / "2024-01-15-08-00-00.md").write_text("Race goal: sub-4 marathon in spring.\n")
+    (notes_dir / "2024-02-10-08-00-00.md").write_text("Revisited the race goal, still on track.\n")
+
+    with patch('subprocess.run'):
+        result = await call_tool("search_consultation_notes", {"query": "race goal"})
+
+    assert len(result) == 1
+    output = result[0].text
+    assert "2 match(es)" in output
+    assert "across 2 note(s)" in output
+    assert output.index("2024-02-10") < output.index("2024-01-15")
+
+
+@pytest.mark.asyncio
+async def test_search_consultation_notes_case_insensitive(training_repo):
+    """Test that search matches regardless of query/text case."""
+    repo_path = training_repo
+    notes_dir = repo_path / "notes"
+    notes_dir.mkdir()
+
+    (notes_dir / "2024-01-15-08-00-00.md").write_text("Achilles felt tight during warmup.\n")
+
+    with patch('subprocess.run'):
+        result = await call_tool("search_consultation_notes", {"query": "ACHILLES"})
+
+    assert len(result) == 1
+    assert "1 match(es)" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_search_consultation_notes_no_match(training_repo):
+    """Test that no matches returns a clear message pointing at list_consultation_notes."""
+    repo_path = training_repo
+    notes_dir = repo_path / "notes"
+    notes_dir.mkdir()
+
+    (notes_dir / "2024-01-15-08-00-00.md").write_text("Easy week, nothing notable.\n")
+
+    with patch('subprocess.run'):
+        result = await call_tool("search_consultation_notes", {"query": "hamstring"})
+
+    assert len(result) == 1
+    output = result[0].text
+    assert "no matches" in output.lower()
+    assert "list_consultation_notes" in output
+
+
+@pytest.mark.asyncio
+async def test_search_consultation_notes_without_repo():
+    """Test that search fails cleanly when repo not configured."""
+    from train_with_gpt.config import config
+    old_path = config.training_repo_path
+    config.training_repo_path = None
+
+    try:
+        result = await call_tool("search_consultation_notes", {"query": "calf"})
+        assert len(result) == 1
+        assert "not configured" in result[0].text.lower() or "setup" in result[0].text.lower()
+    finally:
+        config.training_repo_path = old_path

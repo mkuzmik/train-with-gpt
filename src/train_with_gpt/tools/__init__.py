@@ -16,6 +16,7 @@ from .read_goals import read_goals_tool, read_goals_handler
 from .save_consultation_notes import save_consultation_notes_tool, save_consultation_notes_handler
 from .read_consultation_notes import read_consultation_notes_tool, read_consultation_notes_handler
 from .list_consultation_notes import list_consultation_notes_tool, list_consultation_notes_handler
+from .search_consultation_notes import search_consultation_notes_tool, search_consultation_notes_handler
 
 __all__ = [
     "setup_training_repo_tool",
@@ -50,4 +51,6 @@ __all__ = [
     "read_consultation_notes_handler",
     "list_consultation_notes_tool",
     "list_consultation_notes_handler",
+    "search_consultation_notes_tool",
+    "search_consultation_notes_handler",
 ]
