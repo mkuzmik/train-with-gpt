@@ -31,10 +31,16 @@ async def start_consultation_handler(arguments: dict) -> list[TextContent]:
    - Reference these goals throughout the conversation
    - If goals don't exist yet, use discuss_goals to help create them
 
-3. **read_consultation_notes**
-   - Review ALL previous consultation history for full context
-   - Understand what was discussed and decided previously
-   - Look for patterns, progress, and follow-up items
+3. **list_consultation_notes**, then **read_consultation_notes**
+   - list_consultation_notes gives you a dated index (date + one-line headline) of every
+     past consultation, without their full text
+   - Based on that index, call read_consultation_notes with a since/until range (or
+     note_date) to read the relevant notes in full — at minimum the last couple of
+     weeks, and further back if a headline points at something relevant today (an
+     unresolved standing item, a similar phase of a previous block, an injury, etc.)
+   - Use all=true only when you genuinely need the complete history (e.g. a full-season
+     review) — for normal check-ins, a targeted range is enough and keeps you from
+     drowning in months of notes
    - If no notes exist, this is a fresh start
 
 4. **get_activities** - Check recent training activities

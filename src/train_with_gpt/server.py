@@ -39,6 +39,8 @@ from .tools import (
     save_consultation_notes_handler,
     read_consultation_notes_tool,
     read_consultation_notes_handler,
+    list_consultation_notes_tool,
+    list_consultation_notes_handler,
 )
 
 
@@ -67,6 +69,7 @@ async def list_tools() -> list[Tool]:
         read_goals_tool(),
         save_consultation_notes_tool(),
         read_consultation_notes_tool(),
+        list_consultation_notes_tool(),
     ]
 
 
@@ -103,7 +106,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await save_consultation_notes_handler(arguments)
     elif name == "read_consultation_notes":
         return await read_consultation_notes_handler(arguments)
-    
+    elif name == "list_consultation_notes":
+        return await list_consultation_notes_handler(arguments)
+
     raise ValueError(f"Unknown tool: {name}")
 
 

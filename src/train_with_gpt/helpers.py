@@ -1,7 +1,54 @@
 """Helper functions for train-with-gpt server."""
 
+import re
 import subprocess
 from pathlib import Path
+
+
+_NOTES_HEADER_RE = re.compile(r"^#\s*consultation notes\s*$", re.IGNORECASE)
+_DATE_LINE_RE = re.compile(r"^date:\s*", re.IGNORECASE)
+_SKIP_LINE_RE = re.compile(r"^(#{1,6}\s|={3,}$|-{3,}$)")
+
+
+def extract_note_headline(text: str, max_length: int = 200) -> str:
+    """
+    Derive a short one-line headline from a consultation note's content.
+
+    Works across the note's evolving formats without needing a fixed section
+    name: strips the standard "# Consultation Notes / Date: ..." header, then
+    skips markdown headers, banner lines (====, ----), and all-caps section
+    titles (e.g. "HEADLINE"), collecting the first bit of real prose. Does
+    not modify the note itself.
+    """
+    lines = text.splitlines()
+
+    if lines and _NOTES_HEADER_RE.match(lines[0].strip()):
+        lines = lines[1:]
+    if lines and _DATE_LINE_RE.match(lines[0].strip()):
+        lines = lines[1:]
+
+    content_parts = []
+    length = 0
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _SKIP_LINE_RE.match(stripped):
+            continue
+        if stripped.isupper():
+            continue
+        content_parts.append(stripped)
+        length += len(stripped) + 1
+        if length >= max_length:
+            break
+
+    snippet = " ".join(content_parts) if content_parts else "(no summary available)"
+
+    if len(snippet) <= max_length:
+        return snippet
+
+    truncated = snippet[:max_length].rsplit(" ", 1)[0]
+    return f"{truncated}…"
 
 
 def calculate_zone_distribution(stream_data: list, zone_boundaries: list) -> dict:
