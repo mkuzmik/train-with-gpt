@@ -215,3 +215,49 @@ the tool's output rather than promising Garmin sync.
 - Manually call `save_training_plan` against the real intervals.icu account and confirm
   the workout appears on the intervals.icu calendar with the expected date/type/
   description.
+
+## Future Direction — Multi-user, multi-provider (not scheduled yet)
+
+Not part of Milestones 1–3, which stay scoped to personal/single-user use. Captured here
+so the north star isn't lost, to be revisited only after Milestones 1–3 are done and
+validated. High-level shape, as discussed:
+
+- **Multi-tenant auth**: any user adds the Claude connector and authorizes via OAuth.
+  This server becomes an OAuth Authorization Server for Claude (using the `mcp` SDK's
+  `OAuthAuthorizationServerProvider`/`TokenVerifier` scaffolding) — at the `/authorize`
+  step it redirects to the chosen provider's (intervals.icu's, or Strava's) own OAuth
+  consent screen, collapsing "sign in" and "connect your data" into one step. The server
+  then mints its **own** token for Claude rather than passing through the provider's
+  token directly (audience-binding: Claude should only ever hold a token good for talking
+  to this server, never the provider's own token).
+- **Per-user identity**: use the stable athlete/account id from the provider's profile
+  endpoint as the internal key (e.g. intervals.icu's `i691158`), not email — email is
+  mutable and shouldn't end up baked into directory names or git history.
+- **Notes/goals storage**: stays git-backed (keeps the free win of durable history +
+  backups), just with a per-user subdirectory in one shared repo (`notes/{user_id}/`,
+  `goals/{user_id}.md`) rather than one repo per user. Existing `git_pull`/
+  `git_add_commit_push` helpers (`helpers.py`) barely change — just take a user-scoped
+  subpath instead of the repo root.
+- **Token storage**: a small persistent store (e.g. Postgres) mapping this server's
+  issued token → user id → each connected provider's access/refresh tokens, encrypted at
+  rest. Tokens are a different durability tier than notes: if this store is lost, it's
+  recoverable (every user just re-authorizes) — unlike notes, which are irreplaceable
+  user-authored content and need real backups.
+- **Multi-provider (intervals.icu + Strava, interchangeably)**: a thin `DataProvider`
+  interface both `IntervalsClient` and a (now multi-tenant) `StravaClient` implement;
+  tool handlers call through the interface instead of a concrete client. Two concrete
+  pieces of new work this implies:
+  - Strava's OAuth flow has to become multi-tenant too — today's `strava_client.py` uses
+    a `localhost:8111` callback meant for one desktop user; it needs the same
+    hosted-callback-as-OAuth-client treatment intervals.icu gets, with per-user token
+    storage.
+  - `analyze_activity`/`analyze_lap` need two analysis code paths, not just two data
+    sources behind one interface: intervals.icu hands back precomputed zone-times and
+    per-lap stats in one call, while Strava requires the original multi-call
+    reconstruction (zones + streams + laps, manually cross-referenced) that
+    `analyze_activity.py`/`analyze_lap.py` use today.
+- **Accepted limitation — decided, not to be revisited**: Strava has no sleep/HRV/
+  resting-HR data at all (it's activity-only). Tool interface stays exactly as it is
+  today — no new tools, no degraded/partial output. `get_sleep_data`/`get_hrv_data`/
+  `get_resting_heart_rate` simply return their existing error-response shape when the
+  user's connected provider(s) don't include a wellness-capable source.
