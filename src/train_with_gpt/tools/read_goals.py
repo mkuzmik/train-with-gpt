@@ -5,7 +5,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import git_pull
+from ..helpers import current_user_id, git_pull, user_scoped_goals_file
 
 
 def read_goals_tool() -> Tool:
@@ -34,8 +34,8 @@ async def read_goals_handler(arguments: dict) -> list[TextContent]:
         # Git pull first to get latest
         pull_output = git_pull(repo_path)
         
-        goals_file = repo_path / "goals.md"
-        
+        goals_file, _ = user_scoped_goals_file(repo_path, current_user_id())
+
         if not goals_file.exists():
             return [TextContent(type="text", text="ℹ️ No goals saved yet.\n\nUse **discuss_goals** to start a conversation about training goals, then **save_goals** to save them.")]
         

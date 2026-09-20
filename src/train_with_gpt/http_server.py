@@ -1,70 +1,59 @@
 #!/usr/bin/env python3
-"""HTTP entrypoint for the MCP server (Streamable HTTP transport).
+"""HTTP entrypoint for the MCP server (Streamable HTTP transport, multi-user OAuth).
 
 Runs the same `Server` instance as the stdio entrypoint (`server.py`), but
-reachable over HTTP so it can be used remotely (e.g. as a Claude Custom
-Connector) or from anywhere other than a locally-spawned stdio subprocess.
-
-Auth is a single shared secret (`MCP_SHARED_SECRET`), checked as a bearer
-token on every request to /mcp. This is deliberately not a full OAuth
-Authorization Server - sufficient for single-user personal access, per the
-"just me, multi-device" scope decided in docs/plans/intervals-icu-migration.md.
+reachable over HTTP. Unlike the stdio path (still a single personal
+intervals.icu API key, unchanged), this entrypoint is a full OAuth
+Authorization Server for Claude: `/authorize` immediately redirects to
+Strava's own OAuth consent screen (see `oauth_provider.py`/`strava_oauth.py`
+for the nested-flow details), and every /mcp request must carry a valid
+bearer token this server itself issued.
 """
 
 import contextlib
-import hmac
 import os
 import sys
 
 import uvicorn
+from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
+from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
+from mcp.server.auth.provider import ProviderTokenVerifier
+from mcp.server.auth.routes import create_auth_routes
+from mcp.server.auth.settings import ClientRegistrationOptions
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
-from starlette.middleware import Middleware
+from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-
+from . import store
+from .oauth_provider import TrainWithGptOAuthProvider
 from .server import app as mcp_app
+from .strava_oauth import strava_oauth_route
 
-SHARED_SECRET = os.environ.get("MCP_SHARED_SECRET")
+PUBLIC_URL = os.environ.get("PUBLIC_URL", f"http://localhost:{os.environ.get('PORT', '8000')}")
+
+store.init_db()
+
+provider = TrainWithGptOAuthProvider(issuer_base_url=PUBLIC_URL)
+token_verifier = ProviderTokenVerifier(provider)
 
 session_manager = StreamableHTTPSessionManager(app=mcp_app, stateless=True)
 
 
-class BearerAuthMiddleware:
-    """ASGI middleware enforcing a shared-secret bearer token on /mcp requests."""
-
-    def __init__(self, asgi_app):
-        self.asgi_app = asgi_app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not scope["path"].startswith("/mcp"):
-            await self.asgi_app(scope, receive, send)
-            return
-
-        if not SHARED_SECRET:
-            response = JSONResponse(
-                {"error": "server misconfigured: MCP_SHARED_SECRET not set"},
-                status_code=500,
-            )
-            await response(scope, receive, send)
-            return
-
-        headers = dict(scope.get("headers") or [])
-        auth_header = headers.get(b"authorization", b"").decode("latin-1")
-        token = auth_header[len("Bearer "):] if auth_header.startswith("Bearer ") else ""
-
-        if not token or not hmac.compare_digest(token, SHARED_SECRET):
-            response = JSONResponse({"error": "unauthorized"}, status_code=401)
-            await response(scope, receive, send)
-            return
-
-        await self.asgi_app(scope, receive, send)
-
-
 async def handle_mcp(scope: Scope, receive: Receive, send: Send) -> None:
     await session_manager.handle_request(scope, receive, send)
+
+
+# /mcp requires a valid bearer token this server issued: AuthenticationMiddleware
+# (Starlette's own) populates scope["user"]/scope["auth"] from the token via
+# BearerAuthBackend, AuthContextMiddleware makes it available to tool handlers
+# via get_access_token(), and RequireAuthMiddleware 401s if it's missing/invalid.
+mcp_asgi_app = RequireAuthMiddleware(handle_mcp, required_scopes=[])
+mcp_asgi_app = AuthContextMiddleware(mcp_asgi_app)
+mcp_asgi_app = AuthenticationMiddleware(mcp_asgi_app, backend=BearerAuthBackend(token_verifier))
 
 
 async def health(request):
@@ -74,25 +63,35 @@ async def health(request):
 @contextlib.asynccontextmanager
 async def lifespan(_app):
     async with session_manager.run():
-        print("[HTTP] MCP Streamable HTTP server ready at /mcp", file=sys.stderr)
+        print(f"[HTTP] MCP Streamable HTTP server ready at /mcp (issuer: {PUBLIC_URL})", file=sys.stderr)
         yield
 
 
 starlette_app = Starlette(
     routes=[
         Route("/health", health),
-        Mount("/mcp", app=handle_mcp),
+        *create_auth_routes(
+            provider,
+            issuer_url=AnyHttpUrl(PUBLIC_URL),
+            client_registration_options=ClientRegistrationOptions(enabled=True),
+        ),
+        strava_oauth_route,
+        Mount("/mcp", app=mcp_asgi_app),
     ],
-    middleware=[Middleware(BearerAuthMiddleware)],
     lifespan=lifespan,
 )
 
 
 def main():
-    if not SHARED_SECRET:
+    from .config import config
+
+    if not config.client_id or not config.client_secret:
+        # config.py already logs which of these are set; this is just an early,
+        # loud warning specific to the OAuth path needing Strava credentials.
         print(
-            "[HTTP] WARNING: MCP_SHARED_SECRET is not set - all /mcp requests will be rejected.\n"
-            "        Generate one with: openssl rand -hex 32",
+            "[HTTP] WARNING: no STRAVA_CLIENT_ID configured - the multi-user OAuth "
+            "flow (/authorize) will fail until config.json has clientId/clientSecret "
+            "or STRAVA_CLIENT_ID/STRAVA_CLIENT_SECRET are set.",
             file=sys.stderr,
         )
     port = int(os.environ.get("PORT", "8000"))

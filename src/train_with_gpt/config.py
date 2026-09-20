@@ -17,6 +17,11 @@ class Config:
     def __init__(self):
         self.intervals_api_key: Optional[str] = None
         self.training_repo_path: Optional[str] = None
+        # Strava app credentials, used only by the multi-user OAuth path
+        # (strava_client.py / strava_oauth.py) to talk to Strava on our
+        # server's behalf - not a per-user secret.
+        self.client_id: Optional[str] = None
+        self.client_secret: Optional[str] = None
 
     def load(self):
         """Load config from file and environment variables."""
@@ -26,9 +31,12 @@ class Config:
         # Priority: env vars > config file
         self.intervals_api_key = os.getenv("INTERVALS_API_KEY") or file_config.get("intervalsApiKey")
         self.training_repo_path = file_config.get("trainingRepoPath")
+        self.client_id = os.getenv("STRAVA_CLIENT_ID") or file_config.get("clientId")
+        self.client_secret = os.getenv("STRAVA_CLIENT_SECRET") or file_config.get("clientSecret")
 
         print(f"[CONFIG] Loaded from: {CONFIG_FILE}", file=sys.stderr)
         print(f"[CONFIG] Intervals API Key: {'SET' if self.intervals_api_key else 'NOT SET'}", file=sys.stderr)
+        print(f"[CONFIG] Strava Client ID: {self.client_id or 'NOT SET'}", file=sys.stderr)
 
     def _load_file(self) -> dict:
         """Load configuration from JSON file."""

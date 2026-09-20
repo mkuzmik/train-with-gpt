@@ -126,12 +126,10 @@ matching the existing per-tool test file convention.
   `app = Server("train-with-gpt")` unchanged — no migration to `FastMCP`, the low-level
   `Server`/`Tool`/`TextContent` pattern this codebase already uses stays as-is. Mount it
   in a small Starlette app run by `uvicorn`.
-- **Auth**: single shared-secret bearer token (env var `MCP_SHARED_SECRET`), checked in
-  ASGI middleware on every request, 401 on missing/mismatched — sufficient for
-  single-user personal access; explicitly *not* building a full OAuth Authorization
-  Server, since that's SaaS-multi-tenant-sized scope the user opted out of.
-  a `stdio` entrypoint intact for local dev/testing (`server.py`'s current `main()`) —
-  the HTTP entrypoint is additive.
+- **Auth**: ~~single shared-secret bearer token~~ **superseded by Milestone 4** — the
+  HTTP entrypoint now uses full OAuth (see below) instead of a static `MCP_SHARED_SECRET`.
+  Kept a `stdio` entrypoint intact for local dev/testing (`server.py`'s current `main()`,
+  untouched by Milestone 4) — the HTTP entrypoint is additive, stdio stays single-user.
 - **Hosting**: a small always-on host with a public HTTPS URL (Fly.io is the concrete
   recommendation — cheap/free tier, simple `fly deploy`, supports a persistent volume for
   the notes-repo clone) rather than self-hosted hardware + a tunnel, since phone access
@@ -216,48 +214,168 @@ the tool's output rather than promising Garmin sync.
   the workout appears on the intervals.icu calendar with the expected date/type/
   description.
 
-## Future Direction — Multi-user, multi-provider (not scheduled yet)
+### Milestone 4 — Multi-user OAuth (supersedes Milestone 2's shared-secret HTTP auth) ✅ DONE
 
-Not part of Milestones 1–3, which stay scoped to personal/single-user use. Captured here
-so the north star isn't lost, to be revisited only after Milestones 1–3 are done and
-validated. High-level shape, as discussed:
+Implemented as designed below and verified live end-to-end: real Dynamic Client
+Registration from `mcp-remote`, `/authorize` redirecting to Strava, real Strava login/
+consent, `/oauth/strava/callback` resolving and persisting the athlete
+(`store.get_user("2706822")` → "Mateusz Kuzmik"), our own code minted and exchanged at
+`/token`, and a live `get_activities` tool call returning real Strava activities through
+the full chain. `get_sleep_data` correctly returns the no-wellness-data message for the
+Strava session. All 93 tests pass (64 from Milestones 1-3 unaffected + 29 new). intervals.icu
+as a second provider remains future work, unblocked whenever its OAuth app is approved.
 
-- **Multi-tenant auth**: any user adds the Claude connector and authorizes via OAuth.
-  This server becomes an OAuth Authorization Server for Claude (using the `mcp` SDK's
-  `OAuthAuthorizationServerProvider`/`TokenVerifier` scaffolding) — at the `/authorize`
-  step it redirects to the chosen provider's (intervals.icu's, or Strava's) own OAuth
-  consent screen, collapsing "sign in" and "connect your data" into one step. The server
-  then mints its **own** token for Claude rather than passing through the provider's
-  token directly (audience-binding: Claude should only ever hold a token good for talking
-  to this server, never the provider's own token).
-- **Per-user identity**: use the stable athlete/account id from the provider's profile
-  endpoint as the internal key (e.g. intervals.icu's `i691158`), not email — email is
-  mutable and shouldn't end up baked into directory names or git history.
-- **Notes/goals storage**: stays git-backed (keeps the free win of durable history +
-  backups), just with a per-user subdirectory in one shared repo (`notes/{user_id}/`,
-  `goals/{user_id}.md`) rather than one repo per user. Existing `git_pull`/
-  `git_add_commit_push` helpers (`helpers.py`) barely change — just take a user-scoped
-  subpath instead of the repo root.
-- **Token storage**: a small persistent store (e.g. Postgres) mapping this server's
-  issued token → user id → each connected provider's access/refresh tokens, encrypted at
-  rest. Tokens are a different durability tier than notes: if this store is lost, it's
-  recoverable (every user just re-authorizes) — unlike notes, which are irreplaceable
-  user-authored content and need real backups.
-- **Multi-provider (intervals.icu + Strava, interchangeably)**: a thin `DataProvider`
-  interface both `IntervalsClient` and a (now multi-tenant) `StravaClient` implement;
-  tool handlers call through the interface instead of a concrete client. Two concrete
-  pieces of new work this implies:
-  - Strava's OAuth flow has to become multi-tenant too — today's `strava_client.py` uses
-    a `localhost:8111` callback meant for one desktop user; it needs the same
-    hosted-callback-as-OAuth-client treatment intervals.icu gets, with per-user token
-    storage.
-  - `analyze_activity`/`analyze_lap` need two analysis code paths, not just two data
-    sources behind one interface: intervals.icu hands back precomputed zone-times and
-    per-lap stats in one call, while Strava requires the original multi-call
-    reconstruction (zones + streams + laps, manually cross-referenced) that
-    `analyze_activity.py`/`analyze_lap.py` use today.
-- **Accepted limitation — decided, not to be revisited**: Strava has no sleep/HRV/
-  resting-HR data at all (it's activity-only). Tool interface stays exactly as it is
-  today — no new tools, no degraded/partial output. `get_sleep_data`/`get_hrv_data`/
-  `get_resting_heart_rate` simply return their existing error-response shape when the
-  user's connected provider(s) don't include a wellness-capable source.
+**Why now:** Milestone 2's HTTP entrypoint currently holds one global
+`INTERVALS_API_KEY` — every request that reaches it, regardless of who's on the other
+end of the bearer token, acts as the one person who ran the server. This milestone
+replaces *who's allowed to call it, and as whom* with real per-person identity.
+
+**Provider for this first pass: Strava, not intervals.icu.** intervals.icu's OAuth
+requires a manually-submitted app application (`https://intervals.icu/oauth/apply`) that
+sits in "Pending" until a human at intervals.icu approves it — real friction for
+iterating. Strava's OAuth app registration is instant and self-serve
+(`https://www.strava.com/settings/api`, same as the old pre-Milestone-1
+`strava_client.py` used), so it unblocks building and testing the whole multi-tenant
+mechanism *today*. intervals.icu OAuth can be added as a second provider later, once its
+app is approved (submit that application whenever convenient — it doesn't block this).
+Decided explicitly: OAuth'd multi-user sessions get real activity data from Strava, with
+no wellness data (Strava has none) — matches the limitation already accepted earlier
+("return error from health metrics tools" for Strava-only accounts). The existing
+personal stdio and local-HTTP paths keep using the intervals_api_key/`IntervalsClient`
+exactly as today, untouched by any of this.
+
+**Two nested OAuth relationships**, matching the exact diagram in the `mcp` SDK's own
+`OAuthAuthorizationServerProvider.authorize()` docstring
+(`mcp/server/auth/provider.py`, installed at `mcp==1.30.0`):
+
+```
+Claude  -->  our server (OAuth AS)  -->  Strava (OAuth AS)
+  ^                |                            |
+  +----redirect----+<-----------redirect---------+
+```
+
+1. **Claude ↔ our server**: our server *is* a full OAuth 2.0 Authorization Server for
+   Claude, using the SDK's ready-made scaffolding (`mcp.server.auth.routes.create_auth_routes`,
+   `mcp.server.auth.provider.OAuthAuthorizationServerProvider`,
+   `mcp.server.auth.middleware.bearer_auth`) rather than hand-rolling OAuth endpoints.
+   Dynamic Client Registration is enabled (`ClientRegistrationOptions(enabled=True)`) so
+   Claude self-registers (`POST /register`) the way the MCP Authorization spec expects.
+2. **Our server ↔ Strava**: our server is a single, pre-registered Strava OAuth client
+   (same shape the deleted `strava_client.py` already used — recreated below, but
+   per-user rather than single-config):
+   - App registration: `https://www.strava.com/settings/api`, "Authorization Callback
+     Domain" set to `localhost` for now — instant, no approval wait.
+   - Authorize URL: `https://www.strava.com/oauth/authorize?client_id=&redirect_uri=&response_type=code&scope=activity:read_all,activity:read,profile:read_all`
+   - Token exchange: `POST https://www.strava.com/oauth/token` with
+     `client_id`/`client_secret`/`code`/`grant_type=authorization_code`.
+   - **Refresh tokens ARE issued and matter here** — unlike intervals.icu, a Strava
+     access token expires (~6h). Store `refresh_token` + `expires_at` per user in
+     `store.py`; refresh via `grant_type=refresh_token` before/on a 401, reusing the
+     refresh logic pattern the old `strava_client.py` already had.
+   - Athlete id/name: `GET https://www.strava.com/api/v3/athlete` → `id` (int),
+     `firstname`, `lastname`.
+
+**End-to-end flow:**
+1. Claude's `/authorize` request hits our server. Our provider's `authorize()` doesn't
+   show a consent screen itself — it immediately redirects the browser to Strava's
+   `/oauth/authorize`, using our registered Strava `client_id` and a `redirect_uri`
+   pointing back at our own server (e.g. `/oauth/strava/callback`). We stash the
+   original Claude request (its `client_id`, `redirect_uri`, `code_challenge`) keyed by a
+   `state` value we generate, in a new `pending_authorizations` table.
+2. User approves on Strava. It redirects to our `/oauth/strava/callback`.
+3. Our callback handler exchanges the code with Strava for an access+refresh token,
+   calls `GET /athlete` to learn the athlete's stable id (e.g. `12345678`) and name,
+   upserts a `users` row (`provider="strava"`), generates our own authorization code
+   (`subject=user_id`, per `AuthorizationCode.subject` in the SDK — it propagates
+   straight to the issued `AccessToken`), and redirects back to Claude's original
+   `redirect_uri`.
+4. Claude exchanges that code at our `/token` endpoint. Our `exchange_authorization_code()`
+   mints a long-lived `AccessToken` (`subject=user_id`, no refresh token *for Claude* —
+   the Strava-side refresh stays internal to us) and returns it.
+5. Every later `/mcp` call carries `Authorization: Bearer <our-issued-token>`. The SDK's
+   `BearerAuthBackend`/`AuthContextMiddleware` verify it and stash it in a contextvar;
+   inside any tool handler, `mcp.server.auth.middleware.auth_context.get_access_token()`
+   returns it — `.subject` is the calling user's id, with no extra plumbing needed through
+   `call_tool()`'s existing `(name, arguments)` signature.
+
+**New files:**
+- `src/train_with_gpt/store.py` — SQLite (stdlib `sqlite3`, one local `.db` file — no
+  extra infra to run or provision, matches the project's existing low-infra style).
+  Tables: `oauth_clients` (Claude's DCR-registered clients), `auth_codes`,
+  `access_tokens`, `pending_authorizations` (bridges steps 1→3 above, keyed by our own
+  `state`), `users` (`user_id` PK, `provider`, `name`, `access_token`, `refresh_token`
+  nullable, `token_expires_at` nullable — generic enough to hold an intervals.icu row
+  later too).
+- `src/train_with_gpt/oauth_provider.py` — `TrainWithGptOAuthProvider`, implementing
+  `OAuthAuthorizationServerProvider`'s `get_client`/`register_client`/`authorize`/
+  `load_authorization_code`/`exchange_authorization_code`/`load_access_token` against
+  `store.py`, plus a thin `verify_token()` (calls `load_access_token()`) so the same
+  object also satisfies `TokenVerifier`.
+- `src/train_with_gpt/strava_oauth.py` — the Strava side: builds the Strava authorize
+  URL, and the `/oauth/strava/callback` Starlette route (step 2-3 above).
+- `src/train_with_gpt/strava_client.py` — **recreated**, adapted from the version deleted
+  in Milestone 1: same methods (`get_activities`, `get_activity_details`,
+  `get_athlete_zones`, `get_activity_streams`, `get_activity_laps`), but constructed
+  per-request with `(access_token, refresh_token, expires_at, on_refresh: Callable)`
+  instead of reading a single global `config`; `on_refresh` writes the rotated
+  token/expiry back to `store.py` so a refresh persists.
+
+**Modified files:**
+- `src/train_with_gpt/http_server.py` — drop `BearerAuthMiddleware`/`MCP_SHARED_SECRET`
+  entirely; wire `create_auth_routes(provider, issuer_url=...)` plus the SDK's
+  `RequireAuthMiddleware`/`AuthContextMiddleware` in front of `/mcp`; mount the new
+  `/oauth/strava/callback` route from `strava_oauth.py`.
+- `src/train_with_gpt/server.py` — `call_tool()` keeps its existing `(name, arguments)`
+  signature. Add `get_active_data_client()`: when `get_access_token()` is set (HTTP/OAuth
+  path), look up that user's row in `store.py` and return a `StravaClient` bound to their
+  tokens; otherwise (stdio/local-HTTP path, unchanged) return the existing module-level
+  `intervals` `IntervalsClient`. Same pattern for notes/goals: user-scoped
+  `notes/{user_id}/`, `goals/{user_id}.md` when a user id is present, today's root-level
+  paths otherwise.
+- `get_activities.py`, `analyze_activity.py`, `analyze_lap.py` — call
+  `get_active_data_client()` instead of receiving `intervals` as a parameter; since it
+  can now return either an `IntervalsClient` or a `StravaClient`, branch on the type:
+  `analyze_activity`/`analyze_lap` need Strava's original multi-call reconstruction (zones
+  + streams + laps, manually cross-referenced — the exact logic the pre-Milestone-1
+  version had) alongside intervals.icu's precomputed-zone path already in place. This is
+  the "two analysis code paths per provider" case flagged when this was still a
+  speculative Future Direction.
+- `get_sleep_data.py`, `get_hrv_data.py`, `get_resting_heart_rate.py` — when
+  `get_active_data_client()` returns a `StravaClient`, return the existing
+  not-configured-style error response (Strava has no wellness data) instead of calling
+  anything.
+- `save_consultation_notes.py`, `read_consultation_notes.py`, `list_consultation_notes.py`,
+  `search_consultation_notes.py`, `save_goals.py`, `read_goals.py` — thread the resolved
+  user-scoped subpath into their existing `git_pull`/`git_add_commit_push` (`helpers.py`,
+  unchanged) calls.
+- `pyproject.toml` — no new dependency; `sqlite3` is stdlib, `mcp.server.auth.*` and
+  `httpx` (for `strava_client.py`) already ship/are pinned.
+
+**Local testing without a public deployment:** Strava's "Authorization Callback Domain"
+being `localhost` plus `mcp-remote` (already proven working for the Milestone 2 test)
+handling full OAuth flows natively — opening a browser, running its own local callback
+listener — means pointing plain `mcp-remote http://localhost:8123/mcp` at the server
+(no `--header-file`) should trigger the whole OAuth dance automatically once this is
+built, no tunnel/ngrok needed for development.
+
+## Verification
+
+**Milestone 4:**
+- Unit tests: mock Strava's `/oauth/authorize`/`/oauth/token`/`/athlete` calls; cover
+  `store.py`'s CRUD, the provider's `authorize`→`exchange_authorization_code` path with a
+  fake nested-callback, `load_access_token` rejecting expired/unknown tokens, and
+  `StravaClient`'s refresh-on-401 behavior persisting the new token via `on_refresh`.
+- End-to-end locally: run `train-with-gpt-http`, point `npx mcp-remote
+  http://localhost:8123/mcp` at it with no `--header-file`, and confirm it opens a
+  browser, completes the Strava consent, and lands back at a working MCP session —
+  `tools/list` and a live `tools/call` (e.g. `get_activities`, `analyze_activity`)
+  against a real Strava account should succeed, matching the manual `curl` checks
+  already done for Milestone 2's transport. Confirm `get_sleep_data` returns the
+  no-wellness-data message rather than erroring.
+- Confirm a second identity works independently: authorize once, note the `user_id`
+  `store.py` recorded, then (if a second Strava account is available) authorize again
+  and confirm the two sessions get distinct `user_id`s and distinct `notes/{user_id}/`
+  directories in the training-notes repo.
+- Confirm the existing stdio and local-HTTP personal paths are completely unaffected
+  (still using `INTERVALS_API_KEY` directly, no OAuth involved) — re-run Milestone 1/2's
+  manual checks against the real intervals.icu account.

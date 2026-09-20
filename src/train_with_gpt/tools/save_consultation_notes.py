@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import git_add_commit_push
+from ..helpers import current_user_id, git_add_commit_push, user_scoped_notes_dir
 
 
 def save_consultation_notes_tool() -> Tool:
@@ -42,9 +42,10 @@ async def save_consultation_notes_handler(arguments: dict) -> list[TextContent]:
         if not notes:
             return [TextContent(type="text", text="❌ Error: No notes provided")]
         
-        # Create notes directory if it doesn't exist
-        notes_dir = repo_path / "notes"
-        notes_dir.mkdir(exist_ok=True)
+        # Create notes directory if it doesn't exist (user-scoped subdir for
+        # OAuth'd multi-user sessions, repo root for the personal path)
+        notes_dir, notes_prefix = user_scoped_notes_dir(repo_path, current_user_id())
+        notes_dir.mkdir(parents=True, exist_ok=True)
         
         # Create timestamped filename
         timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -62,7 +63,7 @@ Date: {timestamp_display}
             f.write(content)
         
         # Git add, commit, and push
-        relative_path = f"notes/{timestamp}.md"
+        relative_path = f"{notes_prefix}/{timestamp}.md"
         push_status = git_add_commit_push(repo_path, relative_path, f"Add consultation notes - {timestamp_display}")
         
         return [TextContent(type="text", text=f"✅ Consultation notes saved, committed{push_status}: {notes_file}\n\nThese notes are now part of your training history and can be referenced in future consultations.")]

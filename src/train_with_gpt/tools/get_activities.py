@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
 from ..intervals_client import IntervalsClient
+from ..strava_client import StravaClient
 
 
 def get_activities_tool() -> Tool:
@@ -32,7 +33,7 @@ def get_activities_tool() -> Tool:
     )
 
 
-async def get_activities_handler(arguments: dict, intervals: IntervalsClient) -> list[TextContent]:
+async def get_activities_handler(arguments: dict, intervals) -> list[TextContent]:
     """Handle get_activities tool calls."""
     try:
         # Parse date arguments
@@ -86,10 +87,17 @@ async def get_activities_handler(arguments: dict, intervals: IntervalsClient) ->
                 date_range_desc = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
         
         # Fetch activities
-        activities = await intervals.get_activities(
-            oldest=start_date.strftime("%Y-%m-%d"),
-            newest=end_date.strftime("%Y-%m-%d"),
-        )
+        if isinstance(intervals, StravaClient):
+            activities = await intervals.get_activities(
+                after=int(start_date.timestamp()),
+                before=int(end_date.timestamp()),
+                per_page=200,
+            )
+        else:
+            activities = await intervals.get_activities(
+                oldest=start_date.strftime("%Y-%m-%d"),
+                newest=end_date.strftime("%Y-%m-%d"),
+            )
         
         if not activities:
             return [TextContent(type="text", text=f"No activities found for {date_range_desc}.")]
@@ -99,7 +107,7 @@ async def get_activities_handler(arguments: dict, intervals: IntervalsClient) ->
         for activity in activities:
             # Basic info
             date_str = datetime.fromisoformat(activity['start_date'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M')
-            activity_type = activity.get('type', 'Unknown')
+            activity_type = activity.get('sport_type') or activity.get('type', 'Unknown')
             
             # Performance metrics (distance/moving_time can be present but null,
             # e.g. for strength workouts with no GPS/duration tracking)

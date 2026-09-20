@@ -3,6 +3,43 @@
 import re
 import subprocess
 from pathlib import Path
+from typing import Optional
+
+
+def current_user_id() -> Optional[str]:
+    """
+    Resolve the OAuth-authenticated user's id for the current request, if any.
+
+    Set only on the multi-user HTTP/OAuth path (see oauth_provider.py) - the
+    stdio and local-HTTP personal paths have no access token in context, so
+    this returns None there, keeping notes/goals at their existing root-level
+    paths for those.
+    """
+    from mcp.server.auth.middleware.auth_context import get_access_token
+
+    token = get_access_token()
+    return token.subject if token else None
+
+
+def user_scoped_notes_dir(repo_path: Path, user_id: Optional[str]) -> tuple[Path, str]:
+    """Returns (notes_dir, relative_dir_prefix_for_git) for the given user, if any."""
+    if user_id:
+        return repo_path / "notes" / user_id, f"notes/{user_id}"
+    return repo_path / "notes", "notes"
+
+
+def user_scoped_goals_file(repo_path: Path, user_id: Optional[str]) -> tuple[Path, str]:
+    """Returns (goals_file, relative_path_for_git) for the given user, if any."""
+    if user_id:
+        return repo_path / "goals" / f"{user_id}.md", f"goals/{user_id}.md"
+    return repo_path / "goals.md", "goals.md"
+
+
+NO_WELLNESS_DATA_MESSAGE = (
+    "ℹ️ Wellness data (sleep, HRV, resting heart rate) isn't available for accounts "
+    "connected via Strava - Strava has no wellness data at all. This is only available "
+    "through the personal intervals.icu-backed setup."
+)
 
 
 _NOTES_HEADER_RE = re.compile(r"^#\s*consultation notes\s*$", re.IGNORECASE)

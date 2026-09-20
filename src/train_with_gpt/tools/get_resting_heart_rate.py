@@ -4,7 +4,8 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
-from ..intervals_client import IntervalsClient
+from ..helpers import NO_WELLNESS_DATA_MESSAGE
+from ..strava_client import StravaClient
 
 
 def get_resting_heart_rate_tool() -> Tool:
@@ -29,9 +30,12 @@ def get_resting_heart_rate_tool() -> Tool:
     )
 
 
-async def get_resting_heart_rate_handler(arguments: dict, intervals: IntervalsClient) -> list[TextContent]:
+async def get_resting_heart_rate_handler(arguments: dict, intervals) -> list[TextContent]:
     """Handle get_resting_heart_rate tool calls."""
     try:
+        if isinstance(intervals, StravaClient):
+            return [TextContent(type="text", text=NO_WELLNESS_DATA_MESSAGE)]
+
         start_date_str = arguments.get("start_date")
         end_date_str = arguments.get("end_date")
 

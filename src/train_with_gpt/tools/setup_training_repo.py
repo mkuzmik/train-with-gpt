@@ -4,6 +4,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
+from ..helpers import current_user_id
 
 
 def setup_training_repo_tool() -> Tool:
@@ -27,6 +28,14 @@ def setup_training_repo_tool() -> Tool:
 async def setup_training_repo_handler(arguments: dict) -> list[TextContent]:
     """Handle setup_training_repo tool calls."""
     try:
+        if current_user_id():
+            return [TextContent(
+                type="text",
+                text="❌ Error: The training repository is a shared, admin-configured setting "
+                     "and can't be changed from an OAuth'd session. Your notes and goals still "
+                     "live in their own subdirectory within it."
+            )]
+
         repo_path = arguments.get("repo_path", "")
         if not repo_path:
             return [TextContent(type="text", text="❌ Error: No repository path provided")]
