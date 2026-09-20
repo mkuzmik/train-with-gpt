@@ -6,13 +6,10 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from .strava_client import StravaClient
-from .garmin_client import GarminClient
+from .intervals_client import IntervalsClient
 from .tools import (
     setup_training_repo_tool,
     setup_training_repo_handler,
-    connect_strava_tool,
-    connect_strava_handler,
     start_consultation_tool,
     start_consultation_handler,
     get_activities_tool,
@@ -47,8 +44,7 @@ from .tools import (
 
 
 app = Server("train-with-gpt")
-strava = StravaClient()
-garmin = GarminClient()
+intervals = IntervalsClient()
 
 
 
@@ -56,7 +52,6 @@ garmin = GarminClient()
 async def list_tools() -> list[Tool]:
     """List available tools."""
     return [
-        connect_strava_tool(),
         start_consultation_tool(),
         get_current_date_tool(),
         get_activities_tool(),
@@ -79,26 +74,24 @@ async def list_tools() -> list[Tool]:
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls."""
-    if name == "connect_strava":
-        return await connect_strava_handler(arguments, strava)
-    elif name == "setup_training_repo":
+    if name == "setup_training_repo":
         return await setup_training_repo_handler(arguments)
     elif name == "start_consultation":
         return await start_consultation_handler(arguments)
     elif name == "get_current_date":
         return await get_current_date_handler(arguments)
     elif name == "get_activities":
-        return await get_activities_handler(arguments, strava)
+        return await get_activities_handler(arguments, intervals)
     elif name == "get_sleep_data":
-        return await get_sleep_data_handler(arguments, garmin)
+        return await get_sleep_data_handler(arguments, intervals)
     elif name == "get_hrv_data":
-        return await get_hrv_data_handler(arguments, garmin)
+        return await get_hrv_data_handler(arguments, intervals)
     elif name == "get_resting_heart_rate":
-        return await get_resting_heart_rate_handler(arguments, garmin)
+        return await get_resting_heart_rate_handler(arguments, intervals)
     elif name == "analyze_activity":
-        return await analyze_activity_handler(arguments, strava)
+        return await analyze_activity_handler(arguments, intervals)
     elif name == "analyze_lap":
-        return await analyze_lap_handler(arguments, strava)
+        return await analyze_lap_handler(arguments, intervals)
     elif name == "discuss_goals":
         return await discuss_goals_handler(arguments)
     elif name == "save_goals":

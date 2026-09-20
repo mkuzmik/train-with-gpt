@@ -76,12 +76,12 @@ async def start_consultation_handler(arguments: dict) -> list[TextContent]:
 
 ## Available Data Sources
 
-**Training Activities (Strava):**
+**Training Activities (intervals.icu):**
 - **get_activities** - Recent training patterns and trends
 - **analyze_activity** - Deep dive on specific workouts with zones, intervals, splits
 
-**Recovery Metrics (Garmin):**
-- **get_sleep_data** - Sleep duration, quality scores, sleep stages
+**Recovery Metrics (intervals.icu wellness data):**
+- **get_sleep_data** - Sleep duration and quality score
   - Essential for understanding recovery capacity
 - **get_hrv_data** - Heart Rate Variability (key recovery indicator)
   - Shows nightly HRV, 7/14/28-day rolling averages

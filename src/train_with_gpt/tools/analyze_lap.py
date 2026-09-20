@@ -3,7 +3,7 @@
 import sys
 from mcp.types import Tool, TextContent
 
-from ..strava_client import StravaClient
+from ..intervals_client import IntervalsClient
 
 
 def analyze_lap_tool() -> Tool:
@@ -19,8 +19,8 @@ def analyze_lap_tool() -> Tool:
             "type": "object",
             "properties": {
                 "activity_id": {
-                    "type": "number",
-                    "description": "The Strava activity ID (from get_activities or analyze_activity).",
+                    "type": "string",
+                    "description": "The intervals.icu activity ID (from get_activities or analyze_activity), e.g. 'i180171555'.",
                 },
                 "lap_number": {
                     "type": "number",
@@ -36,7 +36,7 @@ def analyze_lap_tool() -> Tool:
     )
 
 
-async def analyze_lap_handler(arguments: dict, strava: StravaClient) -> list[TextContent]:
+async def analyze_lap_handler(arguments: dict, intervals: IntervalsClient) -> list[TextContent]:
     """Handle analyze_lap tool calls."""
     try:
         activity_id_raw = arguments.get("activity_id")
@@ -50,7 +50,7 @@ async def analyze_lap_handler(arguments: dict, strava: StravaClient) -> list[Tex
         if not num_splits_raw:
             return [TextContent(type="text", text="❌ Error: num_splits is required")]
 
-        activity_id = int(activity_id_raw)
+        activity_id = str(activity_id_raw)
         lap_number = int(lap_number_raw)
         num_splits = int(num_splits_raw)
 
@@ -59,12 +59,12 @@ async def analyze_lap_handler(arguments: dict, strava: StravaClient) -> list[Tex
         if num_splits < 2:
             return [TextContent(type="text", text="❌ Error: num_splits must be >= 2")]
 
-        # Fetch activity details (for sport type), laps and streams
-        activity_details = await strava.get_activity_details(activity_id)
-        activity_type = activity_details.get('sport_type') or activity_details.get('type', 'Unknown')
+        # Fetch activity details (for sport type + precomputed laps)
+        activity = await intervals.get_activity(activity_id, intervals=True)
+        activity_type = activity.get('type', 'Unknown')
         is_running = activity_type in ['Run', 'Walk', 'Hike']
 
-        laps = await strava.get_activity_laps(activity_id)
+        laps = activity.get('icu_intervals') or []
 
         if not laps:
             return [TextContent(type="text", text="❌ No lap data available for this activity")]
@@ -75,7 +75,7 @@ async def analyze_lap_handler(arguments: dict, strava: StravaClient) -> list[Tex
                 text=f"❌ Error: lap_number {lap_number} exceeds total laps ({len(laps)})"
             )]
 
-        streams = await strava.get_activity_streams(
+        streams = await intervals.get_activity_streams(
             activity_id,
             stream_types=['time', 'distance', 'heartrate', 'velocity_smooth', 'cadence', 'watts']
         )
@@ -85,15 +85,10 @@ async def analyze_lap_handler(arguments: dict, strava: StravaClient) -> list[Tex
 
         time_data = streams['time']['data']
 
-        # Build cumulative lap start/end times
-        cumulative = 0
-        lap_boundaries = []
-        for lap in laps:
-            start = cumulative
-            cumulative += lap.get('elapsed_time', 0)
-            lap_boundaries.append((start, cumulative))
-
-        lap_start_t, lap_end_t = lap_boundaries[lap_number - 1]
+        # Lap boundaries come straight from intervals.icu - no manual reconstruction needed
+        lap = laps[lap_number - 1]
+        lap_start_t = lap.get('start_time', 0)
+        lap_end_t = lap.get('end_time', 0)
         lap_elapsed = lap_end_t - lap_start_t
 
         if lap_elapsed <= 0:

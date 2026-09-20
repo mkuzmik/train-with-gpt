@@ -4,7 +4,7 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
-from ..strava_client import StravaClient
+from ..intervals_client import IntervalsClient
 
 
 def get_activities_tool() -> Tool:
@@ -32,7 +32,7 @@ def get_activities_tool() -> Tool:
     )
 
 
-async def get_activities_handler(arguments: dict, strava: StravaClient) -> list[TextContent]:
+async def get_activities_handler(arguments: dict, intervals: IntervalsClient) -> list[TextContent]:
     """Handle get_activities tool calls."""
     try:
         # Parse date arguments
@@ -85,15 +85,10 @@ async def get_activities_handler(arguments: dict, strava: StravaClient) -> list[
             else:
                 date_range_desc = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
         
-        # Convert to epoch timestamps
-        after_timestamp = int(start_date.timestamp())
-        before_timestamp = int(end_date.timestamp())
-        
         # Fetch activities
-        activities = await strava.get_activities(
-            after=after_timestamp,
-            before=before_timestamp,
-            per_page=200
+        activities = await intervals.get_activities(
+            oldest=start_date.strftime("%Y-%m-%d"),
+            newest=end_date.strftime("%Y-%m-%d"),
         )
         
         if not activities:
@@ -104,11 +99,12 @@ async def get_activities_handler(arguments: dict, strava: StravaClient) -> list[
         for activity in activities:
             # Basic info
             date_str = datetime.fromisoformat(activity['start_date'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M')
-            activity_type = activity.get('sport_type') or activity.get('type', 'Unknown')
+            activity_type = activity.get('type', 'Unknown')
             
-            # Performance metrics
-            distance_km = activity.get('distance', 0) / 1000
-            moving_time = activity.get('moving_time', 0)
+            # Performance metrics (distance/moving_time can be present but null,
+            # e.g. for strength workouts with no GPS/duration tracking)
+            distance_km = (activity.get('distance') or 0) / 1000
+            moving_time = activity.get('moving_time') or 0
             hours = moving_time // 3600
             minutes = (moving_time % 3600) // 60
             seconds = moving_time % 60
@@ -159,7 +155,7 @@ async def get_activities_handler(arguments: dict, strava: StravaClient) -> list[
             # Cadence
             avg_cadence = activity.get('average_cadence')
             if avg_cadence:
-                # Strava returns running cadence as strides/min, need to double for steps/min
+                # intervals.icu returns running cadence as strides/min, need to double for steps/min
                 if activity_type in ['Run', 'Walk', 'Hike']:
                     cadence_value = avg_cadence * 2
                     stats.append(f"🔄 {cadence_value:.0f} spm")
