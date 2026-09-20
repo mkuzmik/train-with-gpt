@@ -62,6 +62,54 @@ Replace:
 
 Restart Claude Desktop.
 
+### Alternative: Run as a standalone HTTP server
+
+Instead of (or alongside) the stdio entrypoint above, the server can run over
+HTTP (MCP's Streamable HTTP transport), independent of any locally-spawned
+Claude Desktop subprocess. This is the same server and the same tools — just
+reachable at a URL instead of spawned as a stdio child process. It's a step
+toward remote/multi-device access; for now it's meant to be run locally.
+
+Generate a shared secret and start the server:
+
+```bash
+export INTERVALS_API_KEY="your intervals.icu API key"
+export MCP_SHARED_SECRET=$(openssl rand -hex 32)
+echo "Shared secret (save this - you'll need it to connect): $MCP_SHARED_SECRET"
+
+train-with-gpt-http
+# or: PORT=8000 train-with-gpt-http
+```
+
+This starts a Starlette/uvicorn app with:
+- `GET /health` — unauthenticated health check
+- `POST/GET /mcp` — the MCP Streamable HTTP endpoint, gated by a bearer token
+
+Every request to `/mcp` must include `Authorization: Bearer <MCP_SHARED_SECRET>`,
+checked with a constant-time comparison (`hmac.compare_digest`). Requests
+without a valid token get a `401`. If `MCP_SHARED_SECRET` isn't set at all,
+the server refuses every `/mcp` request with a `500` rather than silently
+running unauthenticated.
+
+Quick manual check:
+
+```bash
+# Should be 401 (no token)
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8000/mcp
+
+# Should be 200 and return the MCP initialize response
+curl -s -X POST http://localhost:8000/mcp/ \
+  -H "Authorization: Bearer $MCP_SHARED_SECRET" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+```
+
+**Not yet done:** actually hosting this somewhere with a public HTTPS URL and
+registering it as a Claude Custom Connector (see
+`docs/plans/intervals-icu-migration.md`, Milestone 2). Right now this only
+supports running locally.
+
 ## Usage
 
 ### First Time Setup
