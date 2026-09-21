@@ -120,10 +120,17 @@ above in a container — closer to how it'd behave actually deployed
 you map) without needing a real remote host yet.
 
 ```bash
-export STRAVA_CLIENT_ID="..."      # from config.json / the Strava app you created above
-export STRAVA_CLIENT_SECRET="..."
 docker compose up --build
 ```
+
+Secrets aren't passed as environment variables (they'd show up in plain text
+in `docker inspect`/`docker exec env`). Instead, `docker-compose.yml`
+bind-mounts your existing `~/.config/train-with-gpt/config.json`
+(`clientId`/`clientSecret`/`intervalsApiKey`, from the setup steps above)
+into the container read-only — `config.py` already reads from that file, so
+no code changes or exports are needed, just that the file exists on the host
+with the right permissions (`chmod 600`, and never committed - see
+`.gitignore`).
 
 This maps container port 8000 to `localhost:8123` on the host and sets
 `PUBLIC_URL=http://localhost:8123` to match (override either with `HOST_PORT`/
@@ -131,15 +138,14 @@ This maps container port 8000 to `localhost:8123` on the host and sets
 gets baked into the OAuth redirect URIs sent to Claude and Strava). Point
 `mcp-remote` at `http://localhost:8123/mcp` as above.
 
-The container's `~/.config/train-with-gpt` (the SQLite store of
-users/tokens/OAuth clients, plus `config.json`) is a named Docker volume
-(`train-with-gpt-config`), so it survives `docker compose restart` /
-rebuilds; `docker compose down -v` clears it. `INTERVALS_API_KEY` is passed
-through too, but is only relevant if you also want the personal path
-reachable through the same container. The notes/goals git repo isn't wired
-up by default in Docker — see the commented-out volume in
-`docker-compose.yml` if you want `save_goals`/`save_consultation_notes` to
-work there too.
+The container's `~/.config/train-with-gpt` directory is a named Docker
+volume (`train-with-gpt-config`) with your host `config.json` mounted
+read-only inside it, so the SQLite store (users/tokens/OAuth clients)
+survives `docker compose restart`/rebuilds while secrets stay sourced from
+the host file; `docker compose down -v` clears the store (not the host
+file). The notes/goals git repo isn't wired up by default in Docker — see
+the commented-out volume in `docker-compose.yml` if you want
+`save_goals`/`save_consultation_notes` to work there too.
 
 ## Usage
 
