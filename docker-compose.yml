@@ -1,0 +1,29 @@
+services:
+  mcp-http:
+    build: .
+    ports:
+      - "${HOST_PORT:-8123}:8000"
+    environment:
+      PORT: "8000"
+      # Must match the host-reachable URL (the port mapping above), not the
+      # in-container port - it's what gets baked into the OAuth redirect
+      # URIs Claude and Strava are sent back to.
+      PUBLIC_URL: "${PUBLIC_URL:-http://localhost:8123}"
+      STRAVA_CLIENT_ID: "${STRAVA_CLIENT_ID:?set STRAVA_CLIENT_ID (see ~/.config/train-with-gpt/config.json on the host)}"
+      STRAVA_CLIENT_SECRET: "${STRAVA_CLIENT_SECRET:?set STRAVA_CLIENT_SECRET}"
+      # Optional: only needed if you also want the personal intervals.icu
+      # path reachable through this container (not required for the
+      # multi-user Strava OAuth flow).
+      INTERVALS_API_KEY: "${INTERVALS_API_KEY:-}"
+    volumes:
+      # Persists store.db (OAuth clients/tokens/users) and config.json
+      # across container restarts/rebuilds.
+      - train-with-gpt-config:/home/app/.config/train-with-gpt
+      # Optional: uncomment and point at a real git clone on the host to let
+      # save_goals/save_consultation_notes work inside the container too.
+      # After that, connect once and call setup_training_repo with
+      # repo_path=/data/training-context.
+      # - ${TRAINING_REPO_PATH}:/data/training-context
+
+volumes:
+  train-with-gpt-config:

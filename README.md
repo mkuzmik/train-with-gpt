@@ -62,53 +62,84 @@ Replace:
 
 Restart Claude Desktop.
 
-### Alternative: Run as a standalone HTTP server
+### Alternative: Run as a standalone HTTP server (multi-user)
 
 Instead of (or alongside) the stdio entrypoint above, the server can run over
 HTTP (MCP's Streamable HTTP transport), independent of any locally-spawned
-Claude Desktop subprocess. This is the same server and the same tools — just
-reachable at a URL instead of spawned as a stdio child process. It's a step
-toward remote/multi-device access; for now it's meant to be run locally.
+Claude Desktop subprocess. This mode is a full OAuth Authorization Server:
+Claude authenticates via a Strava login/consent flow, and every connected
+user gets their own identity and their own Strava data — separate from the
+stdio entrypoint above, which always uses your personal `INTERVALS_API_KEY`.
 
-Generate a shared secret and start the server:
+You'll need a Strava OAuth app (instant/self-serve, unlike intervals.icu's):
+1. Create one at https://www.strava.com/settings/api (set "Authorization
+   Callback Domain" to `localhost` for local/Docker testing).
+2. Save its Client ID/Secret to `~/.config/train-with-gpt/config.json` as
+   `clientId`/`clientSecret`, or export `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET`.
+
+Start the server:
 
 ```bash
-export INTERVALS_API_KEY="your intervals.icu API key"
-export MCP_SHARED_SECRET=$(openssl rand -hex 32)
-echo "Shared secret (save this - you'll need it to connect): $MCP_SHARED_SECRET"
-
 train-with-gpt-http
-# or: PORT=8000 train-with-gpt-http
+# or: PORT=8000 PUBLIC_URL=http://localhost:8000 train-with-gpt-http
 ```
 
 This starts a Starlette/uvicorn app with:
 - `GET /health` — unauthenticated health check
-- `POST/GET /mcp` — the MCP Streamable HTTP endpoint, gated by a bearer token
+- `/.well-known/oauth-authorization-server`, `/register`, `/authorize`,
+  `/token` — the OAuth endpoints Claude/`mcp-remote` use automatically
+- `/oauth/strava/callback` — completes the nested Strava leg of the flow
+- `POST/GET /mcp` — the MCP endpoint itself, gated by a bearer token this
+  server issued (not a shared secret)
 
-Every request to `/mcp` must include `Authorization: Bearer <MCP_SHARED_SECRET>`,
-checked with a constant-time comparison (`hmac.compare_digest`). Requests
-without a valid token get a `401`. If `MCP_SHARED_SECRET` isn't set at all,
-the server refuses every `/mcp` request with a `500` rather than silently
-running unauthenticated.
+Connect a client that doesn't natively support this (e.g. Claude Desktop) via
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which handles the
+whole OAuth dance (opens a browser, runs its own callback listener):
 
-Quick manual check:
-
-```bash
-# Should be 401 (no token)
-curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8000/mcp
-
-# Should be 200 and return the MCP initialize response
-curl -s -X POST http://localhost:8000/mcp/ \
-  -H "Authorization: Bearer $MCP_SHARED_SECRET" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+```json
+{
+  "mcpServers": {
+    "train-with-gpt-http": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8000/mcp"]
+    }
+  }
+}
 ```
 
-**Not yet done:** actually hosting this somewhere with a public HTTPS URL and
-registering it as a Claude Custom Connector (see
-`docs/plans/intervals-icu-migration.md`, Milestone 2). Right now this only
-supports running locally.
+**Not yet done:** actually hosting this somewhere with a public HTTPS URL
+(see `docs/plans/intervals-icu-migration.md`, Milestone 2/4). The Docker
+setup below simulates a remote deployment locally, but isn't itself a public
+deployment.
+
+### Running the HTTP server in Docker
+
+A `Dockerfile`/`docker-compose.yml` at the repo root run the HTTP entrypoint
+above in a container — closer to how it'd behave actually deployed
+(no host Python/venv, its own filesystem, reachable only through the port
+you map) without needing a real remote host yet.
+
+```bash
+export STRAVA_CLIENT_ID="..."      # from config.json / the Strava app you created above
+export STRAVA_CLIENT_SECRET="..."
+docker compose up --build
+```
+
+This maps container port 8000 to `localhost:8123` on the host and sets
+`PUBLIC_URL=http://localhost:8123` to match (override either with `HOST_PORT`/
+`PUBLIC_URL` env vars — they must stay in sync, since `PUBLIC_URL` is what
+gets baked into the OAuth redirect URIs sent to Claude and Strava). Point
+`mcp-remote` at `http://localhost:8123/mcp` as above.
+
+The container's `~/.config/train-with-gpt` (the SQLite store of
+users/tokens/OAuth clients, plus `config.json`) is a named Docker volume
+(`train-with-gpt-config`), so it survives `docker compose restart` /
+rebuilds; `docker compose down -v` clears it. `INTERVALS_API_KEY` is passed
+through too, but is only relevant if you also want the personal path
+reachable through the same container. The notes/goals git repo isn't wired
+up by default in Docker — see the commented-out volume in
+`docker-compose.yml` if you want `save_goals`/`save_consultation_notes` to
+work there too.
 
 ## Usage
 
