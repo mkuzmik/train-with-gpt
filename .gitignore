@@ -34,3 +34,7 @@ env/
 
 # OS
 .DS_Store
+
+# Secrets (docker compose auto-loads .env if present - never commit one)
+.env
+.env.*
