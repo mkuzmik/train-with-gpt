@@ -8,9 +8,25 @@
 set -e
 
 SSH_DIR=/home/app/.ssh
+CONFIG_DIR=/home/app/.config/train-with-gpt
+
+# GitHub's published ed25519 host key (https://api.github.com/meta, "ssh_keys").
+# Pinned rather than fetched with ssh-keyscan at boot, so a network MITM during
+# startup can't get its own key trusted for the write-enabled deploy key.
+GITHUB_HOST_KEY="github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 
 # Platform volumes (e.g. Fly) mount root-owned; the store lives here.
-chown app:app /home/app/.config/train-with-gpt
+chown app:app "$CONFIG_DIR"
+
+# docker-compose mounts config.json as a secret owned by the host UID (mode
+# 600), which app can't read unless the UIDs happen to match. Root can, so copy
+# it into app's own config dir with the right ownership.
+CONFIG_SRC=/run/secrets/train_with_gpt_config
+if [ -f "$CONFIG_SRC" ]; then
+    cp "$CONFIG_SRC" "$CONFIG_DIR/config.json"
+    chown app:app "$CONFIG_DIR/config.json"
+    chmod 600 "$CONFIG_DIR/config.json"
+fi
 DEPLOY_KEY_SRC=/run/secrets/training_context_deploy_key
 REPO_DIR="${TRAINING_REPO_PATH:-/data/training-context}"
 REPO_URL="${TRAINING_REPO_URL:-}"
@@ -26,10 +42,10 @@ if [ -f "$DEPLOY_KEY_SRC" ]; then
     cp "$DEPLOY_KEY_SRC" "$SSH_DIR/deploy_key"
     case "$DEPLOY_KEY_SRC" in /tmp/*) rm -f "$DEPLOY_KEY_SRC" ;; esac
     chmod 600 "$SSH_DIR/deploy_key"
-    ssh-keyscan -t ed25519 github.com > "$SSH_DIR/known_hosts" 2>/dev/null
+    printf '%s\n' "$GITHUB_HOST_KEY" > "$SSH_DIR/known_hosts"
     chown -R app:app "$SSH_DIR"
 
-    export GIT_SSH_COMMAND="ssh -i $SSH_DIR/deploy_key -o UserKnownHostsFile=$SSH_DIR/known_hosts -o IdentitiesOnly=yes"
+    export GIT_SSH_COMMAND="ssh -i $SSH_DIR/deploy_key -o UserKnownHostsFile=$SSH_DIR/known_hosts -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
     mkdir -p "$REPO_DIR"
     chown -R app:app "$REPO_DIR"

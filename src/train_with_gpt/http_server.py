@@ -23,7 +23,7 @@ from mcp.server.auth.routes import (
     create_auth_routes,
     create_protected_resource_routes,
 )
-from mcp.server.auth.settings import ClientRegistrationOptions
+from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
@@ -83,6 +83,7 @@ starlette_app = Starlette(
             provider,
             issuer_url=AnyHttpUrl(PUBLIC_URL),
             client_registration_options=ClientRegistrationOptions(enabled=True),
+            revocation_options=RevocationOptions(enabled=True),
         ),
         *create_protected_resource_routes(
             MCP_RESOURCE_URL, authorization_servers=[AnyHttpUrl(PUBLIC_URL)]

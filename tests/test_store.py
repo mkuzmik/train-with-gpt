@@ -119,3 +119,19 @@ def test_update_user_tokens(db):
 
 def test_get_user_missing(db):
     assert store.get_user("nonexistent") is None
+
+
+def test_db_file_is_private(db):
+    import stat
+
+    assert stat.S_IMODE(db.stat().st_mode) == 0o600
+
+
+def test_delete_user_access_tokens_only_hits_that_user(db):
+    store.save_access_token("a1", '{"subject": "alice"}')
+    store.save_access_token("a2", '{"subject": "alice"}')
+    store.save_access_token("b1", '{"subject": "bob"}')
+
+    assert store.delete_user_access_tokens("alice") == 2
+    assert store.get_access_token_row("a1") is None
+    assert store.get_access_token_row("b1") is not None

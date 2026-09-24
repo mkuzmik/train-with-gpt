@@ -24,7 +24,9 @@ from .strava_oauth import build_strava_authorize_url
 
 # Long-lived: Strava has no refresh-token concept on our side of the flow
 # either (we refresh Strava's own token internally, see strava_client.py).
-# If this token is ever lost/revoked, the user simply re-authorizes.
+# If this token is ever lost/revoked, the user simply re-authorizes. Each
+# device/client gets its own token, so revoking one (revoke_token, or
+# store.delete_user_access_tokens for all of a user's) leaves others alone.
 ACCESS_TOKEN_TTL_SECONDS = 365 * 24 * 3600
 
 
@@ -105,6 +107,6 @@ class TrainWithGptOAuthProvider:
         return access_token
 
     async def revoke_token(self, token) -> None:
-        # Best-effort no-op: tokens simply age out, or a fresh /authorize
-        # (a new Strava consent) replaces whatever a client is holding.
-        pass
+        # We only ever issue access tokens (no refresh tokens), so this is
+        # always one of ours; deleting the row makes load_access_token reject it.
+        store.delete_access_token(token.token)

@@ -6,6 +6,7 @@ token on expiry/401 and calls back into `on_refresh` so the caller can
 persist the rotated token (see `store.py`).
 """
 
+import asyncio
 import sys
 import time
 from typing import Awaitable, Callable, Optional
@@ -30,11 +31,18 @@ class StravaClient:
         refresh_token: Optional[str] = None,
         expires_at: Optional[int] = None,
         on_refresh: Optional[Callable[[str, Optional[str], Optional[int]], Awaitable[None]]] = None,
+        refresh_lock: Optional[asyncio.Lock] = None,
+        load_stored_tokens: Optional[Callable[[], Optional[tuple[str, Optional[str], Optional[int]]]]] = None,
     ):
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.expires_at = expires_at
         self.on_refresh = on_refresh
+        # Strava rotates refresh tokens, so two concurrent requests for the same
+        # user must not both refresh: the caller shares one lock per user, and
+        # load_stored_tokens lets a waiter pick up what the winner persisted.
+        self.refresh_lock = refresh_lock or asyncio.Lock()
+        self.load_stored_tokens = load_stored_tokens
         self.zones_cache = None
 
     async def _ensure_fresh_token(self) -> None:
@@ -46,6 +54,20 @@ class StravaClient:
         await self._refresh()
 
     async def _refresh(self) -> None:
+        stale_access_token = self.access_token
+        async with self.refresh_lock:
+            if self.load_stored_tokens:
+                stored = self.load_stored_tokens()
+                if stored:
+                    access_token, refresh_token, expires_at = stored
+                    if access_token != stale_access_token and (not expires_at or expires_at > time.time() + 60):
+                        # Another request already refreshed while we waited.
+                        self.access_token, self.refresh_token, self.expires_at = stored
+                        return
+                    self.refresh_token = refresh_token
+            await self._refresh_locked()
+
+    async def _refresh_locked(self) -> None:
         if not self.refresh_token or not config.client_id or not config.client_secret:
             raise ValueError("Missing credentials for Strava token refresh")
 
@@ -107,6 +129,17 @@ class StravaClient:
         response = await self._get(f"{self.BASE_URL}/athlete/activities", params=params)
         response.raise_for_status()
         return response.json()
+
+    async def get_all_activities(self, after: int, before: int) -> list[dict]:
+        """Every activity in the range, following pages (Strava caps a page at 200)."""
+        activities: list[dict] = []
+        page = 1
+        while True:
+            batch = await self.get_activities(after=after, before=before, page=page, per_page=200)
+            activities.extend(batch)
+            if len(batch) < 200:
+                return activities
+            page += 1
 
     async def get_activity_details(self, activity_id: int) -> dict:
         response = await self._get(f"{self.BASE_URL}/activities/{activity_id}")

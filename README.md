@@ -125,11 +125,12 @@ docker compose up --build
 
 Secrets aren't passed as environment variables (they'd show up in plain text
 in `docker inspect`/`docker exec env`). Instead, `docker-compose.yml`
-bind-mounts your existing `~/.config/train-with-gpt/config.json`
+passes your existing `~/.config/train-with-gpt/config.json`
 (`clientId`/`clientSecret`/`intervalsApiKey`, from the setup steps above)
-into the container read-only — `config.py` already reads from that file, so
-no code changes or exports are needed, just that the file exists on the host
-with the right permissions (`chmod 600`, and never committed - see
+as a file secret, and `docker-entrypoint.sh` copies it into the container's
+config dir owned by the `app` user (the host file's `chmod 600` owner UID
+usually isn't the container's). No code changes or exports are needed, just
+that the file exists on the host (`chmod 600`, and never committed - see
 `.gitignore`).
 
 This maps container port 8000 to `localhost:8123` on the host and sets
@@ -139,11 +140,10 @@ gets baked into the OAuth redirect URIs sent to Claude and Strava). Point
 `mcp-remote` at `http://localhost:8123/mcp` as above.
 
 The container's `~/.config/train-with-gpt` directory is a named Docker
-volume (`train-with-gpt-config`) with your host `config.json` mounted
-read-only inside it, so the SQLite store (users/tokens/OAuth clients)
-survives `docker compose restart`/rebuilds while secrets stay sourced from
-the host file; `docker compose down -v` clears the store (not the host
-file).
+volume (`train-with-gpt-config`), so the SQLite store (users/tokens/OAuth
+clients, kept at mode `600`) survives `docker compose restart`/rebuilds;
+`config.json` is re-copied from the host file on every start.
+`docker compose down -v` clears the store (not the host file).
 
 **Notes/goals repo in Docker.** OAuth'd users' notes and goals are stored per
 user (`notes/<user_id>/`, `goals/<user_id>.md`) in a separate, *private* git
@@ -238,6 +238,11 @@ browser for Strava consent) and call a tool.
 - **Rotating secrets:** re-run `fly secrets set ...` (redeploys automatically).
   For the Strava secret, regenerate it in Strava's settings first. For the
   deploy key, generate a new one, swap it in GitHub, then set the secret.
+- **Revoking access:** clients can revoke their own token via `/revoke`. To
+  cut off a user (e.g. a leaked token), open `fly ssh console -a <app>` and
+  run `su app -c 'python -c "from train_with_gpt import store; print(store.delete_user_access_tokens(\"<user_id>\"))"'`
+  (or delete `store.db` and restart to log everyone out). Each device holds
+  its own token, so a new login does not invalidate the others.
 - **`mcp-remote` cache:** clients cache OAuth registrations per server URL in
   `~/.mcp-auth`. If you wipe the server's store, clear that folder too or you
   will get `400` on `/authorize`.

@@ -17,17 +17,11 @@ services:
       TRAINING_REPO_URL: "${TRAINING_REPO_URL:-git@github.com:mkuzmik/training-context-shared.git}"
     secrets:
       - training_context_deploy_key
+      - train_with_gpt_config
     volumes:
       # Persists store.db (OAuth clients/tokens/users) across container
       # restarts/rebuilds.
       - train-with-gpt-config:/home/app/.config/train-with-gpt
-      # Secrets: bind-mount your existing config.json read-only instead of
-      # passing STRAVA_CLIENT_ID/SECRET (or INTERVALS_API_KEY) as env vars -
-      # avoids them showing up in `docker inspect`/`docker exec env`.
-      # config.py already reads clientId/clientSecret/intervalsApiKey from
-      # this file, so no code changes are needed; it just needs to exist
-      # and be readable (chmod 600, not tracked in git - see README).
-      - ${HOME}/.config/train-with-gpt/config.json:/home/app/.config/train-with-gpt/config.json:ro
       # The actual clone of TRAINING_REPO_URL, made by docker-entrypoint.sh
       # on first start using the deploy key below. Persists across restarts.
       - training-context-repo:/data/training-context
@@ -44,3 +38,11 @@ secrets:
   # before dropping root.
   training_context_deploy_key:
     file: ${HOME}/.config/train-with-gpt/training-context-deploy-key
+  # Your existing config.json (Strava clientId/clientSecret), passed as a file
+  # secret instead of STRAVA_CLIENT_ID/SECRET env vars so they don't show up in
+  # `docker inspect`/`docker exec env`. Mounted at
+  # /run/secrets/train_with_gpt_config; docker-entrypoint.sh copies it into the
+  # `app` user's config dir, since a chmod-600 file owned by the host UID isn't
+  # readable by app directly.
+  train_with_gpt_config:
+    file: ${HOME}/.config/train-with-gpt/config.json

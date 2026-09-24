@@ -88,10 +88,9 @@ async def get_activities_handler(arguments: dict, intervals) -> list[TextContent
         
         # Fetch activities
         if isinstance(intervals, StravaClient):
-            activities = await intervals.get_activities(
+            activities = await intervals.get_all_activities(
                 after=int(start_date.timestamp()),
                 before=int(end_date.timestamp()),
-                per_page=200,
             )
         else:
             activities = await intervals.get_activities(

@@ -47,6 +47,11 @@ from .tools import (
 app = Server("train-with-gpt")
 intervals = IntervalsClient()
 
+# One lock per user, shared by every StravaClient built for them, so
+# concurrent requests don't race to refresh (and invalidate) the same
+# rotating Strava refresh token. Single-process server, so asyncio is enough.
+_strava_refresh_locks: dict[str, asyncio.Lock] = {}
+
 
 def _get_active_data_client():
     """
@@ -75,11 +80,17 @@ def _get_active_data_client():
     async def on_refresh(new_access_token, new_refresh_token, new_expires_at):
         store.update_user_tokens(user_id, new_access_token, new_refresh_token, new_expires_at)
 
+    def load_stored_tokens():
+        row = store.get_user(user_id)
+        return (row["access_token"], row["refresh_token"], row["token_expires_at"]) if row else None
+
     return StravaClient(
         access_token=user["access_token"],
         refresh_token=user["refresh_token"],
         expires_at=user["token_expires_at"],
         on_refresh=on_refresh,
+        refresh_lock=_strava_refresh_locks.setdefault(user_id, asyncio.Lock()),
+        load_stored_tokens=load_stored_tokens,
     )
 
 

@@ -12,6 +12,7 @@ plain values.
 """
 
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -20,16 +21,28 @@ from typing import Optional
 DB_PATH = Path.home() / ".config" / "train-with-gpt" / "store.db"
 
 
+def _open_private(db_path: Path) -> sqlite3.Connection:
+    """Open the DB, making sure only the owner can read it.
+
+    It holds bearer tokens, Strava refresh tokens and client secrets, and
+    sqlite3 would otherwise create it with the process umask (usually 0644).
+    SQLite gives its journal files the same mode as the DB file.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    os.close(os.open(db_path, os.O_CREAT | os.O_WRONLY, 0o600))
+    os.chmod(db_path, 0o600)
+    return sqlite3.connect(db_path)
+
+
 def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = _open_private(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db(db_path: Optional[Path] = None) -> None:
     """Create tables if they don't exist. Safe to call on every startup."""
-    with _connect() if db_path is None else sqlite3.connect(db_path) as conn:
+    with _connect() if db_path is None else _open_private(db_path) as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS oauth_clients (
@@ -126,6 +139,21 @@ def get_access_token_row(token: str) -> Optional[str]:
     with _connect() as conn:
         row = conn.execute("SELECT data FROM access_tokens WHERE token = ?", (token,)).fetchone()
         return row["data"] if row else None
+
+
+def delete_access_token(token: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM access_tokens WHERE token = ?", (token,))
+
+
+def delete_user_access_tokens(user_id: str) -> int:
+    """Revoke every token issued to one user (all their devices). Returns the count."""
+    with _connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM access_tokens WHERE json_extract(data, '$.subject') = ?",
+            (user_id,),
+        )
+        return cursor.rowcount
 
 
 # --- pending_authorizations --------------------------------------------------

@@ -152,3 +152,19 @@ async def test_load_authorization_code_wrong_client_rejected(provider, claude_cl
 @pytest.mark.asyncio
 async def test_load_refresh_token_always_none(provider, claude_client):
     assert await provider.load_refresh_token(claude_client, "anything") is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_invalidates_it(provider):
+    from mcp.server.auth.provider import AccessToken
+
+    access_token = AccessToken(
+        token="tok", client_id="claude-client", scopes=[],
+        expires_at=int(time.time()) + 3600, subject="strava-user-42",
+    )
+    store.save_access_token("tok", access_token.model_dump_json())
+    assert await provider.load_access_token("tok") is not None
+
+    await provider.revoke_token(access_token)
+
+    assert await provider.load_access_token("tok") is None

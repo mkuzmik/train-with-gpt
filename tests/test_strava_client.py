@@ -125,3 +125,56 @@ async def test_get_athlete():
 
     athlete = await client.get_athlete()
     assert athlete["id"] == 999
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_concurrent_refreshes_for_same_user_refresh_once(strava_creds):
+    """Strava rotates refresh tokens: a second concurrent refresh would use a dead one."""
+    import asyncio
+    import time
+
+    stored = {"tokens": ("stale", "refresh-1", int(time.time()) - 10)}
+
+    async def on_refresh(access_token, refresh_token, expires_at):
+        stored["tokens"] = (access_token, refresh_token, expires_at)
+
+    lock = asyncio.Lock()
+
+    def make_client():
+        access, refresh, expires = stored["tokens"]
+        return StravaClient(
+            access_token=access, refresh_token=refresh, expires_at=expires,
+            on_refresh=on_refresh, refresh_lock=lock,
+            load_stored_tokens=lambda: stored["tokens"],
+        )
+
+    token_route = respx.post("https://www.strava.com/oauth/token").mock(
+        return_value=Response(200, json={
+            "access_token": "fresh", "refresh_token": "refresh-2", "expires_at": 9999999999,
+        })
+    )
+    respx.get("https://www.strava.com/api/v3/athlete/activities").mock(return_value=Response(200, json=[]))
+
+    a, b = make_client(), make_client()
+    await asyncio.gather(a.get_activities(), b.get_activities())
+
+    assert token_route.call_count == 1
+    assert a.access_token == b.access_token == "fresh"
+    assert b.refresh_token == "refresh-2"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_all_activities_follows_pages():
+    client = StravaClient(access_token="t")
+    route = respx.get("https://www.strava.com/api/v3/athlete/activities")
+    route.side_effect = [
+        Response(200, json=[{"id": i} for i in range(200)]),
+        Response(200, json=[{"id": i} for i in range(200, 250)]),
+    ]
+
+    activities = await client.get_all_activities(after=1, before=2)
+
+    assert len(activities) == 250
+    assert [c.request.url.params["page"] for c in route.calls] == ["1", "2"]
