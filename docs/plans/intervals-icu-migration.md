@@ -379,3 +379,27 @@ built, no tunnel/ngrok needed for development.
 - Confirm the existing stdio and local-HTTP personal paths are completely unaffected
   (still using `INTERVALS_API_KEY` directly, no OAuth involved) — re-run Milestone 1/2's
   manual checks against the real intervals.icu account.
+
+## Future ideas (not scheduled)
+
+### Durable identity mapping in the training-context repo
+
+Idea: keep the user-identity mapping in the shared training-context repo, not
+only in the Fly volume's `store.db`, so losing the volume never orphans a
+user's notes/goals.
+
+- Repo: `profiles/<user_id>.json` with the internal user id, display name and a
+  list of connections (`{provider, external_id}`), next to `goals/` and `notes/`.
+- Volume (`store.db`): tokens, OAuth clients and sessions only - replaceable;
+  users just re-authenticate if it is lost.
+- **Tokens must never be written to the repo** (live credentials; git history is
+  forever, even in a private repo). Only non-secret mapping metadata goes there.
+- Login resolves `(provider, external_id)` -> internal user id via the repo
+  first, then the DB cache, else creates a new user + profile (pull, write,
+  commit, push). Fail the link if the push fails rather than keep a mapping
+  that is not durable.
+- Prerequisite: split identity from provider connections (`users` +
+  `connections` tables); today the internal id is the Strava athlete id. The
+  owner's existing id `2706822` stays as-is, so no notes/goals migration.
+- Only worth doing once a second provider is real (intervals.icu OAuth approval,
+  or another way to get wellness data).
