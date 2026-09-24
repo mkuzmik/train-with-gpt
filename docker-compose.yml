@@ -9,6 +9,14 @@ services:
       # in-container port - it's what gets baked into the OAuth redirect
       # URIs Claude and Strava are sent back to.
       PUBLIC_URL: "${PUBLIC_URL:-http://localhost:8123}"
+      # Not secrets - just paths/URLs. Overrides config.json's
+      # trainingRepoPath (a host path, not valid inside the container) so
+      # the multi-user OAuth path gets its own shared repo, separate from
+      # the personal one the stdio/host setup uses.
+      TRAINING_REPO_PATH: /data/training-context
+      TRAINING_REPO_URL: "${TRAINING_REPO_URL:-git@github.com:mkuzmik/training-context-shared.git}"
+    secrets:
+      - training_context_deploy_key
     volumes:
       # Persists store.db (OAuth clients/tokens/users) across container
       # restarts/rebuilds.
@@ -20,11 +28,19 @@ services:
       # this file, so no code changes are needed; it just needs to exist
       # and be readable (chmod 600, not tracked in git - see README).
       - ${HOME}/.config/train-with-gpt/config.json:/home/app/.config/train-with-gpt/config.json:ro
-      # Optional: uncomment and point at a real git clone on the host to let
-      # save_goals/save_consultation_notes work inside the container too.
-      # After that, connect once and call setup_training_repo with
-      # repo_path=/data/training-context.
-      # - ${TRAINING_REPO_PATH}:/data/training-context
+      # The actual clone of TRAINING_REPO_URL, made by docker-entrypoint.sh
+      # on first start using the deploy key below. Persists across restarts.
+      - training-context-repo:/data/training-context
 
 volumes:
   train-with-gpt-config:
+  training-context-repo:
+
+secrets:
+  # A GitHub deploy key with write access scoped to just this one repo (see
+  # README) - never an env var, never committed. Mounted read-only at
+  # /run/secrets/training_context_deploy_key, which docker-entrypoint.sh
+  # copies into the `app` user's own .ssh dir with correct ownership/perms
+  # before dropping root.
+  training_context_deploy_key:
+    file: ${HOME}/.config/train-with-gpt/training-context-deploy-key

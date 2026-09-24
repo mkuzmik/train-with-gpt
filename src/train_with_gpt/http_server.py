@@ -18,14 +18,18 @@ import uvicorn
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
 from mcp.server.auth.provider import ProviderTokenVerifier
-from mcp.server.auth.routes import create_auth_routes
+from mcp.server.auth.routes import (
+    build_resource_metadata_url,
+    create_auth_routes,
+    create_protected_resource_routes,
+)
 from mcp.server.auth.settings import ClientRegistrationOptions
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from . import store
@@ -51,7 +55,12 @@ async def handle_mcp(scope: Scope, receive: Receive, send: Send) -> None:
 # (Starlette's own) populates scope["user"]/scope["auth"] from the token via
 # BearerAuthBackend, AuthContextMiddleware makes it available to tool handlers
 # via get_access_token(), and RequireAuthMiddleware 401s if it's missing/invalid.
-mcp_asgi_app = RequireAuthMiddleware(handle_mcp, required_scopes=[])
+MCP_RESOURCE_URL = AnyHttpUrl(f"{PUBLIC_URL.rstrip('/')}/mcp")
+mcp_asgi_app = RequireAuthMiddleware(
+    handle_mcp,
+    required_scopes=[],
+    resource_metadata_url=build_resource_metadata_url(MCP_RESOURCE_URL),
+)
 mcp_asgi_app = AuthContextMiddleware(mcp_asgi_app)
 mcp_asgi_app = AuthenticationMiddleware(mcp_asgi_app, backend=BearerAuthBackend(token_verifier))
 
@@ -75,8 +84,13 @@ starlette_app = Starlette(
             issuer_url=AnyHttpUrl(PUBLIC_URL),
             client_registration_options=ClientRegistrationOptions(enabled=True),
         ),
+        *create_protected_resource_routes(
+            MCP_RESOURCE_URL, authorization_servers=[AnyHttpUrl(PUBLIC_URL)]
+        ),
         strava_oauth_route,
-        Mount("/mcp", app=mcp_asgi_app),
+        # Route, not Mount: a Mount redirects /mcp -> /mcp/, which behind a
+        # TLS-terminating proxy risks a downgrade redirect strict clients reject.
+        Route("/mcp", mcp_asgi_app),
     ],
     lifespan=lifespan,
 )
@@ -95,7 +109,13 @@ def main():
             file=sys.stderr,
         )
     port = int(os.environ.get("PORT", "8000"))
-    uvicorn.run(starlette_app, host="0.0.0.0", port=port)
+    uvicorn.run(
+        starlette_app,
+        host="0.0.0.0",
+        port=port,
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
 
 
 if __name__ == "__main__":

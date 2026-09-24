@@ -30,13 +30,18 @@ class Config:
 
         # Priority: env vars > config file
         self.intervals_api_key = os.getenv("INTERVALS_API_KEY") or file_config.get("intervalsApiKey")
-        self.training_repo_path = file_config.get("trainingRepoPath")
+        # TRAINING_REPO_PATH lets Docker point at its own in-container clone
+        # (e.g. /data/training-context) without touching the shared,
+        # bind-mounted config.json, whose trainingRepoPath is a host path
+        # (not a secret, so an env var is fine here).
+        self.training_repo_path = os.getenv("TRAINING_REPO_PATH") or file_config.get("trainingRepoPath")
         self.client_id = os.getenv("STRAVA_CLIENT_ID") or file_config.get("clientId")
         self.client_secret = os.getenv("STRAVA_CLIENT_SECRET") or file_config.get("clientSecret")
 
         print(f"[CONFIG] Loaded from: {CONFIG_FILE}", file=sys.stderr)
         print(f"[CONFIG] Intervals API Key: {'SET' if self.intervals_api_key else 'NOT SET'}", file=sys.stderr)
         print(f"[CONFIG] Strava Client ID: {self.client_id or 'NOT SET'}", file=sys.stderr)
+        print(f"[CONFIG] Training Repo Path: {self.training_repo_path or 'NOT SET'}", file=sys.stderr)
 
     def _load_file(self) -> dict:
         """Load configuration from JSON file."""
