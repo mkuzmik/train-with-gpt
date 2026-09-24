@@ -12,6 +12,8 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 
 All training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
 
+There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Deploying to Fly.io"). Hosted users get Strava activity data only; sleep/HRV/resting HR need the intervals.icu path.
+
 ## Quick Start
 
 ### 1. Install
@@ -107,10 +109,8 @@ whole OAuth dance (opens a browser, runs its own callback listener):
 }
 ```
 
-**Not yet done:** actually hosting this somewhere with a public HTTPS URL
-(see `docs/plans/intervals-icu-migration.md`, Milestone 2/4). The Docker
-setup below simulates a remote deployment locally, but isn't itself a public
-deployment.
+See "Deploying to Fly.io" below for the public deployment. The Docker setup
+below simulates a remote deployment locally.
 
 ### Running the HTTP server in Docker
 
@@ -143,9 +143,107 @@ volume (`train-with-gpt-config`) with your host `config.json` mounted
 read-only inside it, so the SQLite store (users/tokens/OAuth clients)
 survives `docker compose restart`/rebuilds while secrets stay sourced from
 the host file; `docker compose down -v` clears the store (not the host
-file). The notes/goals git repo isn't wired up by default in Docker — see
-the commented-out volume in `docker-compose.yml` if you want
-`save_goals`/`save_consultation_notes` to work there too.
+file).
+
+**Notes/goals repo in Docker.** OAuth'd users' notes and goals are stored per
+user (`notes/<user_id>/`, `goals/<user_id>.md`) in a separate, *private* git
+repo, cloned by the container on first start (`docker-entrypoint.sh`) and
+pushed to on every save. Set it up once:
+
+1. Create a private repo (e.g. `training-context-shared`) and set
+   `TRAINING_REPO_URL` (default in `docker-compose.yml`/`fly.toml`, edit it to
+   your repo).
+2. Generate a dedicated deploy key and save it outside the repo:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.config/train-with-gpt/training-context-deploy-key -N "" -C "train-with-gpt"
+   chmod 600 ~/.config/train-with-gpt/training-context-deploy-key
+   ```
+3. Add the `.pub` file as a **deploy key with write access** in that repo's
+   GitHub settings (scoped to just that repo — not a personal access token).
+
+Compose mounts the key as a Docker secret; the entrypoint copies it to the
+`app` user with correct permissions. `setup_training_repo` is deliberately
+disabled for OAuth sessions — the repo is server configuration
+(`TRAINING_REPO_PATH`/`TRAINING_REPO_URL`), not a per-user setting.
+
+## Deploying to Fly.io (public, HTTPS)
+
+This is how the server runs remotely so it works from other devices (including
+the Claude mobile app). The repo's `Dockerfile` and `fly.toml` are used as-is.
+**Never commit secrets** — this repo is public; everything sensitive below goes
+through `fly secrets` or files under `~/.config/train-with-gpt/`.
+
+### One-time setup
+
+1. Install and log in (`fly auth login` needs a real terminal, not a `!` shell):
+   ```bash
+   brew install flyctl
+   fly auth login
+   ```
+2. Pick a globally unique app name; set it as `app` and in `PUBLIC_URL`
+   (`https://<app>.fly.dev`) in `fly.toml`, then create the app and a volume
+   (holds `store.db` — without it users are logged out on every deploy):
+   ```bash
+   fly apps create <app>
+   fly volumes create train_with_gpt_data --region fra --size 1 -a <app>
+   ```
+3. Register the Strava OAuth app at https://www.strava.com/settings/api and set
+   **Authorization Callback Domain** to `<app>.fly.dev` (hostname only — no
+   `https://`, no path). Strava allows one domain per app, so a second app is
+   needed if you also want to keep testing against `localhost`.
+4. Set secrets (encrypted, injected as env vars at runtime). The deploy key
+   must keep its real newlines, so pass it via `$(cat ...)`:
+   ```bash
+   fly secrets set -a <app> \
+     STRAVA_CLIENT_ID=... \
+     STRAVA_CLIENT_SECRET=... \
+     "TRAINING_CONTEXT_DEPLOY_KEY=$(cat ~/.config/train-with-gpt/training-context-deploy-key)"
+   ```
+   Optionally `INTERVALS_API_KEY` if you want the personal intervals.icu path
+   reachable (not needed for Strava OAuth users).
+5. Deploy:
+   ```bash
+   fly deploy --ha=false -a <app>
+   ```
+
+### Verify
+
+```bash
+curl https://<app>.fly.dev/health                                   # {"status":"ok"}
+curl -i -X POST https://<app>.fly.dev/mcp                           # 401 + WWW-Authenticate
+curl https://<app>.fly.dev/.well-known/oauth-authorization-server   # https:// URLs
+fly logs -a <app>
+```
+
+Then run the real flow: `npx mcp-remote https://<app>.fly.dev/mcp` (opens a
+browser for Strava consent) and call a tool.
+
+### Connecting clients
+
+- **Claude mobile / web:** claude.ai → Settings → Connectors → Add custom
+  connector → `https://<app>.fly.dev/mcp`, sign in with Strava. It syncs to the
+  mobile app (paid plan required).
+- **Claude Desktop:** use `mcp-remote` as in the local setup, with the
+  `https://<app>.fly.dev/mcp` URL.
+
+### Operations
+
+- **Redeploy:** `fly deploy --ha=false -a <app>`. The volume (and therefore
+  users/tokens) survives; the notes repo is re-cloned on boot (saves push
+  immediately, so nothing is lost unless a push failed).
+- **Auto-stop:** the machine stops when idle and starts on the next request
+  (`fly.toml`), so the first request after a quiet period is slower.
+- **Backups:** Fly snapshots the volume daily (5 days). It's one copy on one
+  machine; if lost, users simply re-authenticate.
+- **Rotating secrets:** re-run `fly secrets set ...` (redeploys automatically).
+  For the Strava secret, regenerate it in Strava's settings first. For the
+  deploy key, generate a new one, swap it in GitHub, then set the secret.
+- **`mcp-remote` cache:** clients cache OAuth registrations per server URL in
+  `~/.mcp-auth`. If you wipe the server's store, clear that folder too or you
+  will get `400` on `/authorize`.
+- **Limitations:** OAuth'd users only get Strava activity data. Wellness
+  (sleep/HRV/resting HR) is only available on the personal intervals.icu path;
+  Strava has none.
 
 ## Usage
 
