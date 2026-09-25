@@ -1,7 +1,8 @@
 # Idea: science-based coaching that stays current (proposal, for review)
 
-Not implemented. This proposes how the coach can give advice that is grounded
-in sport science, say how sure it is, and keep up with new research.
+Step 1 is implemented (see "Step 1" below); the later steps are proposals.
+This proposes how the coach can give advice that is grounded in sport
+science, say how sure it is, and keep up with new research.
 
 Research date: 2026-09-25. Every DOI below was resolved on Crossref and checked
 for correction or retraction notices on that date, and every summary was
@@ -82,13 +83,34 @@ One small PR, no new infrastructure, no dependency on other proposals:
 3. **One unit test** that asserts the section is present, carries a
    `reviewed:` date, and stays under its size budget.
 
+**As implemented** (`src/train_with_gpt/coaching_science.py`):
+- The section is the constant `TRAINING_SCIENCE` = `PRINCIPLES` +
+  `SAFETY_RULES`. `start_consultation` appends it to its guidance; #9's
+  assembled context can drop the same constant into its reserved slot, and
+  onboarding (#11) can import `SAFETY_RULES` on its own.
+- Sources are cited by **DOI** rather than author-year, so the model has an
+  exact identifier to repeat. With DOIs the section is about 2,760
+  characters, still under the 2,800 cap.
+- The weight line follows open question 5: screening questions first,
+  conservative guidance only if they're clear, no targets and a referral for
+  under-18s or a positive screen. Garthe 2011 is cited for the rate.
+- The strength line cites both Llanos-Lagos 2024 meta-analyses (economy and
+  performance) plus the 2025 cycling one, with separate labels.
+- HRV and RHR outputs end with a one-line reminder to read them against the
+  athlete's own baseline (`BASELINE_NOTE`).
+- `tests/unit/test_coaching_science.py` enforces the size cap, the `reviewed:`
+  date, that every DOI in the section appears in this doc's References, and
+  that the `discuss_goals` and `start_consultation` texts only name tools
+  that exist.
+
 **Budget:** the draft below is about 2,400 characters, roughly 600 tokens
 (estimated at about 4 characters per token; not measured with a tokenizer).
 Today's `start_consultation` text is 5,619 characters, about 1,400 tokens. Set
 the budget at **≤ 2,800 characters** and enforce it in the test. #9 should
 reserve this inside its fixed character budget.
 
-**Draft section** (generic, English, reviewed 2026-09):
+**Draft section** (generic, English, reviewed 2026-09; the shipped text in
+`coaching_science.py` differs as listed above):
 
 ```text
 ## Training science (reviewed 2026-09; confidence in brackets)

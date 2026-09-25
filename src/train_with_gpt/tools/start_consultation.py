@@ -2,6 +2,8 @@
 
 from mcp.types import Tool, TextContent
 
+from ..coaching_science import TRAINING_SCIENCE
+
 
 def start_consultation_tool() -> Tool:
     """Return the start_consultation tool definition."""
@@ -85,9 +87,11 @@ async def start_consultation_handler(arguments: dict) -> list[TextContent]:
   - Essential for understanding recovery capacity
 - **get_hrv_data** - Heart Rate Variability (key recovery indicator)
   - Shows nightly HRV, 7/14/28-day rolling averages
-  - Higher HRV = better recovery, lower = potential fatigue/stress
+  - Read it against the athlete's own baseline and normal range, not as
+    "higher = better"; single nights are noisy, look at the trend
 - **get_resting_heart_rate** - Daily resting heart rate trends
-  - Lower RHR = better fitness, elevated = possible overtraining or illness
+  - A sustained rise above the athlete's own baseline can mean fatigue or
+    illness; compare with their normal range, not other people's values
 
 **When to Check Recovery Data:**
 - When discussing training load or planning volume increases
@@ -115,6 +119,8 @@ Now that you have context, start by:
 2. Ask ONE open question about how they're doing or what's on their mind
 3. Let the athlete guide where the conversation goes
 
-Ready to begin? 🎯"""
+Ready to begin? 🎯
+
+""" + TRAINING_SCIENCE
 
     return [TextContent(type="text", text=guidance)]

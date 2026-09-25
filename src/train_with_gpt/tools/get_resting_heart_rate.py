@@ -4,6 +4,7 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
+from ..coaching_science import BASELINE_NOTE
 from ..helpers import NO_WELLNESS_DATA_MESSAGE
 from ..strava_client import StravaClient
 
@@ -12,7 +13,7 @@ def get_resting_heart_rate_tool() -> Tool:
     """Return the get_resting_heart_rate tool definition."""
     return Tool(
         name="get_resting_heart_rate",
-        description="Get resting heart rate (RHR) data from intervals.icu for a date range. RHR is a key recovery and fitness metric - lower values generally indicate better fitness, elevated values may indicate overtraining or illness.",
+        description="Get resting heart rate (RHR) data from intervals.icu for a date range. RHR is a recovery metric that only means something against the athlete's own baseline and normal range; a sustained rise above it can mean fatigue or illness.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -105,6 +106,8 @@ async def get_resting_heart_rate_handler(arguments: dict, intervals) -> list[Tex
         lines.append(f"📊 Summary:")
         lines.append(f"   Average RHR: {avg_rhr:.1f} bpm")
         lines.append(f"   Range: {min_rhr} - {max_rhr} bpm")
+        lines.append("")
+        lines.append(BASELINE_NOTE)
 
         return [TextContent(type="text", text="\n".join(lines))]
 

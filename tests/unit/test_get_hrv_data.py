@@ -4,6 +4,7 @@ import pytest
 from httpx import Response
 
 from tests.support import text_of
+from train_with_gpt.coaching_science import BASELINE_NOTE
 from train_with_gpt.helpers import NO_WELLNESS_DATA_MESSAGE
 from train_with_gpt.intervals_client import IntervalsClient
 from train_with_gpt.strava_client import StravaClient
@@ -28,6 +29,7 @@ async def test_single_day(intervals, wellness):
     output = text_of(await get_hrv_data_handler({"start_date": "2024-01-15", "end_date": "2024-01-15"}, intervals))
 
     assert "💓 HRV: 52ms" in output
+    assert output.endswith(BASELINE_NOTE)
     assert dict(wellness.calls.last.request.url.params) == {"oldest": "2024-01-15", "newest": "2024-01-15"}
 
 
