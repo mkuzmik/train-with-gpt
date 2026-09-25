@@ -1,7 +1,7 @@
 # Runs the HTTP entrypoint (train-with-gpt-http) - the multi-user OAuth path.
 # The stdio entrypoint (train-with-gpt, used by Claude Desktop directly) has
 # no reason to run in a container.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # git: helpers.py shells out to it for the notes/goals repo.
 # openssh-client: needed for git-over-ssh with the deploy key (see

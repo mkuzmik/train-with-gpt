@@ -425,7 +425,7 @@ Tests run automatically via GitHub Actions on:
 - Every push to main branch
 - Every pull request
 
-The CI pipeline tests against Python 3.10, 3.11, and 3.12.
+The CI pipeline tests against Python 3.10 through 3.14. The Docker image and local dev (`.python-version`) use 3.14.
 
 **⚠️ IMPORTANT: All tests must pass before merging PRs.**
 
