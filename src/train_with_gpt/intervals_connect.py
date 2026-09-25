@@ -92,12 +92,18 @@ async def handle_connect(request: Request):
     token = str(form.get("token") or "")
     action = str(form.get("action") or "skip")
 
-    step = store.get_pending_connect_step(token, STEP_TTL_SECONDS) if token else None
+    # Claimed (deleted) up front so two concurrent submits can't both finish
+    # the same Claude authorization; put back only when the user should retry.
+    step = store.claim_pending_connect_step(token, STEP_TTL_SECONDS) if token else None
     if not step:
         return PlainTextResponse(
             "This sign-in link has expired. Start connecting again from Claude.", status_code=400
         )
     user_id = step["user_id"]
+
+    def retry(message: str, status_code: int) -> HTMLResponse:
+        store.save_pending_connect_step(token, user_id, step["pending"])
+        return _render(token, store.get_intervals_connection(user_id), message, status_code)
 
     if action == "disconnect":
         store.delete_intervals_connection(user_id)
@@ -105,7 +111,7 @@ async def handle_connect(request: Request):
     elif action == "connect":
         api_key = str(form.get("api_key") or "").strip()
         if not api_key:
-            return _render(token, store.get_intervals_connection(user_id), "Paste your API key first.", 400)
+            return retry("Paste your API key first.", 400)
         try:
             athlete = await IntervalsClient(api_key=api_key).get_athlete()
         except httpx.HTTPStatusError as e:
@@ -113,9 +119,9 @@ async def handle_connect(request: Request):
                 message = "intervals.icu rejected that key. Check you copied the whole key."
             else:
                 message = "intervals.icu returned an error. Try again in a moment."
-            return _render(token, store.get_intervals_connection(user_id), message, 400)
+            return retry(message, 400)
         except httpx.HTTPError:
-            return _render(token, store.get_intervals_connection(user_id), "Couldn't reach intervals.icu. Try again.", 502)
+            return retry("Couldn't reach intervals.icu. Try again.", 502)
 
         store.save_intervals_connection(
             user_id=user_id,
@@ -125,7 +131,6 @@ async def handle_connect(request: Request):
         )
         print(f"[intervals.icu] Connected user {user_id} to athlete {athlete.get('id')}", file=sys.stderr)
 
-    store.delete_pending_connect_step(token)
     return complete_authorization(step["pending"], user_id)
 
 

@@ -9,13 +9,23 @@ Generate a key with:
     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 """
 
+import sys
+
 from cryptography.fernet import Fernet, InvalidToken
 
 from .config import config
 
 
 def is_configured() -> bool:
-    return bool(config.token_encryption_key)
+    """True only for a usable Fernet key; a malformed one disables the feature."""
+    if not config.token_encryption_key:
+        return False
+    try:
+        _fernet()
+    except ValueError:
+        print("[secret_box] TOKEN_ENCRYPTION_KEY is not a valid Fernet key - intervals.icu step disabled", file=sys.stderr)
+        return False
+    return True
 
 
 def _fernet() -> Fernet:

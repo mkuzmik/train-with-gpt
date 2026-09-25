@@ -190,3 +190,21 @@ async def test_wellness_without_connection_explains_how_to_connect(db, encryptio
         auth_context_var.reset(reset)
 
     assert "connect intervals.icu" in result[0].text
+
+
+def test_concurrent_claims_only_one_wins(client):
+    token = _login_via_strava(client)
+
+    assert store.claim_pending_connect_step(token, 60) is not None
+    assert store.claim_pending_connect_step(token, 60) is None
+
+
+def test_expired_step_rejected(client):
+    token = _login_via_strava(client)
+
+    assert store.claim_pending_connect_step(token, max_age_seconds=-1) is None
+
+
+def test_malformed_encryption_key_disables_step(db):
+    with patch("train_with_gpt.config.config.token_encryption_key", "not-a-fernet-key"):
+        assert secret_box.is_configured() is False

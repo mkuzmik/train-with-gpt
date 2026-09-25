@@ -295,14 +295,17 @@ def save_pending_connect_step(token: str, user_id: str, pending: dict) -> None:
         )
 
 
-def get_pending_connect_step(token: str, max_age_seconds: float) -> Optional[dict]:
+def claim_pending_connect_step(token: str, max_age_seconds: float) -> Optional[dict]:
+    """Atomically take a pending step: of concurrent claims, exactly one wins.
+
+    The caller puts it back (save_pending_connect_step) if it wants the user
+    to retry, e.g. after a rejected API key.
+    """
     with _connect() as conn:
         row = conn.execute("SELECT * FROM pending_connect_steps WHERE token = ?", (token,)).fetchone()
-        if not row or row["created_at"] < time.time() - max_age_seconds:
+        if not row:
+            return None
+        deleted = conn.execute("DELETE FROM pending_connect_steps WHERE token = ?", (token,)).rowcount
+        if deleted != 1 or row["created_at"] < time.time() - max_age_seconds:
             return None
         return {"user_id": row["user_id"], "pending": json.loads(row["pending"])}
-
-
-def delete_pending_connect_step(token: str) -> None:
-    with _connect() as conn:
-        conn.execute("DELETE FROM pending_connect_steps WHERE token = ?", (token,))
