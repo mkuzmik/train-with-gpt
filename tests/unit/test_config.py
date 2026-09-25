@@ -28,6 +28,7 @@ def test_defaults_are_none(config_file):
     assert config.training_repo_path is None
     assert config.client_id is None
     assert config.client_secret is None
+    assert config.token_encryption_key is None
 
 
 def test_load_without_file_leaves_everything_unset(config_file):
@@ -44,11 +45,13 @@ def test_load_from_file(config_file):
         "trainingRepoPath": "/tmp/training",
         "clientId": "file-client-id",
         "clientSecret": "file-client-secret",
+        "tokenEncryptionKey": "file_fernet_key",
     })
 
     config = Config(config_file)
     config.load()
 
+    assert config.token_encryption_key == "file_fernet_key"
     assert config.intervals_api_key == "file_key"
     assert config.training_repo_path == "/tmp/training"
     assert config.client_id == "file-client-id"
@@ -61,8 +64,10 @@ def test_env_vars_override_file(config_file, monkeypatch):
         "trainingRepoPath": "/file/repo",
         "clientId": "file-client-id",
         "clientSecret": "file-client-secret",
+        "tokenEncryptionKey": "file_fernet_key",
     })
     monkeypatch.setenv("INTERVALS_API_KEY", "env_key")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "env_fernet_key")
     monkeypatch.setenv("TRAINING_REPO_PATH", "/env/repo")
     monkeypatch.setenv("STRAVA_CLIENT_ID", "env-client-id")
     monkeypatch.setenv("STRAVA_CLIENT_SECRET", "env-client-secret")
@@ -74,6 +79,7 @@ def test_env_vars_override_file(config_file, monkeypatch):
     assert config.training_repo_path == "/env/repo"
     assert config.client_id == "env-client-id"
     assert config.client_secret == "env-client-secret"
+    assert config.token_encryption_key == "env_fernet_key"
 
 
 def test_invalid_json_file_is_ignored(config_file):

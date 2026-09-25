@@ -30,6 +30,7 @@ _SCRUBBED_ENV = (
     "TRAINING_CONTEXT_DEPLOY_KEY",
     "STRAVA_CLIENT_ID",
     "STRAVA_CLIENT_SECRET",
+    "TOKEN_ENCRYPTION_KEY",
     "PUBLIC_URL",
     "PORT",
 )
@@ -53,6 +54,7 @@ os.environ.update(
 
 import pytest  # noqa: E402
 import respx  # noqa: E402
+from cryptography.fernet import Fernet  # noqa: E402
 
 from train_with_gpt import config as config_module  # noqa: E402
 from train_with_gpt import store  # noqa: E402
@@ -121,7 +123,7 @@ def hermetic(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "config_file", config_dir / "config.json")
     monkeypatch.setattr(store, "DB_PATH", config_dir / "store.db")
 
-    for attr in ("intervals_api_key", "training_repo_path", "client_id", "client_secret"):
+    for attr in ("intervals_api_key", "training_repo_path", "client_id", "client_secret", "token_encryption_key"):
         monkeypatch.setattr(app_config, attr, None)
 
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
@@ -148,6 +150,14 @@ def strava_app_credentials(monkeypatch):
     """This server's own Strava app credentials (client_id/secret)."""
     monkeypatch.setattr(app_config, "client_id", STRAVA_CLIENT_ID)
     monkeypatch.setattr(app_config, "client_secret", STRAVA_CLIENT_SECRET)
+
+
+@pytest.fixture
+def token_encryption_key(monkeypatch):
+    """A fresh Fernet key, which turns on the optional intervals.icu login step."""
+    key = Fernet.generate_key().decode()
+    monkeypatch.setattr(app_config, "token_encryption_key", key)
+    return key
 
 
 @pytest.fixture

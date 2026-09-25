@@ -5,9 +5,12 @@ training repo: each must only ever see their own `notes/<user_id>/` and
 `goals/<user_id>.md`, and the personal (no-OAuth) path sees neither.
 """
 
+import pytest
+from httpx import Response
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from tests.support import remote_file, remote_files
+from train_with_gpt.helpers import NO_WELLNESS_DATA_MESSAGE
 from train_with_gpt.server import app as mcp_server
 
 ALICE = 1001
@@ -63,6 +66,23 @@ def test_notes_are_isolated_per_user(login, git_remote):
     assert "calf" in listed and "knee" not in listed
     assert "calf tightness" in own
     assert "sore knee" not in other
+
+
+@pytest.mark.intervals_login_step
+def test_intervals_connection_is_per_user(login, http_mock):
+    http_mock.get("https://intervals.icu/api/v1/athlete/0").mock(
+        return_value=Response(200, json={"id": "i1", "name": "Alice"})
+    )
+    wellness = http_mock.get("https://intervals.icu/api/v1/athlete/0/wellness").mock(
+        return_value=Response(200, json=[{"id": "2024-01-15", "restingHR": 45}])
+    )
+    alice = login(ALICE, intervals_api_key="alice-key")
+    bob = login(BOB)  # skipped the intervals.icu step
+    day = {"start_date": "2024-01-15", "end_date": "2024-01-15"}
+
+    assert "RHR: 45 bpm" in alice.call_tool("get_resting_heart_rate", day)
+    assert bob.call_tool("get_resting_heart_rate", day) == NO_WELLNESS_DATA_MESSAGE
+    assert wellness.call_count == 1
 
 
 async def test_personal_path_does_not_see_user_notes(login):

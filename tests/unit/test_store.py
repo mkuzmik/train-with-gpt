@@ -4,9 +4,16 @@ The `db` fixture (tests/conftest.py) initialises a fresh store.db in the
 test's own tmp HOME.
 """
 
+import sqlite3
 import stat
 
 from train_with_gpt import store
+
+
+def _age_rows(db, table, seconds, where="1=1"):
+    """Backdate created_at directly in the DB file (simulates time passing)."""
+    with sqlite3.connect(db) as conn:
+        conn.execute(f"UPDATE {table} SET created_at = created_at - ? WHERE {where}", (seconds,))
 
 
 def test_client_round_trip(db):
@@ -149,3 +156,56 @@ def test_pending_authorization_round_trips_resource_and_implicit_redirect(db):
     assert pending["resource"] == "https://server/mcp"
     assert pending["claude_state"] is None
     assert pending["scopes"] == []
+
+
+def test_stale_pending_rows_are_pruned_and_rejected(db):
+    stale = store.PENDING_TTL_SECONDS + 1
+    store.save_pending_authorization("old", "c", "http://x", True, "ch", [], None, None)
+    store.save_pending_connect_step("old-step", "42", {"k": "v"})
+    _age_rows(db, "pending_authorizations", stale)
+    _age_rows(db, "pending_connect_steps", stale)
+
+    # A stale authorization is rejected even before pruning.
+    assert store.pop_pending_authorization("old") is None
+
+    store.save_pending_authorization("old2", "c", "http://x", True, "ch", [], None, None)
+    _age_rows(db, "pending_authorizations", stale, where="state = 'old2'")
+    store.save_pending_authorization("new", "c", "http://x", True, "ch", [], None, None)
+
+    # Saving a new row pruned every stale one, in both tables.
+    with sqlite3.connect(db) as conn:
+        states = [row[0] for row in conn.execute("SELECT state FROM pending_authorizations")]
+        steps = conn.execute("SELECT COUNT(*) FROM pending_connect_steps").fetchone()[0]
+    assert states == ["new"]
+    assert steps == 0
+
+
+def test_intervals_connection_round_trip(db):
+    assert store.get_intervals_connection("42") is None
+
+    store.save_intervals_connection("42", "i777", "Jane D", "ciphertext-1")
+    store.save_intervals_connection("42", "i777", "Jane D", "ciphertext-2")
+
+    connection = store.get_intervals_connection("42")
+    assert (connection["athlete_id"], connection["athlete_name"], connection["encrypted_api_key"]) == (
+        "i777", "Jane D", "ciphertext-2",
+    )
+
+    store.delete_intervals_connection("42")
+    assert store.get_intervals_connection("42") is None
+
+
+def test_pending_connect_step_can_be_claimed_once(db):
+    store.save_pending_connect_step("tok", "42", {"client_id": "claude"})
+
+    assert store.claim_pending_connect_step("tok", 60) == {"user_id": "42", "pending": {"client_id": "claude"}}
+    assert store.claim_pending_connect_step("tok", 60) is None
+
+
+def test_expired_connect_step_is_rejected(db):
+    store.save_pending_connect_step("tok", "42", {})
+    _age_rows(db, "pending_connect_steps", 120)
+
+    assert store.claim_pending_connect_step("tok", max_age_seconds=60) is None
+
+

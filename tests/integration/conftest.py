@@ -14,11 +14,13 @@ import base64
 import hashlib
 import itertools
 import json
+import re
 import secrets
 import time
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from cryptography.fernet import Fernet
 from httpx import Response
 from starlette.testclient import TestClient
 
@@ -181,12 +183,46 @@ def register_client(http: TestClient) -> dict:
     return response.json()
 
 
-def oauth_login(http: TestClient, strava: FakeStrava, athlete_id: int, firstname="Test", lastname="Athlete") -> str:
+def through_interstitials(http: TestClient, response, intervals_api_key: str | None = None):
+    """Act like the user's browser until we're redirected back to Claude.
+
+    Follows redirects, and submits an HTML form page (the optional
+    intervals.icu step) once, like a user would: with `intervals_api_key` if
+    given, else by pressing "skip". If that lands on a form page again (e.g.
+    the key was rejected), returns it so the caller can decide what's next.
+    """
+    submitted = False
+    for _ in range(10):
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers["location"]
+            if location.startswith(CLAUDE_REDIRECT_URI):
+                break
+            response = http.get(location, follow_redirects=False)
+        elif "<form" in response.text and not submitted:
+            submitted = True
+            action = re.search(r'<form[^>]*action="([^"]+)"', response.text).group(1)
+            fields = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', response.text))
+            if intervals_api_key:
+                fields.update(action="connect", api_key=intervals_api_key)
+            else:
+                fields.update(action="skip")
+            response = http.post(action, data=fields, follow_redirects=False)
+        else:
+            break
+    return response
+
+
+def oauth_login(
+    http: TestClient, strava: FakeStrava, athlete_id: int, firstname="Test", lastname="Athlete",
+    intervals_api_key: str | None = None,
+) -> str:
     """Full nested OAuth round trip for one athlete; returns our bearer token.
 
     Claude registers, sends the user to /authorize with PKCE, we bounce them to
-    Strava, Strava redirects back to our callback with its code, we redirect to
-    Claude with our own code, and Claude exchanges that at /token.
+    Strava, Strava redirects back to our callback with its code, the user goes
+    through any interstitial page (the optional intervals.icu step, answered
+    with `intervals_api_key` or skipped), we redirect to Claude with our own
+    code, and Claude exchanges that at /token.
     """
     client = register_client(http)
     verifier, challenge = pkce_pair()
@@ -214,9 +250,7 @@ def oauth_login(http: TestClient, strava: FakeStrava, athlete_id: int, firstname
         params={"state": strava_params["state"], "code": strava_code, "scope": "read,activity:read_all"},
         follow_redirects=False,
     )
-    # Follow any interstitial pages until we're sent back to Claude.
-    while callback.status_code in (301, 302, 303, 307, 308) and not callback.headers["location"].startswith(CLAUDE_REDIRECT_URI):
-        callback = http.get(callback.headers["location"], follow_redirects=False)
+    callback = through_interstitials(http, callback, intervals_api_key)
     assert callback.status_code in (302, 303, 307), callback.text
     back_to_claude = callback.headers["location"]
     assert back_to_claude.startswith(CLAUDE_REDIRECT_URI)
@@ -237,13 +271,22 @@ def oauth_login(http: TestClient, strava: FakeStrava, athlete_id: int, firstname
     return body["access_token"]
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "intervals_login_step: run the server with TOKEN_ENCRYPTION_KEY set, "
+        "which adds the optional intervals.icu page to the OAuth login",
+    )
+
+
 @pytest.fixture
-def server_env(monkeypatch, training_repo):
+def server_env(request, monkeypatch, training_repo):
     """Production-style configuration: env vars, loaded by config.load()."""
     monkeypatch.setenv("PUBLIC_URL", PUBLIC_URL)
     monkeypatch.setenv("STRAVA_CLIENT_ID", STRAVA_CLIENT_ID)
     monkeypatch.setenv("STRAVA_CLIENT_SECRET", STRAVA_CLIENT_SECRET)
     monkeypatch.setenv("TRAINING_REPO_PATH", str(training_repo))
+    if request.node.get_closest_marker("intervals_login_step"):
+        monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     config.load()
     return training_repo
 
@@ -263,8 +306,8 @@ def strava(http_mock):
 @pytest.fixture
 def login(http, strava):
     """login(athlete_id, ...) -> an initialized McpHttpClient for that athlete."""
-    def _login(athlete_id: int, **names) -> McpHttpClient:
-        mcp = McpHttpClient(http, oauth_login(http, strava, athlete_id, **names))
+    def _login(athlete_id: int, **kwargs) -> McpHttpClient:
+        mcp = McpHttpClient(http, oauth_login(http, strava, athlete_id, **kwargs))
         mcp.initialize()
         return mcp
     return _login

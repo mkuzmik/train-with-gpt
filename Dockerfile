@@ -1,7 +1,7 @@
 # Runs the HTTP entrypoint (train-with-gpt-http) - the multi-user OAuth path.
 # The stdio entrypoint (train-with-gpt, used by Claude Desktop directly) has
 # no reason to run in a container.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # git: helpers.py shells out to it for the notes/goals repo.
 # openssh-client: needed for git-over-ssh with the deploy key (see
@@ -12,9 +12,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-cli
 RUN useradd --create-home --shell /bin/bash app
 WORKDIR /app
 
-COPY pyproject.toml ./
+# Dependencies come from the committed uv.lock, so the image gets exactly the
+# versions CI tested. uv is pinned; bump it deliberately.
+COPY --from=ghcr.io/astral-sh/uv:0.11.17 /uv /usr/local/bin/uv
+# Use the base image's Python (never download one), compile .pyc at build
+# time, and install into /app/.venv (on PATH below, so `train-with-gpt-http`
+# and `python -c "from train_with_gpt import ..."` work for root and app).
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON=/usr/local/bin/python3 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Dependencies first (only invalidated when the lockfile changes), then the
+# project itself as a regular (non-editable) install.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
 
 ENV HOME=/home/app
 # Config file, SQLite store (users/tokens/oauth clients), all live here -

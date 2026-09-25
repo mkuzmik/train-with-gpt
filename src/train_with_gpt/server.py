@@ -94,6 +94,31 @@ def _get_active_data_client():
     )
 
 
+def _get_wellness_client():
+    """
+    Resolve the client for sleep/HRV/resting-HR tools.
+
+    OAuth'd users get an IntervalsClient on their own intervals.icu key if they
+    added one at login (intervals_connect.py); otherwise their StravaClient,
+    which the wellness handlers answer with NO_WELLNESS_DATA_MESSAGE.
+    stdio/personal paths keep the personal `intervals` client.
+    """
+    from mcp.server.auth.middleware.auth_context import get_access_token
+
+    access_token = get_access_token()
+    if not access_token or not access_token.subject:
+        return intervals
+
+    from . import secret_box, store
+
+    connection = store.get_intervals_connection(access_token.subject)
+    if connection and secret_box.is_configured():
+        api_key = secret_box.decrypt(connection["encrypted_api_key"])
+        if api_key:
+            return IntervalsClient(api_key=api_key)
+    return _get_active_data_client()
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available tools."""
@@ -129,11 +154,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     elif name == "get_activities":
         return await get_activities_handler(arguments, _get_active_data_client())
     elif name == "get_sleep_data":
-        return await get_sleep_data_handler(arguments, _get_active_data_client())
+        return await get_sleep_data_handler(arguments, _get_wellness_client())
     elif name == "get_hrv_data":
-        return await get_hrv_data_handler(arguments, _get_active_data_client())
+        return await get_hrv_data_handler(arguments, _get_wellness_client())
     elif name == "get_resting_heart_rate":
-        return await get_resting_heart_rate_handler(arguments, _get_active_data_client())
+        return await get_resting_heart_rate_handler(arguments, _get_wellness_client())
     elif name == "analyze_activity":
         return await analyze_activity_handler(arguments, _get_active_data_client())
     elif name == "analyze_lap":

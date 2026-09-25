@@ -80,7 +80,7 @@ def test_callback_strava_error_redirects_with_error(client):
         follow_redirects=False,
     )
 
-    assert response.status_code in (302, 307)
+    assert response.status_code in (302, 303, 307)
     location = response.headers["location"]
     assert location.startswith("http://localhost:9999/callback")
     assert _query(location) == {"error": "access_denied", "state": "claude-state-xyz"}
@@ -110,7 +110,7 @@ def test_callback_success_mints_code_and_redirects(client, http_mock):
         "grant_type": ["authorization_code"],
     }
 
-    assert response.status_code in (302, 307)
+    assert response.status_code in (302, 303, 307)
     location = response.headers["location"]
     assert location.startswith("http://localhost:9999/callback")
     params = _query(location)
@@ -143,7 +143,7 @@ def test_callback_falls_back_to_profile_when_token_has_no_athlete(client, http_m
 
     response = client.get("/oauth/strava/callback?state=nested-state-1&code=c", follow_redirects=False)
 
-    assert response.status_code in (302, 307)
+    assert response.status_code in (302, 303, 307)
     assert profile_route.calls.last.request.headers["Authorization"] == "Bearer strava-access"
     assert store.get_user("7")["name"] == "Sam"
 

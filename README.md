@@ -18,9 +18,13 @@ There are two ways to run it: **locally over stdio** (single user, intervals.icu
 
 ### 1. Install
 
+Dependencies are pinned in `uv.lock`; install [uv](https://docs.astral.sh/uv/) (e.g. `brew install uv`), then from the project directory:
+
 ```bash
-pip install -e .
+uv sync
 ```
+
+This creates `.venv/` with the project and its locked dependencies (including the dev/test tools).
 
 ### 2. Get an intervals.icu API Key
 
@@ -50,7 +54,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "train-with-gpt": {
-      "command": "/path/to/python",
+      "command": "/path/to/train-with-gpt/.venv/bin/python",
       "args": ["-m", "train_with_gpt.server"],
       "cwd": "/path/to/train-with-gpt"
     }
@@ -59,8 +63,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```
 
 Replace:
-- `/path/to/python` with your Python path (e.g., `which python` or `~/.pyenv/shims/python`)
-- `/path/to/train-with-gpt` with your project directory
+- `/path/to/train-with-gpt` with your project directory (the `.venv` is the one `uv sync` created)
 
 Restart Claude Desktop.
 
@@ -82,8 +85,8 @@ You'll need a Strava OAuth app (instant/self-serve, unlike intervals.icu's):
 Start the server:
 
 ```bash
-train-with-gpt-http
-# or: PORT=8000 PUBLIC_URL=http://localhost:8000 train-with-gpt-http
+uv run train-with-gpt-http
+# or: PORT=8000 PUBLIC_URL=http://localhost:8000 uv run train-with-gpt-http
 ```
 
 This starts a Starlette/uvicorn app with:
@@ -131,7 +134,8 @@ as a file secret, and `docker-entrypoint.sh` copies it into the container's
 config dir owned by the `app` user (the host file's `chmod 600` owner UID
 usually isn't the container's). No code changes or exports are needed, just
 that the file exists on the host (`chmod 600`, and never committed - see
-`.gitignore`).
+`.gitignore`). Add `"tokenEncryptionKey"` (a Fernet key, generated as in the
+Fly.io setup below) to it to turn on the optional intervals.icu login step.
 
 This maps container port 8000 to `localhost:8123` on the host and sets
 `PUBLIC_URL=http://localhost:8123` to match (override either with `HOST_PORT`/
@@ -197,10 +201,13 @@ through `fly secrets` or files under `~/.config/train-with-gpt/`.
    fly secrets set -a <app> \
      STRAVA_CLIENT_ID=... \
      STRAVA_CLIENT_SECRET=... \
-     "TRAINING_CONTEXT_DEPLOY_KEY=$(cat ~/.config/train-with-gpt/training-context-deploy-key)"
+     "TRAINING_CONTEXT_DEPLOY_KEY=$(cat ~/.config/train-with-gpt/training-context-deploy-key)" \
+     "TOKEN_ENCRYPTION_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
    ```
-   Optionally `INTERVALS_API_KEY` if you want the personal intervals.icu path
-   reachable (not needed for Strava OAuth users).
+   `TOKEN_ENCRYPTION_KEY` encrypts users' intervals.icu API keys in `store.db`
+   and turns on the optional intervals.icu step at login (see below). Leave it
+   out to skip that step. Changing it later makes stored keys unreadable, so
+   users would need to add them again.
 5. Deploy:
    ```bash
    fly deploy --ha=false -a <app>
@@ -226,6 +233,23 @@ browser for Strava consent) and call a tool.
 - **Claude Desktop:** use `mcp-remote` as in the local setup, with the
   `https://<app>.fly.dev/mcp` URL.
 
+**Sleep, HRV and resting HR (optional).** Strava has no wellness data. After
+the Strava consent, the login shows one more page asking for your
+intervals.icu API key (intervals.icu → Settings → Developer Settings). If your
+Garmin syncs to intervals.icu, paste it there and the wellness tools use it;
+otherwise press Skip. The key goes from your browser straight to the server
+(never through Claude or the chat), is checked against intervals.icu, and is
+stored encrypted.
+
+- It belongs to your account, not to a device: add it once from any client and
+  it works everywhere you're connected.
+- **Already connected?** Disconnect and reconnect the connector (claude.ai →
+  Settings → Connectors). Strava usually skips its consent screen for an app you
+  already approved, so you go straight to the intervals.icu page. The same page
+  lets you replace or disconnect the key later.
+- Personal intervals.icu keys have full access to the account. To cut the
+  server off, regenerate your key on intervals.icu.
+
 ### Operations
 
 - **Redeploy:** `fly deploy --ha=false -a <app>`. The volume (and therefore
@@ -246,9 +270,8 @@ browser for Strava consent) and call a tool.
 - **`mcp-remote` cache:** clients cache OAuth registrations per server URL in
   `~/.mcp-auth`. If you wipe the server's store, clear that folder too or you
   will get `400` on `/authorize`.
-- **Limitations:** OAuth'd users only get Strava activity data. Wellness
-  (sleep/HRV/resting HR) is only available on the personal intervals.icu path;
-  Strava has none.
+- **Limitations:** OAuth'd users' activities always come from Strava.
+  Wellness (sleep/HRV/resting HR) needs the optional intervals.icu key.
 
 ## Usage
 
@@ -359,41 +382,44 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Running Tests
 
-**Install development dependencies:**
+**Install development dependencies** (the `dev` group is included by default):
 ```bash
-pip install -e ".[dev]"
+uv sync
 ```
 
 **Run everything (both levels):**
 ```bash
-pytest
+uv run pytest
 ```
 
 **Run one level:**
 ```bash
-pytest tests/unit          # or: pytest -m unit
-pytest tests/integration   # or: pytest -m integration
+uv run pytest tests/unit          # or: uv run pytest -m unit
+uv run pytest tests/integration   # or: uv run pytest -m integration
 ```
 
 **Run a specific file or test:**
 ```bash
-pytest tests/unit/test_get_activities.py -v
-pytest tests/unit/test_get_activities.py::test_explicit_date_range -v
+uv run pytest tests/unit/test_get_activities.py -v
+uv run pytest tests/unit/test_get_activities.py::test_explicit_date_range -v
 ```
 
 The suite is hermetic, so it passes the same way on any machine, in any order
-(`pip install pytest-randomly` to shuffle it). `tests/conftest.py` enforces
-this for every test:
+(`uv run --with pytest-randomly pytest` shuffles it). `tests/conftest.py`
+enforces this for every test:
 - `HOME` is a throwaway directory, set *before* `train_with_gpt` is imported.
   The global `config` loads at import time, so without this the tests would
   read your real `~/.config/train-with-gpt/config.json` and `store.db`.
-- `INTERVALS_API_KEY`, `STRAVA_CLIENT_*`, `TRAINING_REPO_PATH`, `PUBLIC_URL`,
-  `PORT` and all `GIT_*` env vars are cleared, and git gets a fixed test identity.
+- `INTERVALS_API_KEY`, `STRAVA_CLIENT_*`, `TOKEN_ENCRYPTION_KEY`,
+  `TRAINING_REPO_PATH`, `PUBLIC_URL`, `PORT` and all `GIT_*` env vars are
+  cleared, and git gets a fixed test identity.
 - The global `config` starts empty, and its file and the SQLite store live in
   the test's `tmp_path`.
 - All httpx traffic goes through a respx router (the `http_mock` fixture).
   Any request that isn't stubbed fails the test, and so does any non-loopback
   socket connection.
+
+**Changing dependencies:** edit `pyproject.toml` (or use `uv add` / `uv add --dev`), then run `uv lock` and commit the updated `uv.lock`. CI fails if the lockfile is out of date, and the Docker image installs exactly what's locked.
 
 ### Testing Tools Manually
 
@@ -401,13 +427,13 @@ Test individual tools during development:
 
 ```bash
 # List all available tools
-python test_tools.py --help
+uv run python test_tools.py --help
 
 # Test a specific tool
-python test_tools.py get_activities
+uv run python test_tools.py get_activities
 
 # Test with arguments
-python test_tools.py setup_training_repo '{"repo_path": "/path/to/repo"}'
+uv run python test_tools.py setup_training_repo '{"repo_path": "/path/to/repo"}'
 ```
 
 ### Continuous Integration
@@ -416,7 +442,7 @@ Tests run automatically via GitHub Actions on:
 - Every push to main branch
 - Every pull request
 
-The CI pipeline tests against Python 3.10, 3.11, and 3.12, running the unit and integration levels as separate steps.
+The CI pipeline tests against Python 3.10 through 3.14, running the unit and integration levels as separate steps. The Docker image and local dev (`.python-version`) use 3.14.
 
 **⚠️ IMPORTANT: All tests must pass before merging PRs.**
 
@@ -446,7 +472,10 @@ through its public interfaces only:
   fixture). Drive the OAuth endpoints (`/register`, `/authorize`,
   `/oauth/strava/callback`, `/token`, `/revoke`) and `/mcp` with real MCP
   JSON-RPC (`McpHttpClient`). `login(athlete_id)` runs the full OAuth round
-  trip and returns an initialised MCP client.
+  trip and returns an initialised MCP client. It walks through the optional
+  intervals.icu page, which is on when a test has
+  `@pytest.mark.intervals_login_step`, by skipping it or pasting
+  `intervals_api_key=...`.
 - The personal stdio server: `python -m train_with_gpt.server` as a
   subprocess (`StdioServer`). For intervals.icu-backed tools, which need HTTP
   stubs a subprocess can't see, use the same `Server` over the MCP SDK's
@@ -496,9 +525,9 @@ async def test_get_activities_date_range(http_mock, intervals_api_key):
 **Debugging failed tests:**
 
 ```bash
-pytest tests/unit/test_get_activities.py::test_name -vv --tb=long
-pytest -s        # show print/stderr output
-pytest --pdb     # drop into the debugger on failure
+uv run pytest tests/unit/test_get_activities.py::test_name -vv --tb=long
+uv run pytest -s        # show print/stderr output
+uv run pytest --pdb     # drop into the debugger on failure
 ```
 
 **Test layout:**
@@ -508,7 +537,8 @@ pytest --pdb     # drop into the debugger on failure
 - `tests/unit/`: `test_config.py`, `test_store.py`, `test_helpers.py` (git
   operations, headlines, zones), the HTTP clients (`test_intervals_client.py`,
   `test_strava_client.py`), OAuth (`test_oauth_provider.py`,
-  `test_strava_oauth.py`) and one file per tool.
+  `test_strava_oauth.py`, `test_intervals_connect.py` for the optional
+  intervals.icu login step and `secret_box`) and one file per tool.
 - `tests/integration/`: `test_oauth_flow.py` (full OAuth round trip, then
   MCP tool calls), `test_http_auth.py` (the /mcp auth boundary),
   `test_user_isolation.py` (per-user notes and goals) and

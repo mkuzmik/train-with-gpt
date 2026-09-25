@@ -25,6 +25,10 @@ class Config:
         # server's behalf - not a per-user secret.
         self.client_id: Optional[str] = None
         self.client_secret: Optional[str] = None
+        # Fernet key encrypting users' intervals.icu API keys at rest
+        # (secret_box.py). Unset disables the optional intervals.icu step in
+        # the OAuth login flow.
+        self.token_encryption_key: Optional[str] = None
 
     def load(self):
         """Load config from file and environment variables."""
@@ -40,10 +44,12 @@ class Config:
         self.training_repo_path = os.getenv("TRAINING_REPO_PATH") or file_config.get("trainingRepoPath")
         self.client_id = os.getenv("STRAVA_CLIENT_ID") or file_config.get("clientId")
         self.client_secret = os.getenv("STRAVA_CLIENT_SECRET") or file_config.get("clientSecret")
+        self.token_encryption_key = os.getenv("TOKEN_ENCRYPTION_KEY") or file_config.get("tokenEncryptionKey")
 
         print(f"[CONFIG] Loaded from: {self.config_file}", file=sys.stderr)
         print(f"[CONFIG] Intervals API Key: {'SET' if self.intervals_api_key else 'NOT SET'}", file=sys.stderr)
         print(f"[CONFIG] Strava Client ID: {self.client_id or 'NOT SET'}", file=sys.stderr)
+        print(f"[CONFIG] Token Encryption Key: {'SET' if self.token_encryption_key else 'NOT SET'}", file=sys.stderr)
         print(f"[CONFIG] Training Repo Path: {self.training_repo_path or 'NOT SET'}", file=sys.stderr)
 
     def _load_file(self) -> dict:

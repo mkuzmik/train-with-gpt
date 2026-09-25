@@ -5,6 +5,11 @@ callback -> /token dance, then calls tools over /mcp with the bearer token.
 Only Strava (FakeStrava), intervals.icu and the git remote are stand-ins.
 """
 
+import base64
+
+import pytest
+from httpx import Response
+
 from tests.support import remote_file, remote_files
 from train_with_gpt.helpers import NO_WELLNESS_DATA_MESSAGE
 
@@ -16,7 +21,17 @@ from .conftest import (
     pkce_pair,
     query_params,
     register_client,
+    through_interstitials,
 )
+
+INTERVALS = "https://intervals.icu/api/v1"
+DAY = {"start_date": "2024-01-15", "end_date": "2024-01-15"}
+
+
+def _basic_auth_key(request) -> str:
+    user, key = base64.b64decode(request.headers["authorization"].split()[1]).decode().split(":", 1)
+    assert user == "API_KEY"
+    return key
 
 ALL_TOOLS = {
     "start_consultation", "get_current_date", "get_activities", "get_sleep_data", "get_hrv_data",
@@ -184,6 +199,63 @@ def test_wellness_tools_explain_strava_has_no_wellness_data(login):
 
     for tool in ("get_sleep_data", "get_hrv_data", "get_resting_heart_rate"):
         assert mcp.call_tool(tool, {"start_date": "2024-01-15", "end_date": "2024-01-16"}) == NO_WELLNESS_DATA_MESSAGE
+
+
+@pytest.mark.intervals_login_step
+def test_login_with_intervals_key_serves_wellness_from_the_users_own_account(http, strava, http_mock):
+    validate = http_mock.get(f"{INTERVALS}/athlete/0").mock(
+        return_value=Response(200, json={"id": "i777", "name": "Jane D"})
+    )
+    wellness = http_mock.get(f"{INTERVALS}/athlete/0/wellness").mock(return_value=Response(200, json=[
+        {"id": "2024-01-15", "restingHR": 48, "hrv": 61, "sleepSecs": 28800, "sleepScore": 90},
+    ]))
+    strava.activities[42] = []
+
+    mcp = McpHttpClient(http, oauth_login(http, strava, 42, intervals_api_key="users-own-key"))
+    mcp.initialize()
+
+    # The key was checked against intervals.icu during login...
+    assert _basic_auth_key(validate.calls.last.request) == "users-own-key"
+    # ...and wellness tools now read the user's own intervals.icu account.
+    assert "RHR: 48 bpm" in mcp.call_tool("get_resting_heart_rate", DAY)
+    assert "HRV: 61ms" in mcp.call_tool("get_hrv_data", DAY)
+    assert "Score: 90/100" in mcp.call_tool("get_sleep_data", DAY)
+    assert {_basic_auth_key(call.request) for call in wellness.calls} == {"users-own-key"}
+    # Activities still come from Strava.
+    assert mcp.call_tool("get_activities", DAY) == "No activities found for 2024-01-15."
+    assert strava.activities_route.called
+
+
+@pytest.mark.intervals_login_step
+def test_skipping_the_intervals_step_leaves_wellness_unavailable(login, http_mock):
+    wellness = http_mock.get(f"{INTERVALS}/athlete/0/wellness")
+
+    mcp = login(43)  # presses "skip" on the intervals.icu page
+
+    assert mcp.call_tool("get_sleep_data", DAY) == NO_WELLNESS_DATA_MESSAGE
+    assert not wellness.called
+
+
+@pytest.mark.intervals_login_step
+def test_a_rejected_intervals_key_can_be_skipped(http, strava, http_mock):
+    http_mock.get(f"{INTERVALS}/athlete/0").mock(return_value=Response(401))
+    client = register_client(http)
+    verifier, challenge = pkce_pair()
+    authorize = http.get("/authorize", params={
+        "response_type": "code", "client_id": client["client_id"], "redirect_uri": CLAUDE_REDIRECT_URI,
+        "code_challenge": challenge, "code_challenge_method": "S256", "state": "s",
+    }, follow_redirects=False)
+    strava_state = query_params(authorize.headers["location"])["state"]
+    page = http.get("/oauth/strava/callback", params={"state": strava_state, "code": strava.approve(44)},
+                    follow_redirects=False)
+
+    rejected = through_interstitials(http, page, intervals_api_key="wrong-key")
+    assert rejected.status_code == 400
+    assert "rejected that key" in rejected.text
+
+    finished = through_interstitials(http, rejected)  # now skip
+    code = query_params(finished.headers["location"])["code"]
+    assert _exchange(http, client, code, verifier).status_code == 200
 
 
 def test_oauth_sessions_cannot_reconfigure_the_training_repo(login, tmp_path, git_remote):

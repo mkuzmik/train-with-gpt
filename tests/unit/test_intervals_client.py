@@ -44,6 +44,16 @@ async def test_api_key_is_read_from_config_at_call_time(http_mock, monkeypatch):
     assert route.calls.last.request.headers["Authorization"] == expected
 
 
+async def test_explicit_api_key_wins_over_config(http_mock, intervals_api_key):
+    route = http_mock.get(f"{API}/athlete/0").mock(return_value=Response(200, json={"id": "i7", "name": "Jane"}))
+
+    athlete = await IntervalsClient(api_key="users-own-key").get_athlete()
+
+    assert athlete == {"id": "i7", "name": "Jane"}
+    expected = "Basic " + base64.b64encode(b"API_KEY:users-own-key").decode()
+    assert route.calls.last.request.headers["Authorization"] == expected
+
+
 async def test_http_errors_are_raised(http_mock, intervals_api_key):
     http_mock.get(f"{API}/athlete/0/activities").mock(return_value=Response(401))
 

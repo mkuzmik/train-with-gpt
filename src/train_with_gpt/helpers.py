@@ -36,9 +36,10 @@ def user_scoped_goals_file(repo_path: Path, user_id: Optional[str]) -> tuple[Pat
 
 
 NO_WELLNESS_DATA_MESSAGE = (
-    "ℹ️ Wellness data (sleep, HRV, resting heart rate) isn't available for accounts "
-    "connected via Strava - Strava has no wellness data at all. This is only available "
-    "through the personal intervals.icu-backed setup."
+    "ℹ️ Wellness data (sleep, HRV, resting heart rate) isn't available: Strava has no "
+    "wellness data. To add it, connect intervals.icu: disconnect and reconnect this "
+    "connector in Claude's settings, and paste your intervals.icu API key on the "
+    "page shown after the Strava login."
 )
 
 
