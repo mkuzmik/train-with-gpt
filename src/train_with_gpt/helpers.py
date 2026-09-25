@@ -197,8 +197,10 @@ def git_add_commit_push(repo_path: Path, file_path: str, commit_message: str) ->
         return push_status
         
     except subprocess.CalledProcessError as e:
-        # If commit fails (e.g., no changes), check if it's because nothing to commit
-        if "nothing to commit" in e.stderr.decode('utf-8', errors='ignore').lower():
+        # If commit fails (e.g., no changes), check if it's because nothing to
+        # commit - git reports that on stdout, not stderr.
+        output = (e.stdout or b"") + (e.stderr or b"")
+        if "nothing to commit" in output.decode('utf-8', errors='ignore').lower():
             return "\n\n(No changes to commit - content unchanged)"
         else:
             raise

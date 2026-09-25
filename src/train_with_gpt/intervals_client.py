@@ -13,10 +13,13 @@ class IntervalsClient:
     BASE_URL = "https://intervals.icu/api/v1"
 
     def __init__(self):
-        self.api_key = config.intervals_api_key
-
         print(f"[DEBUG] intervals.icu credentials:", file=sys.stderr)
         print(f"  API_KEY: {'SET' if self.api_key else 'NOT SET'}", file=sys.stderr)
+
+    @property
+    def api_key(self) -> Optional[str]:
+        """The personal API key, read from config on each use (single source of truth)."""
+        return config.intervals_api_key
 
     def _auth(self) -> tuple[str, str]:
         """HTTP Basic auth tuple for intervals.icu (literal username 'API_KEY')."""
