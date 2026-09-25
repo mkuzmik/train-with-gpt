@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import current_user_id, git_pull, user_scoped_goals_file
+from ..helpers import current_user_id, git_pull_and_read, read_file_if_exists, user_scoped_goals_file
 
 
 def read_goals_tool() -> Tool:
@@ -32,17 +32,15 @@ async def read_goals_handler(arguments: dict) -> list[TextContent]:
         if not repo_path.exists():
             return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
         
-        # Git pull first to get latest
-        pull_output = await asyncio.to_thread(git_pull, repo_path)
-        
+        # Pull first to get the latest, and read the goals under the same lock
         goals_file, _ = user_scoped_goals_file(repo_path, current_user_id())
+        pull_output, content = await asyncio.to_thread(
+            git_pull_and_read, repo_path, lambda: read_file_if_exists(goals_file)
+        )
 
-        if not goals_file.exists():
+        if content is None:
             return [TextContent(type="text", text="ℹ️ No goals saved yet.\n\nUse **discuss_goals** to start a conversation about training goals, then **save_goals** to save them.")]
-        
-        with open(goals_file, 'r') as f:
-            content = f.read()
-        
+
         # Add pull info if there were updates
         if pull_output:
             content = f"_{pull_output}_\n\n{content}"

@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import current_user_id, git_pull, user_scoped_notes_dir
+from ..helpers import current_user_id, git_pull_and_read, read_note_files, user_scoped_notes_dir
 
 _CONTEXT_LINES = 2
 
@@ -73,16 +73,13 @@ async def search_consultation_notes_handler(arguments: dict) -> list[TextContent
         if not repo_path.exists():
             return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
 
-        pull_output = await asyncio.to_thread(git_pull, repo_path)
-
+        # Pull first to get the latest, and read the notes under the same lock
         notes_dir, _ = user_scoped_notes_dir(repo_path, current_user_id())
+        pull_output, notes = await asyncio.to_thread(
+            git_pull_and_read, repo_path, lambda: read_note_files(notes_dir)
+        )
 
-        if not notes_dir.exists():
-            return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]
-
-        note_files = sorted(notes_dir.glob("*.md"), reverse=True)
-
-        if not note_files:
+        if not notes:
             return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]
 
         query_lower = query.lower()
@@ -90,15 +87,12 @@ async def search_consultation_notes_handler(arguments: dict) -> list[TextContent
         match_count = 0
         matched_dates = set()
 
-        for note_file in note_files:
-            with open(note_file, 'r') as f:
-                text = f.read()
-
+        for stem, text in notes:
             snippets = _snippets_for_note(text, query_lower)
             if not snippets:
                 continue
 
-            date = note_file.stem[:10]
+            date = stem[:10]
             match_count += len(snippets)
             matched_dates.add(date)
             for snippet in snippets:

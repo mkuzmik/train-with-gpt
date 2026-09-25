@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import current_user_id, git_pull, extract_note_headline, user_scoped_notes_dir
+from ..helpers import current_user_id, extract_note_headline, git_pull_and_read, read_note_files, user_scoped_notes_dir
 
 
 def list_consultation_notes_tool() -> Tool:
@@ -37,33 +37,27 @@ async def list_consultation_notes_handler(arguments: dict) -> list[TextContent]:
         if not repo_path.exists():
             return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
 
-        # Git pull first to get latest
-        pull_output = await asyncio.to_thread(git_pull, repo_path)
-
+        # Pull first to get the latest, and read the notes (most recent first)
+        # under the same lock
         notes_dir, _ = user_scoped_notes_dir(repo_path, current_user_id())
+        pull_output, notes = await asyncio.to_thread(
+            git_pull_and_read, repo_path, lambda: read_note_files(notes_dir)
+        )
 
-        if not notes_dir.exists():
-            return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]
-
-        # Get all .md files in notes directory, most recent first
-        note_files = sorted(notes_dir.glob("*.md"), reverse=True)
-
-        if not note_files:
+        if not notes:
             return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]
 
         lines = []
-        for note_file in note_files:
-            with open(note_file, 'r') as f:
-                text = f.read()
-            date = note_file.stem[:10]  # YYYY-MM-DD from YYYY-MM-DD-HH-MM-SS[-suffix]
+        for stem, text in notes:
+            date = stem[:10]  # YYYY-MM-DD from YYYY-MM-DD-HH-MM-SS[-suffix]
             headline = extract_note_headline(text)
             lines.append(f"{date} — {headline}")
 
-        earliest = note_files[-1].stem[:10]
-        latest = note_files[0].stem[:10]
+        earliest = notes[-1][0][:10]
+        latest = notes[0][0][:10]
 
         summary = (
-            f"{len(note_files)} consultation note(s), spanning {earliest} to {latest}.\n\n"
+            f"{len(notes)} consultation note(s), spanning {earliest} to {latest}.\n\n"
             "Call read_consultation_notes with since/until (YYYY-MM-DD) or note_date to read "
             "specific notes in full, or all=true for the complete history."
         )

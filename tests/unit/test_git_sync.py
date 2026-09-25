@@ -20,7 +20,7 @@ from tests.support import (
     remote_files,
 )
 from train_with_gpt import helpers
-from train_with_gpt.helpers import GIT_SAVE_ATTEMPTS, GitSyncError, git_pull, git_save_file
+from train_with_gpt.helpers import GIT_SAVE_ATTEMPTS, GitSyncError, git_pull, git_pull_and_read, git_save_file
 
 
 @pytest.fixture
@@ -105,6 +105,29 @@ def test_git_pull_parks_conflicting_local_commits_on_a_branch(training_repo, git
     assert_clean_and_in_sync(training_repo)
 
 
+def test_git_pull_stashes_uncommitted_edits_that_would_block_recovery(training_repo, git_remote):
+    # personal checkout: an unpushed goals commit plus an uncommitted edit on
+    # top of it, while the remote got different goals
+    commit_locally(training_repo, "goals.md", "Local goals\n")
+    (training_repo / "goals.md").write_text("Local goals, still editing\n")
+    push_files(git_remote, {"goals.md": "Remote goals\n"})
+
+    output = git_pull(training_repo)
+
+    assert "moved to local branch 'unsynced-" in output
+    assert "Uncommitted edits were stashed" in output
+    assert git(training_repo, "stash", "show", "-p", "stash@{0}").count("Local goals, still editing") == 1
+    assert (training_repo / "goals.md").read_text() == "Remote goals\n"
+    assert_clean_and_in_sync(training_repo)
+
+
+def test_git_pull_and_read_reads_under_the_repo_lock(training_repo):
+    note, locked = git_pull_and_read(training_repo, lambda: helpers._repo_lock(training_repo).locked())
+
+    assert note is None
+    assert locked
+
+
 def test_git_pull_keeps_uncommitted_edits(training_repo, git_remote):
     # the personal/stdio path: the clone is the user's own checkout
     (training_repo / "README.md").write_text("my local edit\n")
@@ -154,8 +177,35 @@ def test_save_when_remote_unreachable_keeps_the_commit(training_repo, git_remote
     status = git_save_file(training_repo, "goals.md", "goal\n", "Update goals")
 
     assert "Could not push to remote" in status
-    assert "kept locally and will be pushed with the next save" in status
+    assert "kept locally; the next save will try to push it again" in status
     assert git(training_repo, "log", "-1", "--format=%s").strip() == "Update goals"
+
+
+def test_save_does_not_retry_a_push_the_remote_refuses_for_good(training_repo, git_remote):
+    attempts = git_remote / "push-attempts"
+    hook = git_remote / "hooks" / "pre-receive"
+    hook.write_text(f"#!/bin/sh\necho x >> '{attempts}'\necho 'branch is protected' >&2\nexit 1\n")
+    hook.chmod(0o755)
+
+    status = git_save_file(training_repo, "goals.md", "goal\n", "Update goals")
+
+    assert "Could not push to remote" in status and "branch is protected" in status
+    assert attempts.read_text().count("x") == 1  # no pointless retries
+    assert "goals.md" not in remote_files(git_remote)
+    assert git(training_repo, "log", "-1", "--format=%s").strip() == "Update goals"  # kept locally
+
+
+def test_resaving_unchanged_content_pushes_the_pending_commit(training_repo, git_remote, tmp_path):
+    moved = tmp_path / "moved.git"
+    git_remote.rename(moved)
+    git_save_file(training_repo, "goals.md", "goal\n", "Update goals")  # push fails
+    moved.rename(git_remote)
+
+    status = git_save_file(training_repo, "goals.md", "goal\n", "Update goals")  # retry, same content
+
+    assert status == " and pushed to remote"
+    assert remote_file(git_remote, "goals.md") == "goal\n"
+    assert_clean_and_in_sync(training_repo)
 
 
 def test_unpushed_commit_goes_out_with_the_next_save(training_repo, git_remote, tmp_path):
