@@ -104,11 +104,12 @@ without an extra click on every login. Instead:
 - **Landing page at `GET /`** (a plain Starlette `Route("/", ..., methods=["GET"])`).
   Routes match exact paths, so it doesn't collide with `/mcp`, `/authorize`
   or `/.well-known/*`. It says what the tool is, the connector URL to paste
-  (`<PUBLIC_URL>/mcp`, shown in full with a copy button), how to add it on
+  (`<PUBLIC_URL>/mcp`, shown in full as selectable text), how to add it on
   claude.ai and that it then syncs to Desktop and mobile, what data it reads
   and stores, how to revoke access, and the first thing to type: **"Set me up
-  as a new athlete"**. Generic content only, the same security headers as
-  the intervals.icu page, and no JavaScript beyond the copy button.
+  as a new athlete"**. Generic content only, static HTML with the same
+  security headers as the intervals.icu page (its CSP allows no scripts, so
+  no copy button).
 - **One line on the intervals.icu page:** "Next: open a new chat in Claude
   and type 'Set me up as a new athlete'."
 - **The server does the rest:** `start_consultation` detects a new athlete
@@ -123,10 +124,10 @@ onboarding note:
 
 | State | Condition | Response |
 |---|---|---|
-| New | no goals, no notes | onboarding guidance from step 1 |
-| Onboarding in progress | an `onboarding` note exists, no goals | onboarding guidance, starting from the first unanswered item listed in that note |
-| Existing, no profile (Phase 2) | goals or notes exist, no profile | today's daily guidance plus an offer to run the #10 backfill, never the interview |
-| Onboarded | goals exist | today's daily guidance |
+| New | no goals, no notes | onboarding guidance (steps 3–7) |
+| Onboarding in progress | an `Onboarding (in progress)` note exists, no goals | onboarding guidance, starting from the first pending item listed in that note |
+| Existing, no goals | notes exist (none of them an onboarding note), no goals | today's daily guidance plus "no goals saved yet; offer `discuss_goals`" |
+| Onboarded | goals exist | today's daily guidance (Phase 2: plus a one-time offer to run the #10 backfill if there is no profile yet) |
 
 An existing user with months of notes is never treated as new: any saved
 goal or note means they are existing. The personal stdio user is in the same
