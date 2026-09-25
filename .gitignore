@@ -42,3 +42,6 @@ env/
 *deploy_key*
 fly-token*
 *.pem
+
+# uv
+.venv/
