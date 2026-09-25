@@ -1,110 +1,345 @@
 # Idea: new-user onboarding (proposal, for review)
 
 Not implemented. This proposes how a new athlete goes from "just added the
-connector" to a useful first consultation.
+connector" to a useful first consultation on the hosted (Strava OAuth) server.
+Validated against `main` on 2026-09-25; see "What the code does today".
 
 ## Problem
 
-A new remote user today:
+### What the code does today
 
-1. adds the connector URL in Claude and logs in with Strava;
-2. optionally pastes an intervals.icu API key on the interstitial page;
-3. lands in an empty conversation with no guidance on what to type.
+- **Login.** `/authorize` redirects straight to Strava's consent screen
+  (`oauth_provider.py`, `strava_oauth.py`). After Strava's callback, and only
+  when `TOKEN_ENCRYPTION_KEY` is set, the server shows one page of its own:
+  the optional intervals.icu key page (`intervals_connect.py`). Both "Connect"
+  and "Skip" end in `complete_authorization` (`authorization.py`), a 303
+  redirect to **Claude's** `redirect_uri`. Without the encryption key, the
+  Strava callback redirects straight back. The server never shows a "you're
+  connected" page; the last page it controls is the intervals.icu page, and
+  only when that page is enabled.
+- **Server root.** `http_server.py` routes `/health`, the OAuth routes
+  (`/authorize`, `/token`, `/register`, `/revoke`,
+  `/.well-known/oauth-authorization-server`), the protected-resource
+  metadata (`/.well-known/oauth-protected-resource/mcp`),
+  `/oauth/strava/callback`, `/oauth/intervals/connect` and `/mcp`. There is
+  nothing at `/`: it returns Starlette's plain 404.
+- **`start_consultation`** is a fixed prompt string. It takes no arguments,
+  reads nothing and is the same for every user. It tells the model to call
+  `get_current_date`, `read_goals`, `list_consultation_notes`,
+  `get_activities`, and says "If no notes exist, this is a fresh start". It
+  also says activities and wellness come from intervals.icu, which is wrong
+  for hosted users (activities come from Strava; wellness only with the
+  optional key).
+- **`discuss_goals`** is a fixed prompt covering goal, current fitness,
+  constraints (time, injuries, life, equipment) and secondary priorities, one
+  question at a time, ending in `save_goals`. It tells the model to call
+  `get_last_week_activities`, **a tool that does not exist** (it should be
+  `get_activities`). Also noted in `science-based-coaching.md`.
+- **`setup_training_repo`** is listed for every user. For OAuth users the
+  handler refuses ("a shared, admin-configured setting"). But `read_goals`,
+  `list_consultation_notes` and the other notes tools tell the user to "use
+  setup_training_repo first" whenever the server has no training repo
+  configured, so a hosted user hitting that case is sent to a tool that
+  refuses them.
+- **README.** The intro says all data comes from intervals.icu. Its "First
+  Time Setup" (create a local git repo, call `setup_training_repo`) is for
+  the stdio path only. The hosted connector steps are under "Deploying to
+  Fly.io → Connecting clients", and they send Claude Desktop users to
+  `mcp-remote` (needs Node) although a connector added on claude.ai also
+  shows up in Desktop.
 
-If they then call `start_consultation`, it finds no goals and no notes and
-says "this is a fresh start", and the coach improvises. Nothing captures the
-athlete's background, recent results, constraints or targets in a structured
-way, and nothing uses the training history the server can already read from
-Strava. `setup_training_repo` belongs to the personal stdio path and means
-nothing to a remote user. The first days are exactly when the coach knows
-least, and there is no flow for them.
+### Where a brand-new user gets stuck
+
+| Step | claude.ai web | Desktop | Mobile |
+|---|---|---|---|
+| Find the URL | No page explains what to paste; `/` is a 404 | same | same |
+| Add the connector | Settings → Connectors → Add custom connector. Free plan: one custom connector | Same (synced from claude.ai); README points to `mcp-remote` instead | **Can't add here.** Custom connectors are added on claude.ai and then sync to the apps |
+| Strava login | Works, **if the Strava app has athlete capacity** (below) | same | same, once added on the web |
+| After login | Back in Claude with no hint what to type. The connector may also need enabling in the chat's "+" / tools menu | same | same |
+| First chat | "hi" does nothing; "start a consultation" gives a generic session with no goals, no notes and the intervals.icu wording | same | same |
+
+**The hard blocker is Strava, not this server.** New Strava API apps start
+in "Single Player Mode" with an athlete capacity of 1 (the owner). A
+self-serve upgrade raises it to 10 athletes; beyond 10, the app must pass
+Strava's review, and until then no additional athlete can authenticate
+([Strava rate limits](https://developers.strava.com/docs/rate-limits/)).
+Onboarding flow design doesn't matter until the owner has checked the app's
+capacity on the Strava API settings page.
+
+Once in, nothing captures the athlete's background, recent results,
+constraints or health screening in a structured way, and the Strava history
+the server can already read goes unused in the first conversation.
 
 ## Proposed solution
 
-### Flow
+The design has two phases. Phase 1 needs neither `consultation-context.md`
+(#9) nor `athlete-profile.md` (#10) and fixes most of the first-day
+experience. Phase 2 moves the same flow onto the athlete profile when #10
+lands.
 
-1. **Connect** (exists): Strava login, then the optional intervals.icu key
-   page. The final page of that flow (or a landing page at the server root)
-   says what to type first, e.g. "Start my onboarding".
-2. **Detect a new athlete.** `start_consultation` sees no profile and no goals
-   for this user and returns onboarding context instead of the daily
-   context. Server instructions (see `consultation-context.md`) make this work
-   even if the user just says "hi".
-3. **Data baseline first.** The server runs `refresh_athlete_profile` (see
-   `athlete-profile.md`) over the last 8–12 weeks: weekly volume per sport,
-   longest session, best efforts, rough thresholds, and resting HR/HRV/sleep
-   baselines when intervals.icu is connected. It also reports what data is
-   *missing* (no HR, few activities, no wellness) so the coach knows what it
-   can't see.
-4. **Interview, one question at a time,** starting from the baseline: "I see
-   about X per week and a recent 5k effort around Y. What are you training
-   toward?" The server supplies the list of profile gaps, so the interview
-   covers:
-   - goal event, date and target;
-   - training background and recent race results;
-   - injuries and health issues;
-   - available days and hours, equipment, other sports;
-   - coaching preferences.
+### Phase 0: remove the dead ends (S, no dependencies)
 
-   Health red flags (see `science-based-coaching.md`) are screened here and
-   lead to a referral message rather than a plan.
-5. **Save** the profile's stated sections, goals, and a first training block,
-   then a first note summarizing onboarding.
-6. **Explain the routine.** A short closing message: how daily check-ins work,
-   when to save, how to update goals, how to disconnect or revoke access.
+- Fix `discuss_goals`: `get_last_week_activities` → `get_activities`.
+- Make `start_consultation`'s data-source wording match the transport
+  (Strava for hosted users, intervals.icu for stdio; wellness "only if
+  connected").
+- Hide `setup_training_repo` from OAuth sessions. `list_tools` can check
+  `current_user_id()` just as the tool handlers do, because the bearer token
+  is in context for every `/mcp` request, including `tools/list`. Keep the
+  handler's refusal as a fallback for clients with a cached tool list.
+- For OAuth users, the "training repository not configured" message should say
+  "this server's notes storage isn't set up; contact the operator", not point
+  to `setup_training_repo`.
+- README: a short "Using the hosted server" section at the top (add on
+  claude.ai, syncs to Desktop and mobile, what to type first). Keep
+  `mcp-remote` as the fallback for clients without custom connectors.
 
-### Resumable
+### Phase 1: onboarding on today's storage (M)
 
-Onboarding can be long. It saves progress per section as it goes, so a
-dropped conversation resumes at the next gap instead of starting over.
-`start_consultation` keeps returning onboarding context until the minimum
-profile is complete (goal, background, constraints).
+**1. Say what to type, where the user can actually see it.** The last page
+the server controls comes before the redirect back to Claude, and not
+everyone sees it, so a "what to type first" page after login isn't possible
+without an extra click on every login. Instead:
 
-### Tools
+- **Landing page at `GET /`** (a plain Starlette `Route("/", ..., methods=["GET"])`).
+  Routes match exact paths, so it doesn't collide with `/mcp`, `/authorize`
+  or `/.well-known/*`. It says what the tool is, the connector URL to paste
+  (`<PUBLIC_URL>/mcp`, shown in full with a copy button), how to add it on
+  claude.ai and that it then syncs to Desktop and mobile, what data it reads
+  and stores, how to revoke access, and the first thing to type: **"Set me up
+  as a new athlete"**. Generic content only, the same security headers as
+  the intervals.icu page, and no JavaScript beyond the copy button.
+- **One line on the intervals.icu page:** "Next: open a new chat in Claude
+  and type 'Set me up as a new athlete'."
+- **The server does the rest:** `start_consultation` detects a new athlete
+  (below), so a user who types "start a consultation" also gets onboarding.
+  Its tool description says "call this first in any training conversation;
+  it also handles first-time setup". Once #9 adds server instructions, a plain
+  "hi" works too.
 
-- `onboarding` guidance, or `start_consultation` in onboarding mode, whichever
-  reads better to the model. Reuses `profile_interview` and `discuss_goals`
-  rather than duplicating them.
-- An MCP prompt `onboard` for clients that show prompts.
-- `setup_training_repo` is hidden from remote users (it only applies to the
-  stdio path).
+**2. Detect the athlete's state.** `start_consultation` (stays argument-free)
+looks at the current user's goals file, notes directory and, in Phase 1, an
+onboarding note:
 
-### Landing page
+| State | Condition | Response |
+|---|---|---|
+| New | no goals, no notes | onboarding guidance from step 1 |
+| Onboarding in progress | an `onboarding` note exists, no goals | onboarding guidance, starting from the first unanswered item listed in that note |
+| Existing, no profile (Phase 2) | goals or notes exist, no profile | today's daily guidance plus an offer to run the #10 backfill, never the interview |
+| Onboarded | goals exist | today's daily guidance |
 
-A small page at the server root: what the tool is, how to add it as a custom
-connector in Claude (desktop, web, mobile), what data it reads, how to
-revoke access, and the first thing to type. Generic content only.
+An existing user with months of notes is never treated as new: any saved
+goal or note means they are existing. The personal stdio user is in the same
+position; they get the backfill offer in Phase 2, not onboarding.
+
+**3. Data baseline first, within a fixed request budget.** Before the first
+question, the guidance has the coach pull:
+
+- the last 12 weeks of activities (`get_activities`, one Strava list call:
+  a page holds 200 activities) for weekly volume per sport, longest session
+  and consistency;
+- the athlete's HR zones if set (one call);
+- wellness baselines if intervals.icu is connected (not Strava);
+- **what's missing**: no HR data, fewer than ~3 activities a week, no
+  wellness source, and private activities missing if the athlete unticked
+  `activity:read_all` on Strava's consent screen. Strava returns the granted
+  `scope` on the callback; the server doesn't record it today, so Phase 1
+  stores it with the user.
+
+Don't fetch per-activity detail or streams on day one. Strava's best efforts
+are only in the per-activity detail (one request per run), so ask for recent
+results in the interview instead. The budget is about 2–4 Strava read
+requests per onboarding, against a per-application read limit of 100 per 15
+minutes and 1,000 per day (200 and 2,000 after the self-serve upgrade),
+shared by all users. Even ten athletes onboarding in the same window stay far
+below the limit. A longer look-back (52 weeks, about 2 list pages, to find
+races) can come later, once responses are cached.
+
+**4. Interview, one question at a time,** opening from the baseline. Order:
+
+1. Goal: event, date and target, or "no event, general fitness". Both are
+   valid answers.
+2. Health screen (below). It comes second so red flags surface before any
+   plan talk.
+3. Background: years training, sports, recent results and PBs.
+4. Constraints: available days and hours, equipment, other sports, life
+   load.
+5. Coaching preferences (optional).
+
+The athlete can skip any question except the health screen. Skipped items
+are recorded as "skipped" and asked about later, in normal consultations.
+
+**5. Health screen and referral wording.** Three short yes/no questions plus
+one conditional one, in
+the spirit of the PAR-Q+ general health questions
+([eparmedx.com](https://eparmedx.com/)) and the cardiac and REDs red flags
+in `science-based-coaching.md`:
+
+- Has a doctor ever told you that you have a heart condition or high blood
+  pressure, or do you get chest pain, fainting or unusual breathlessness when
+  exercising?
+- Any current injury, or pain that gets worse as you train?
+- Any other condition or medication a coach should know about, or are you
+  pregnant or recently postpartum?
+- (Only if relevant to their answers so far, asked gently) any recent
+  unexplained fatigue, frequent illness, missed periods or rapid weight loss?
+
+On a yes, the coach doesn't diagnose, doesn't build intensity into a plan,
+and uses wording along these lines:
+
+> "Thanks for telling me. That's something to check with a doctor (or a
+> physio, for the injury) before we add hard training. I'm not able to
+> assess it myself. Until you've been cleared, I can help with easy, low-risk
+> activity and we can set up your goals so we're ready to go."
+
+Current symptoms (chest pain or fainting right now or today) get "stop
+exercising and contact emergency services or a doctor now", with nothing
+else in that reply. The flag, but not medical detail beyond what the athlete
+chose to say, is saved in the onboarding note so later consultations see it.
+
+**6. Save as you go.** After each answered item, the coach calls
+`save_consultation_notes` with an onboarding note headed
+`Onboarding (in progress)`, with a checklist of items answered, skipped and
+pending. It rewrites the note in place if the notes-sync fix (#8) supports
+same-day updates, and otherwise saves a new note. When the minimum profile is
+complete:
+`save_goals` writes goal + background + constraints + health status (the
+goals format already has room for all of these, see `discuss_goals`), a final
+note marks onboarding done, and `start_consultation` switches to daily
+guidance.
+
+**Minimum profile** (the definition used for "done"):
+
+- a goal, or an explicit "no specific goal";
+- the health screen answered (all "no", or a flag with the referral given);
+- training background in one or two sentences;
+- weekly availability (days and rough hours).
+
+Everything else (results, equipment, preferences) is optional and asked about
+later.
+
+**7. Explain the routine** in the closing message: start each chat with
+"start today's consultation", say "save notes" at the end, "update my goals"
+when things change, how to add intervals.icu later (disconnect and reconnect
+the connector), and how to revoke access (remove the connector in Claude,
+and revoke the app at strava.com/settings/apps).
+
+**8. Resumability** comes from step 6: the onboarding note is the progress
+record. A dropped conversation, or a switch from phone to laptop, resumes at
+the first pending item. Nothing is kept in the conversation or in server
+memory.
+
+### Phase 2: move onto the athlete profile (after #10, #9)
+
+- Answers go to profile sections with `update_athlete_profile` instead of
+  the onboarding note. The "minimum profile" becomes a check on the Background,
+  Health and Constraints sections, plus goals.
+- The baseline comes from `refresh_athlete_profile`, and the interview from
+  `profile_interview`, which already asks only about missing sections.
+  Onboarding is then just "baseline + `profile_interview` + health screen +
+  first block", not a separate tool.
+- `start_consultation` returns assembled context (#9). The onboarding states
+  above become one more part of that response.
+- Migration: existing onboarding notes go through the #10 backfill like any
+  other notes.
+- An `onboard` MCP prompt for clients that show prompts (check support on
+  each client first, as for `consult` in #9).
+- Save a first training block (the #10 "current block" section).
+
+### Example (made-up data)
+
+> **Athlete:** Set me up as a new athlete
+>
+> *(Coach calls `start_consultation` → new-athlete guidance, then
+> `get_activities` for 12 weeks.)*
+>
+> **Coach:** Welcome! I've looked at your last 12 weeks on Strava: mostly
+> running, about 25–30 km a week over 3–4 runs, with a longest run of 16 km
+> three weeks ago. Most runs have heart rate, and I can't see sleep or HRV
+> (that's optional, we can add it later). What are you training toward, a
+> specific race or more general fitness?
+>
+> **Athlete:** A half marathon in about 14 weeks. I'd like to go under 1:50.
+>
+> **Coach:** Got it: half marathon in ~14 weeks, target under 1:50. Before we
+> talk training, a quick health check I ask everyone: has a doctor ever told
+> you that you have a heart condition or high blood pressure, or do you get
+> chest pain, fainting or unusual breathlessness when you exercise?
+>
+> **Athlete:** No, none of that.
+>
+> *(Coach saves the `Onboarding (in progress)` note: goal ✔, health 1/3,
+> background, availability pending.)*
+>
+> **Coach:** Good. Any current injury, or pain that gets worse when you run?
 
 ## Alternatives considered
 
-- **Keep improvising.** No work, but new users get a weak first experience
-  and nothing is saved in a structured way.
-- **A web form instead of an interview.** Faster to fill, but it duplicates
-  the profile outside Claude, needs its own UI and auth, and loses the
-  follow-up questions an interview gets.
+- **Keep improvising.** No work, but the first experience stays weak and
+  nothing is saved in a structured way.
+- **A web form instead of an interview.** Faster to fill in, but it
+  duplicates the profile outside Claude, needs its own UI and auth, and loses
+  the follow-up questions.
+- **A "you're connected, type X" page after every login.** It's the only
+  place the server could show it, but it adds a click to every re-login and
+  device, and the user still has to type in Claude. The landing page and
+  server-side detection cover the same need.
+- **A separate `onboarding` tool.** One more tool the model has to choose
+  correctly. Routing through `start_consultation` means the user's usual
+  words trigger it.
+- **Wait for #9 and #10.** Cleaner end state, but new users stay stuck until
+  then. Phase 1 reuses `discuss_goals`, goals and notes, and migrates later.
 
-## Open questions
+## Open questions (with recommended answers)
 
-- Minimum profile before daily consultations take over.
-- How much history to pull on day one given Strava rate limits (100 requests
-  per 15 minutes per application, shared across all users).
-- Whether the existing personal/stdio user also goes through a lighter version
-  (backfill from notes, see `athlete-profile.md`) instead.
+1. **Strava athlete capacity: stay at 10 or apply for review?**
+   Recommended: do the self-serve upgrade to 10 now; apply for review only
+   when real demand appears. The landing page says access is limited while in
+   beta. Also re-read Strava's API agreement (updated 2026-06-01) on AI use
+   of Strava data before opening to people beyond friends (flagged in #12).
+2. **Minimum profile.** Recommended: goal (or "none"), health screen,
+   background, availability, as above. Results, equipment and preferences
+   stay optional.
+3. **How much history on day one?** Recommended: 12 weeks of activity
+   summaries only (1 list call, plus zones); no detail or streams. 52 weeks
+   for race detection later, once cached.
+4. **Existing users with many notes.** Recommended: never onboard them. Any
+   goal or note means existing; in Phase 2 offer the #10 backfill once, and
+   let them decline.
+5. **Health screen: how many questions, and mandatory?** Recommended: the
+   three core questions are mandatory and can't be skipped; the REDs question
+   is asked only when the context calls for it. Store only the flag and the
+   athlete's own words, no inferred diagnoses.
+6. **Where does "what to type first" live?** Recommended: landing page +
+   one line on the intervals.icu page + `start_consultation` detection. No
+   new post-login page.
+7. **Hide `setup_training_repo` per transport?** Recommended: yes, in
+   `list_tools` via `current_user_id()`, keeping the handler's refusal.
+8. **Data deletion.** There is no self-serve way to delete stored notes,
+   goals or tokens. Recommended: the landing page names a contact for
+   deletion requests now; a `delete_my_data` tool is a separate proposal.
 
-## Rollout
+## Rollout, effort and dependencies
 
-Depends on `athlete-profile.md` (profile storage, refresh, interview) and
-`consultation-context.md` (assembled `start_consultation`, server
-instructions).
-
-1. New-athlete detection and onboarding context in `start_consultation`.
-2. Resumable interview and first-block save.
-3. Landing page, `onboard` prompt, hiding `setup_training_repo` remotely.
+| Step | Effort | Depends on |
+|---|---|---|
+| 0. Dead ends: `discuss_goals` tool name, transport-aware wording, hide `setup_training_repo`, OAuth "repo not configured" message, README hosted section | S | none |
+| Strava capacity upgrade (operator action, no code) | – | none; blocks real users |
+| 1a. Landing page at `/`, intervals.icu page hint | S | none |
+| 1b. State detection + onboarding guidance in `start_consultation`, health screen, onboarding note, resumability | M | #8 only for in-place note updates (works without it by saving new notes) |
+| 2. Profile-backed onboarding, `onboard` prompt, first block | M | #10 (profile, refresh, interview), #9 (assembled context, server instructions) |
 
 ## How to verify
 
-- Integration test: a brand-new user (stubbed Strava with a few weeks of
-  activities) gets onboarding context; after saving goals and the minimum
-  profile, the next call returns daily context.
-- Integration test: interrupted onboarding resumes at the next gap.
-- Manual: a second Strava account goes through onboarding end to end on Fly.
+- Unit: `start_consultation` returns onboarding guidance for a user with no
+  goals and no notes, resume guidance with an in-progress onboarding note,
+  and daily guidance once goals exist, all for the right user only.
+- Unit: `list_tools` omits `setup_training_repo` with an OAuth token in
+  context and includes it without one.
+- Integration: `GET /` returns the landing page (200, no auth), `/mcp` still
+  401s without a token, and the `.well-known` routes are unchanged.
+- Integration: brand-new user via `login()` with stubbed Strava → onboarding
+  guidance; after `save_goals` → daily guidance. Count Strava requests made
+  during onboarding (budget ≤ 4).
+- Manual: a second Strava account (within the app's capacity) goes through
+  onboarding end to end on Fly, from the web, then continues on mobile.
