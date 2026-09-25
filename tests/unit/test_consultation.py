@@ -1,39 +1,29 @@
-"""Integration tests for start_consultation and get_current_date tools."""
+"""Unit tests for the guidance tools: start_consultation and get_current_date."""
 
-import pytest
-import re
+from datetime import datetime
 
-from train_with_gpt.server import call_tool
-
-
-@pytest.mark.asyncio
-async def test_start_consultation():
-    """Test that start_consultation provides coaching instructions."""
-    result = await call_tool("start_consultation", {})
-    
-    assert len(result) == 1
-    output = result[0].text
-    
-    # Should include instructions
-    assert "consultation" in output.lower()
-    assert "get_current_date" in output
-    assert "read_goals" in output
-    assert "read_consultation_notes" in output
-    # Should mention coaching role
-    assert "coach" in output.lower() or "role" in output.lower()
+from tests.support import text_of
+from train_with_gpt.tools import get_current_date_handler, start_consultation_handler
 
 
-@pytest.mark.asyncio
-async def test_get_current_date():
-    """Test get_current_date returns valid date information."""
-    result = await call_tool("get_current_date", {})
-    
-    assert len(result) == 1
-    output = result[0].text
-    
-    # Should contain date in YYYY-MM-DD format
-    assert re.search(r'\d{4}-\d{2}-\d{2}', output)
-    
-    # Should contain day of week
-    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    assert any(day in output for day in days)
+async def test_start_consultation_points_at_the_context_tools():
+    output = text_of(await start_consultation_handler({}))
+
+    assert output.startswith("🏃 Starting Training Consultation Session")
+    for tool in ("get_current_date", "read_goals", "list_consultation_notes", "read_consultation_notes",
+                 "search_consultation_notes", "get_activities"):
+        assert tool in output
+    assert "coach" in output.lower()
+
+
+def _formatted(moment: datetime) -> str:
+    return moment.strftime(f"%A, %B {moment.day}, %Y (%Y-%m-%d)")
+
+
+async def test_get_current_date_is_today():
+    before = datetime.now()
+    output = text_of(await get_current_date_handler({}))
+    after = datetime.now()
+
+    # (either side of the call, in case it straddled midnight)
+    assert any(f"📅 Current date: {_formatted(moment)}\n" in output for moment in (before, after))

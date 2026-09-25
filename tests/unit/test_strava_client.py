@@ -1,46 +1,46 @@
-"""Tests for the per-user Strava client (multi-user OAuth data path)."""
+"""Unit tests for the per-user Strava client (multi-user OAuth data path).
 
-from unittest.mock import patch
+Strava's HTTP API is stubbed with respx (`http_mock`); nothing else is faked.
+"""
+
+import asyncio
+import time
+from urllib.parse import parse_qs
 
 import pytest
-import respx
 from httpx import Response
 
+from tests.support import STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET
 from train_with_gpt.strava_client import StravaClient
 
-
-@pytest.fixture
-def strava_creds(monkeypatch):
-    """Provide the server's own Strava app credentials for token refresh calls."""
-    with patch("train_with_gpt.strava_client.config.client_id", "app-client-id"), \
-         patch("train_with_gpt.strava_client.config.client_secret", "app-client-secret"):
-        yield
+API = "https://www.strava.com/api/v3"
+TOKEN_URL = "https://www.strava.com/oauth/token"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_get_activities_uses_bearer_token():
-    client = StravaClient(access_token="user-access-token")
+def _token_response(access="new-access-token", refresh="new-refresh-token", expires_at=9999999999):
+    return Response(200, json={"access_token": access, "refresh_token": refresh, "expires_at": expires_at})
 
-    route = respx.get("https://www.strava.com/api/v3/athlete/activities").mock(
+
+async def test_get_activities_uses_bearer_token_and_params(http_mock):
+    route = http_mock.get(f"{API}/athlete/activities").mock(
         return_value=Response(200, json=[{"id": 1, "name": "Run"}])
     )
 
-    activities = await client.get_activities()
+    activities = await StravaClient(access_token="user-access-token").get_activities(
+        after=100, before=200, per_page=500,
+    )
 
     assert activities == [{"id": 1, "name": "Run"}]
-    assert route.calls.last.request.headers["Authorization"] == "Bearer user-access-token"
+    request = route.calls.last.request
+    assert request.headers["Authorization"] == "Bearer user-access-token"
+    assert dict(request.url.params) == {"page": "1", "per_page": "200", "after": "100", "before": "200"}
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_refresh_on_401_retries_and_persists_new_token(strava_creds):
+async def test_refresh_on_401_retries_and_persists_new_token(http_mock, strava_app_credentials):
     refreshed = {}
 
     async def on_refresh(access_token, refresh_token, expires_at):
-        refreshed["access_token"] = access_token
-        refreshed["refresh_token"] = refresh_token
-        refreshed["expires_at"] = expires_at
+        refreshed.update(access_token=access_token, refresh_token=refresh_token, expires_at=expires_at)
 
     client = StravaClient(
         access_token="stale-token",
@@ -49,19 +49,12 @@ async def test_refresh_on_401_retries_and_persists_new_token(strava_creds):
         on_refresh=on_refresh,
     )
 
-    activities_route = respx.get("https://www.strava.com/api/v3/athlete/activities")
+    activities_route = http_mock.get(f"{API}/athlete/activities")
     activities_route.side_effect = [
         Response(401, json={"message": "Unauthorized"}),
         Response(200, json=[{"id": 2, "name": "Ride"}]),
     ]
-
-    respx.post("https://www.strava.com/oauth/token").mock(
-        return_value=Response(200, json={
-            "access_token": "new-access-token",
-            "refresh_token": "new-refresh-token",
-            "expires_at": 9999999999,
-        })
-    )
+    token_route = http_mock.post(TOKEN_URL).mock(return_value=_token_response())
 
     activities = await client.get_activities()
 
@@ -72,68 +65,60 @@ async def test_refresh_on_401_retries_and_persists_new_token(strava_creds):
         "refresh_token": "new-refresh-token",
         "expires_at": 9999999999,
     }
+    # The refresh used our app credentials and the user's refresh token...
+    form = parse_qs(token_route.calls.last.request.content.decode())
+    assert form == {
+        "client_id": [STRAVA_CLIENT_ID],
+        "client_secret": [STRAVA_CLIENT_SECRET],
+        "refresh_token": ["refresh-token"],
+        "grant_type": ["refresh_token"],
+    }
+    # ...and the retry carried the new access token.
+    assert activities_route.calls.last.request.headers["Authorization"] == "Bearer new-access-token"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_proactive_refresh_when_expiring_soon(strava_creds):
-    import time
+async def test_401_without_refresh_token_is_returned_as_is(http_mock):
+    http_mock.get(f"{API}/athlete").mock(return_value=Response(401))
 
+    with pytest.raises(Exception, match="401"):
+        await StravaClient(access_token="t").get_athlete()
+
+
+async def test_refresh_without_app_credentials_fails(http_mock):
+    http_mock.get(f"{API}/athlete/activities").mock(return_value=Response(401))
+    client = StravaClient(access_token="t", refresh_token="r")
+
+    with pytest.raises(ValueError, match="Missing credentials"):
+        await client.get_activities()
+
+
+async def test_proactive_refresh_when_expiring_soon(http_mock, strava_app_credentials):
     client = StravaClient(
         access_token="soon-to-expire",
         refresh_token="refresh-token",
         expires_at=int(time.time()) + 5,  # inside the 60s refresh window
     )
-
-    respx.post("https://www.strava.com/oauth/token").mock(
-        return_value=Response(200, json={
-            "access_token": "fresh-token",
-            "refresh_token": "fresh-refresh",
-            "expires_at": 9999999999,
-        })
-    )
-    respx.get("https://www.strava.com/api/v3/athlete/activities").mock(
-        return_value=Response(200, json=[])
-    )
+    http_mock.post(TOKEN_URL).mock(return_value=_token_response(access="fresh-token"))
+    route = http_mock.get(f"{API}/athlete/activities").mock(return_value=Response(200, json=[]))
 
     await client.get_activities()
 
     assert client.access_token == "fresh-token"
+    assert route.calls.last.request.headers["Authorization"] == "Bearer fresh-token"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_get_activity_laps_returns_empty_on_404():
-    client = StravaClient(access_token="token")
+async def test_no_refresh_when_token_is_fresh(http_mock, strava_app_credentials):
+    token_route = http_mock.post(TOKEN_URL)
+    http_mock.get(f"{API}/athlete/activities").mock(return_value=Response(200, json=[]))
+    client = StravaClient(access_token="t", refresh_token="r", expires_at=int(time.time()) + 3600)
 
-    respx.get("https://www.strava.com/api/v3/activities/123/laps").mock(
-        return_value=Response(404, json={"message": "Not Found"})
-    )
+    await client.get_activities()
 
-    laps = await client.get_activity_laps(123)
-    assert laps == []
+    assert not token_route.called
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_get_athlete():
-    client = StravaClient(access_token="token")
-
-    respx.get("https://www.strava.com/api/v3/athlete").mock(
-        return_value=Response(200, json={"id": 999, "firstname": "Jane", "lastname": "Doe"})
-    )
-
-    athlete = await client.get_athlete()
-    assert athlete["id"] == 999
-
-
-@pytest.mark.asyncio
-@respx.mock
-async def test_concurrent_refreshes_for_same_user_refresh_once(strava_creds):
+async def test_concurrent_refreshes_for_same_user_refresh_once(http_mock, strava_app_credentials):
     """Strava rotates refresh tokens: a second concurrent refresh would use a dead one."""
-    import asyncio
-    import time
-
     stored = {"tokens": ("stale", "refresh-1", int(time.time()) - 10)}
 
     async def on_refresh(access_token, refresh_token, expires_at):
@@ -149,12 +134,10 @@ async def test_concurrent_refreshes_for_same_user_refresh_once(strava_creds):
             load_stored_tokens=lambda: stored["tokens"],
         )
 
-    token_route = respx.post("https://www.strava.com/oauth/token").mock(
-        return_value=Response(200, json={
-            "access_token": "fresh", "refresh_token": "refresh-2", "expires_at": 9999999999,
-        })
+    token_route = http_mock.post(TOKEN_URL).mock(
+        return_value=_token_response(access="fresh", refresh="refresh-2")
     )
-    respx.get("https://www.strava.com/api/v3/athlete/activities").mock(return_value=Response(200, json=[]))
+    http_mock.get(f"{API}/athlete/activities").mock(return_value=Response(200, json=[]))
 
     a, b = make_client(), make_client()
     await asyncio.gather(a.get_activities(), b.get_activities())
@@ -164,17 +147,82 @@ async def test_concurrent_refreshes_for_same_user_refresh_once(strava_creds):
     assert b.refresh_token == "refresh-2"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_get_all_activities_follows_pages():
-    client = StravaClient(access_token="t")
-    route = respx.get("https://www.strava.com/api/v3/athlete/activities")
+async def test_get_all_activities_follows_pages(http_mock):
+    route = http_mock.get(f"{API}/athlete/activities")
     route.side_effect = [
         Response(200, json=[{"id": i} for i in range(200)]),
         Response(200, json=[{"id": i} for i in range(200, 250)]),
     ]
 
-    activities = await client.get_all_activities(after=1, before=2)
+    activities = await StravaClient(access_token="t").get_all_activities(after=1, before=2)
 
     assert len(activities) == 250
     assert [c.request.url.params["page"] for c in route.calls] == ["1", "2"]
+
+
+async def test_get_athlete(http_mock):
+    http_mock.get(f"{API}/athlete").mock(
+        return_value=Response(200, json={"id": 999, "firstname": "Jane", "lastname": "Doe"})
+    )
+
+    athlete = await StravaClient(access_token="token").get_athlete()
+
+    assert athlete["id"] == 999
+
+
+async def test_get_activity_details(http_mock):
+    http_mock.get(f"{API}/activities/77").mock(return_value=Response(200, json={"id": 77, "sport_type": "Run"}))
+
+    assert (await StravaClient(access_token="t").get_activity_details(77))["sport_type"] == "Run"
+
+
+async def test_get_activity_laps_returns_empty_on_404(http_mock):
+    http_mock.get(f"{API}/activities/123/laps").mock(return_value=Response(404, json={"message": "Not Found"}))
+
+    assert await StravaClient(access_token="token").get_activity_laps(123) == []
+
+
+async def test_get_activity_laps_raises_on_other_errors(http_mock):
+    http_mock.get(f"{API}/activities/123/laps").mock(return_value=Response(500))
+
+    with pytest.raises(Exception, match="Failed to fetch laps: 500"):
+        await StravaClient(access_token="token").get_activity_laps(123)
+
+
+async def test_get_activity_streams_requests_keys_by_type(http_mock):
+    route = http_mock.get(f"{API}/activities/5/streams").mock(
+        return_value=Response(200, json={"time": {"data": [0, 1]}})
+    )
+
+    streams = await StravaClient(access_token="t").get_activity_streams(5, stream_types=["time", "heartrate"])
+
+    assert streams == {"time": {"data": [0, 1]}}
+    assert dict(route.calls.last.request.url.params) == {"keys": "time,heartrate", "key_by_type": "true"}
+
+
+async def test_get_activity_streams_not_found(http_mock):
+    http_mock.get(f"{API}/activities/5/streams").mock(return_value=Response(404))
+
+    with pytest.raises(Exception, match="not found"):
+        await StravaClient(access_token="t").get_activity_streams(5)
+
+
+async def test_athlete_zones_are_cached_until_forced(http_mock):
+    route = http_mock.get(f"{API}/athlete/zones").mock(
+        return_value=Response(200, json={"heart_rate": {"zones": []}})
+    )
+    client = StravaClient(access_token="t")
+
+    await client.get_athlete_zones()
+    await client.get_athlete_zones()
+    assert route.call_count == 1
+
+    await client.get_athlete_zones(force_refresh=True)
+    assert route.call_count == 2
+
+
+async def test_athlete_zones_error(http_mock):
+    http_mock.get(f"{API}/athlete/zones").mock(return_value=Response(403))
+
+    with pytest.raises(Exception, match="Failed to fetch zones: 403"):
+        await StravaClient(access_token="t").get_athlete_zones()

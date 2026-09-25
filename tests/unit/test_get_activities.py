@@ -1,29 +1,37 @@
-"""Integration tests for get_activities tool.
+"""Unit tests for the get_activities tool handler.
 
-Tests end-to-end: tool call → IntervalsClient (mocked) → response parsing → formatted output.
+Handler + a real IntervalsClient/StravaClient; only intervals.icu's and
+Strava's HTTP APIs are stubbed (respx).
 """
 
-import pytest
-from unittest.mock import patch, AsyncMock
+from datetime import datetime, timedelta
 
-from train_with_gpt.server import call_tool
+import pytest
+from httpx import Response
+
+from tests.support import text_of
+from train_with_gpt.intervals_client import IntervalsClient
+from train_with_gpt.strava_client import StravaClient
+from train_with_gpt.tools import get_activities_handler
+
+ACTIVITIES_URL = "https://intervals.icu/api/v1/athlete/0/activities"
+STRAVA_ACTIVITIES_URL = "https://www.strava.com/api/v3/athlete/activities"
 
 
 @pytest.fixture
-def mock_intervals():
-    """Mock the server's IntervalsClient instance."""
-    with patch('train_with_gpt.server.intervals') as mock:
-        mock.get_activities = AsyncMock()
-        yield mock
+def intervals(intervals_api_key):
+    return IntervalsClient()
 
 
-@pytest.mark.asyncio
-async def test_get_activities_default_last_week(mock_intervals):
-    """Test fetching activities from last 7 days with a realistic intervals.icu response."""
-    mock_intervals.get_activities.return_value = [
+@pytest.fixture
+def activities_api(http_mock):
+    return http_mock.get(ACTIVITIES_URL)
+
+
+async def test_default_is_last_seven_days(intervals, activities_api):
+    activities_api.mock(return_value=Response(200, json=[
         {
             "id": "i123456789",
-            "name": "Morning Run",
             "type": "Run",
             "distance": 10000.5,
             "moving_time": 3600,
@@ -31,98 +39,117 @@ async def test_get_activities_default_last_week(mock_intervals):
             "start_date": "2024-01-15T07:30:00Z",
             "average_heartrate": 145,
             "max_heartrate": 178,
+            "average_cadence": 85,
+            "average_temp": 12,
         },
         {
             "id": "i987654321",
-            "name": "Evening Ride",
             "type": "Ride",
             "distance": 25000,
             "moving_time": 4500,
-            "total_elevation_gain": 300,
+            "average_speed": 5.5,
+            "average_watts": 210,
+            "average_cadence": 90,
             "start_date": "2024-01-14T18:00:00Z",
-        }
-    ]
+        },
+    ]))
 
-    result = await call_tool("get_activities", {})
+    before = datetime.now()
+    output = text_of(await get_activities_handler({}, intervals))
+    after = datetime.now()
 
-    assert len(result) == 1
-    output = result[0].text
+    assert output.startswith("Found 2 activities for last 7 days:")
+    # Run: distance, time, pace, elevation, HR, cadence doubled to steps/min, temp
+    assert "2024-01-15 07:30" in output
+    assert "10.00km | 1h00m00s | ⏱️ 5:59/km | ⛰️ 150m | ❤️ 145/178 bpm | 🔄 170 spm | 🌡️ 12°C" in output
+    assert "🔗 ID: i123456789" in output
+    # Ride: speed not pace, power, rpm
+    assert "25.00km | 1h15m00s | ⏱️ 19.8km/h | ⚡ 210W | 🔄 90 rpm" in output
 
-    # Verify both activities are in output (check types, not names)
-    assert "Run" in output
-    assert "Ride" in output
-    # Distance is shown (in some format)
-    assert "10" in output and "km" in output
-
-
-@pytest.mark.asyncio
-async def test_get_activities_with_date_range(mock_intervals):
-    """Test filtering activities by date range."""
-    mock_intervals.get_activities.return_value = [
-        {
-            "id": "i111",
-            "name": "Training Run",
-            "type": "Run",
-            "distance": 5000,
-            "moving_time": 1800,
-            "start_date": "2024-01-10T10:00:00Z",
-        }
-    ]
-
-    result = await call_tool("get_activities", {
-        "start_date": "2024-01-10",
-        "end_date": "2024-01-15"
-    })
-
-    assert len(result) == 1
-    assert "Run" in result[0].text
-    assert "5.00km" in result[0].text
-    mock_intervals.get_activities.assert_called_once_with(
-        oldest="2024-01-10", newest="2024-01-15"
-    )
+    params = activities_api.calls.last.request.url.params
+    # (compare against both ends of the call, in case it straddled midnight)
+    assert params["newest"] in {before.strftime("%Y-%m-%d"), after.strftime("%Y-%m-%d")}
+    assert params["oldest"] in {
+        (before - timedelta(days=7)).strftime("%Y-%m-%d"),
+        (after - timedelta(days=7)).strftime("%Y-%m-%d"),
+    }
 
 
-@pytest.mark.asyncio
-async def test_get_activities_empty_result(mock_intervals):
-    """Test when no activities are found."""
-    mock_intervals.get_activities.return_value = []
+async def test_explicit_date_range(intervals, activities_api):
+    activities_api.mock(return_value=Response(200, json=[{
+        "id": "i111", "type": "Run", "distance": 5000, "moving_time": 1800,
+        "start_date": "2024-01-10T10:00:00Z",
+    }]))
 
-    result = await call_tool("get_activities", {})
+    output = text_of(await get_activities_handler({"start_date": "2024-01-10", "end_date": "2024-01-15"}, intervals))
 
-    assert len(result) == 1
-    assert "no activities" in result[0].text.lower() or "0" in result[0].text
-
-
-@pytest.mark.asyncio
-async def test_get_activities_api_error(mock_intervals):
-    """Test handling of intervals.icu API errors."""
-    mock_intervals.get_activities.side_effect = Exception("Unauthorized")
-
-    result = await call_tool("get_activities", {})
-
-    assert len(result) == 1
-    assert "error" in result[0].text.lower() or "unauthorized" in result[0].text.lower()
+    assert "Found 1 activities for 2024-01-10 to 2024-01-15" in output
+    assert "5.00km" in output
+    assert dict(activities_api.calls.last.request.url.params) == {"oldest": "2024-01-10", "newest": "2024-01-15"}
 
 
-@pytest.mark.asyncio
-async def test_get_activities_invalid_date_format(mock_intervals):
-    """Test validation of date format."""
-    result = await call_tool("get_activities", {
-        "start_date": "2024/01/10",  # Wrong format
-        "end_date": "2024-01-15"
-    })
+async def test_single_day(intervals, activities_api):
+    activities_api.mock(return_value=Response(200, json=[]))
 
-    assert len(result) == 1
-    assert "invalid" in result[0].text.lower() or "error" in result[0].text.lower()
+    output = text_of(await get_activities_handler({"start_date": "2024-01-10", "end_date": "2024-01-10"}, intervals))
+
+    assert output == "No activities found for 2024-01-10."
 
 
-@pytest.mark.asyncio
-async def test_get_activities_start_after_end(mock_intervals):
-    """Test validation when start date is after end date."""
-    result = await call_tool("get_activities", {
-        "start_date": "2024-01-20",
-        "end_date": "2024-01-15"
-    })
+async def test_activity_with_null_distance_and_time(intervals, activities_api):
+    """Strength workouts come back with distance/moving_time present but null."""
+    activities_api.mock(return_value=Response(200, json=[{
+        "id": "i5", "type": "WeightTraining", "distance": None, "moving_time": None,
+        "start_date": "2024-01-10T10:00:00Z",
+    }]))
 
-    assert len(result) == 1
-    assert "after" in result[0].text.lower() or "error" in result[0].text.lower()
+    output = text_of(await get_activities_handler({"start_date": "2024-01-10", "end_date": "2024-01-10"}, intervals))
+
+    assert "WeightTraining" in output
+    assert "No stats" in output
+
+
+async def test_empty_result(intervals, activities_api):
+    activities_api.mock(return_value=Response(200, json=[]))
+
+    assert text_of(await get_activities_handler({}, intervals)) == "No activities found for last 7 days."
+
+
+async def test_api_error(intervals, activities_api):
+    activities_api.mock(return_value=Response(401, json={"error": "Unauthorized"}))
+
+    output = text_of(await get_activities_handler({}, intervals))
+
+    assert output.startswith("❌ Error:")
+    assert "401" in output
+
+
+@pytest.mark.parametrize("args, message", [
+    ({"start_date": "2024/01/10", "end_date": "2024-01-15"}, "Invalid start_date format"),
+    ({"start_date": "2024-01-10", "end_date": "15.01.2024"}, "Invalid end_date format"),
+    ({"start_date": "2024-01-20", "end_date": "2024-01-15"}, "cannot be after end_date"),
+])
+async def test_invalid_arguments_make_no_request(intervals, activities_api, args, message):
+    output = text_of(await get_activities_handler(args, intervals))
+
+    assert output.startswith("❌")
+    assert message in output
+    assert not activities_api.called
+
+
+async def test_strava_client_gets_all_pages_for_the_range(http_mock):
+    route = http_mock.get(STRAVA_ACTIVITIES_URL).mock(return_value=Response(200, json=[{
+        "id": 99, "sport_type": "TrailRun", "type": "Run", "distance": 8000, "moving_time": 3000,
+        "start_date": "2024-01-12T09:00:00Z",
+    }]))
+
+    output = text_of(await get_activities_handler(
+        {"start_date": "2024-01-10", "end_date": "2024-01-15"}, StravaClient(access_token="t"),
+    ))
+
+    assert "TrailRun" in output
+    assert "🔗 ID: 99" in output
+    params = route.calls.last.request.url.params
+    assert int(params["after"]) == int(datetime(2024, 1, 10).timestamp())
+    assert int(params["before"]) == int(datetime(2024, 1, 15, 23, 59, 59).timestamp())
+    assert params["per_page"] == "200"

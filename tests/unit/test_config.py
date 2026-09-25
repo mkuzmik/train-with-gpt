@@ -1,111 +1,121 @@
-"""Tests for configuration management.
+"""Unit tests for Config: real JSON files in tmp dirs, real env vars.
 
-IMPORTANT: Config is global state - tests must be isolated!
-
-Test Coverage:
-- Initialization with None values
-- Save and load operations
-- File-based configuration
-- Environment variable overrides
-
-When adding new config fields:
-1. Update test_config_initialization to check new field
-2. Update test_config_save_and_load to test saving new field
-3. Update test_config_load_from_file to test loading new field
-4. If field can be overridden by env var, add to test_config_env_vars_override_file
-
-Always use temporary directories and patch CONFIG_FILE to avoid modifying real config.
-
-See TESTING.md for detailed guidelines.
+When adding a config field: cover its default, loading it from the file,
+saving it (if save() supports it) and, if it has one, its env var override.
 """
 
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+from train_with_gpt import config as config_module
 from train_with_gpt.config import Config
 
 
-def test_config_initialization():
-    """Test that Config initializes with None values."""
-    config = Config()
+@pytest.fixture
+def config_file(tmp_path):
+    return tmp_path / "train-with-gpt" / "config.json"
+
+
+def write_config(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+
+
+def test_defaults_are_none(config_file):
+    config = Config(config_file)
     assert config.intervals_api_key is None
     assert config.training_repo_path is None
+    assert config.client_id is None
+    assert config.client_secret is None
 
 
-def test_config_save_and_load():
-    """Test saving and loading configuration."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        config_file = Path(tmpdir) / "config.json"
-
-        with patch('train_with_gpt.config.CONFIG_FILE', config_file):
-            config = Config()
-
-            # Save config
-            config.save(
-                intervals_api_key="test_key",
-                training_repo_path="/tmp/test"
-            )
-
-            # Verify file was created
-            assert config_file.exists()
-
-            # Load config
-            with open(config_file, 'r') as f:
-                data = json.load(f)
-
-            assert data["intervalsApiKey"] == "test_key"
-            assert data["trainingRepoPath"] == "/tmp/test"
+def test_load_without_file_leaves_everything_unset(config_file):
+    config = Config(config_file)
+    config.load()
+    assert (config.intervals_api_key, config.training_repo_path, config.client_id, config.client_secret) == (
+        None, None, None, None,
+    )
 
 
-def test_config_load_from_file():
-    """Test loading configuration from file."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        config_file = Path(tmpdir) / "config.json"
-        config_dir = Path(tmpdir)
+def test_load_from_file(config_file):
+    write_config(config_file, {
+        "intervalsApiKey": "file_key",
+        "trainingRepoPath": "/tmp/training",
+        "clientId": "file-client-id",
+        "clientSecret": "file-client-secret",
+    })
 
-        # Create config file
-        config_data = {
-            "intervalsApiKey": "file_key",
-            "trainingRepoPath": "/tmp/training"
-        }
+    config = Config(config_file)
+    config.load()
 
-        with open(config_file, 'w') as f:
-            json.dump(config_data, f)
-
-        with patch('train_with_gpt.config.CONFIG_FILE', config_file), \
-             patch('train_with_gpt.config.CONFIG_DIR', config_dir):
-            config = Config()
-            config.load()
-
-            assert config.intervals_api_key == "file_key"
-            assert config.training_repo_path == "/tmp/training"
+    assert config.intervals_api_key == "file_key"
+    assert config.training_repo_path == "/tmp/training"
+    assert config.client_id == "file-client-id"
+    assert config.client_secret == "file-client-secret"
 
 
-def test_config_env_vars_override_file():
-    """Test that environment variables override config file."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        config_file = Path(tmpdir) / "config.json"
-        config_dir = Path(tmpdir)
+def test_env_vars_override_file(config_file, monkeypatch):
+    write_config(config_file, {
+        "intervalsApiKey": "file_key",
+        "trainingRepoPath": "/file/repo",
+        "clientId": "file-client-id",
+        "clientSecret": "file-client-secret",
+    })
+    monkeypatch.setenv("INTERVALS_API_KEY", "env_key")
+    monkeypatch.setenv("TRAINING_REPO_PATH", "/env/repo")
+    monkeypatch.setenv("STRAVA_CLIENT_ID", "env-client-id")
+    monkeypatch.setenv("STRAVA_CLIENT_SECRET", "env-client-secret")
 
-        # Create config file
-        config_data = {
-            "intervalsApiKey": "file_key",
-        }
+    config = Config(config_file)
+    config.load()
 
-        with open(config_file, 'w') as f:
-            json.dump(config_data, f)
+    assert config.intervals_api_key == "env_key"
+    assert config.training_repo_path == "/env/repo"
+    assert config.client_id == "env-client-id"
+    assert config.client_secret == "env-client-secret"
 
-        with patch('train_with_gpt.config.CONFIG_FILE', config_file), \
-             patch('train_with_gpt.config.CONFIG_DIR', config_dir), \
-             patch.dict('os.environ', {
-                 'INTERVALS_API_KEY': 'env_key',
-             }):
-            config = Config()
-            config.load()
 
-            # Env vars should override file
-            assert config.intervals_api_key == "env_key"
+def test_invalid_json_file_is_ignored(config_file):
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{not json")
+
+    config = Config(config_file)
+    config.load()
+
+    assert config.intervals_api_key is None
+
+
+def test_save_creates_file_and_updates_instance(config_file):
+    config = Config(config_file)
+
+    config.save(intervals_api_key="test_key", training_repo_path="/tmp/test")
+
+    assert json.loads(config_file.read_text()) == {
+        "intervalsApiKey": "test_key",
+        "trainingRepoPath": "/tmp/test",
+    }
+    assert config.intervals_api_key == "test_key"
+    assert config.training_repo_path == "/tmp/test"
+
+
+def test_save_preserves_unrelated_keys(config_file):
+    write_config(config_file, {"clientId": "keep-me", "trainingRepoPath": "/old"})
+
+    Config(config_file).save(training_repo_path="/new")
+
+    assert json.loads(config_file.read_text()) == {"clientId": "keep-me", "trainingRepoPath": "/new"}
+
+
+def test_save_then_load_round_trips(config_file):
+    Config(config_file).save(training_repo_path="/tmp/repo")
+
+    reloaded = Config(config_file)
+    reloaded.load()
+
+    assert reloaded.training_repo_path == "/tmp/repo"
+
+
+def test_default_path_is_the_module_config_file():
+    # (The hermetic conftest fixture points CONFIG_FILE into the test's tmp HOME.)
+    assert Config().get_config_path() == str(config_module.CONFIG_FILE)

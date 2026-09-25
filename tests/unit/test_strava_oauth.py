@@ -1,29 +1,28 @@
-"""Tests for the Strava-side OAuth callback (second leg of the nested flow)."""
+"""Unit tests for the Strava-side OAuth callback (second leg of the nested flow).
 
-from unittest.mock import patch
+Mounts just the callback route on a bare Starlette app, over a real temp
+store; Strava's token/profile endpoints are stubbed with respx. The full
+round trip through the real app lives in tests/integration/test_oauth_flow.py.
+"""
+
+from urllib.parse import parse_qs, urlparse
 
 import pytest
-import respx
 from httpx import Response
+from mcp.server.auth.provider import AuthorizationCode
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
+from tests.support import STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET
 from train_with_gpt import store
 from train_with_gpt.strava_oauth import build_strava_authorize_url, strava_oauth_route
 
-
-@pytest.fixture
-def db(tmp_path):
-    db_path = tmp_path / "store.db"
-    with patch("train_with_gpt.store.DB_PATH", db_path):
-        store.init_db()
-        yield db_path
+TOKEN_URL = "https://www.strava.com/oauth/token"
 
 
 @pytest.fixture
-def client(db):
-    app = Starlette(routes=[strava_oauth_route])
-    return TestClient(app)
+def client(db, strava_app_credentials):
+    return TestClient(Starlette(routes=[strava_oauth_route]))
 
 
 def _seed_pending(state="nested-state-1", claude_redirect="http://localhost:9999/callback"):
@@ -34,32 +33,46 @@ def _seed_pending(state="nested-state-1", claude_redirect="http://localhost:9999
         redirect_uri_provided_explicitly=True,
         code_challenge="challenge-abc",
         scopes=["activity:read_all"],
-        resource=None,
+        resource="http://testserver/mcp",
         claude_state="claude-state-xyz",
     )
 
 
-def test_build_strava_authorize_url():
-    with patch("train_with_gpt.strava_oauth.config.client_id", "strava-app-id"):
-        url = build_strava_authorize_url("http://localhost:8123", "some-state")
+def _query(location):
+    return {k: v[0] for k, v in parse_qs(urlparse(location).query).items()}
+
+
+def test_build_strava_authorize_url(strava_app_credentials):
+    url = build_strava_authorize_url("http://localhost:8123/", "some-state")
 
     assert url.startswith("https://www.strava.com/oauth/authorize?")
-    assert "client_id=strava-app-id" in url
-    assert "state=some-state" in url
-    assert "localhost%3A8123%2Foauth%2Fstrava%2Fcallback" in url or "localhost:8123/oauth/strava/callback" in url
+    assert _query(url) == {
+        "client_id": STRAVA_CLIENT_ID,
+        "redirect_uri": "http://localhost:8123/oauth/strava/callback",
+        "response_type": "code",
+        "approval_prompt": "auto",
+        "scope": "activity:read_all,activity:read,profile:read_all",
+        "state": "some-state",
+    }
 
 
-def test_callback_missing_state(client, db):
+def test_callback_missing_state(client):
     response = client.get("/oauth/strava/callback", follow_redirects=False)
     assert response.status_code == 400
 
 
-def test_callback_unknown_state(client, db):
+def test_callback_unknown_state(client):
     response = client.get("/oauth/strava/callback?state=nope&code=abc", follow_redirects=False)
     assert response.status_code == 400
 
 
-def test_callback_strava_error_redirects_with_error(client, db):
+def test_callback_missing_code(client):
+    _seed_pending()
+    response = client.get("/oauth/strava/callback?state=nested-state-1", follow_redirects=False)
+    assert response.status_code == 400
+
+
+def test_callback_strava_error_redirects_with_error(client):
     _seed_pending(state="nested-state-1")
 
     response = client.get(
@@ -70,15 +83,12 @@ def test_callback_strava_error_redirects_with_error(client, db):
     assert response.status_code in (302, 307)
     location = response.headers["location"]
     assert location.startswith("http://localhost:9999/callback")
-    assert "error=access_denied" in location
-    assert "state=claude-state-xyz" in location
+    assert _query(location) == {"error": "access_denied", "state": "claude-state-xyz"}
 
 
-@respx.mock
-def test_callback_success_mints_code_and_redirects(client, db):
+def test_callback_success_mints_code_and_redirects(client, http_mock):
     _seed_pending(state="nested-state-1")
-
-    respx.post("https://www.strava.com/oauth/token").mock(
+    token_route = http_mock.post(TOKEN_URL).mock(
         return_value=Response(200, json={
             "access_token": "strava-access",
             "refresh_token": "strava-refresh",
@@ -87,32 +97,62 @@ def test_callback_success_mints_code_and_redirects(client, db):
         })
     )
 
-    with patch("train_with_gpt.strava_oauth.config.client_id", "app-id"), \
-         patch("train_with_gpt.strava_oauth.config.client_secret", "app-secret"):
-        response = client.get(
-            "/oauth/strava/callback?state=nested-state-1&code=strava-code",
-            follow_redirects=False,
-        )
+    response = client.get(
+        "/oauth/strava/callback?state=nested-state-1&code=strava-code",
+        follow_redirects=False,
+    )
+
+    # Exchanged Strava's code with our app credentials
+    assert parse_qs(token_route.calls.last.request.content.decode()) == {
+        "client_id": [STRAVA_CLIENT_ID],
+        "client_secret": [STRAVA_CLIENT_SECRET],
+        "code": ["strava-code"],
+        "grant_type": ["authorization_code"],
+    }
 
     assert response.status_code in (302, 307)
     location = response.headers["location"]
     assert location.startswith("http://localhost:9999/callback")
-    assert "code=" in location
-    assert "state=claude-state-xyz" in location
+    params = _query(location)
+    assert params["state"] == "claude-state-xyz"
+
+    # Our own code is stored, bound to the Strava athlete and Claude's PKCE challenge
+    code = AuthorizationCode.model_validate_json(store.get_auth_code(params["code"]))
+    assert code.subject == "42"
+    assert code.client_id == "claude-client"
+    assert code.code_challenge == "challenge-abc"
+    assert code.scopes == ["activity:read_all"]
+    assert str(code.resource) == "http://testserver/mcp"
 
     user = store.get_user("42")
-    assert user is not None
     assert user["provider"] == "strava"
     assert user["name"] == "Jane Doe"
     assert user["access_token"] == "strava-access"
     assert user["refresh_token"] == "strava-refresh"
+    assert user["token_expires_at"] == 9999999999
 
 
-def test_pending_authorization_is_single_use_via_callback(client, db):
+def test_callback_falls_back_to_profile_when_token_has_no_athlete(client, http_mock):
+    _seed_pending()
+    http_mock.post(TOKEN_URL).mock(
+        return_value=Response(200, json={"access_token": "strava-access", "expires_at": 9999999999})
+    )
+    profile_route = http_mock.get("https://www.strava.com/api/v3/athlete").mock(
+        return_value=Response(200, json={"id": 7, "firstname": "Sam", "lastname": ""})
+    )
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=c", follow_redirects=False)
+
+    assert response.status_code in (302, 307)
+    assert profile_route.calls.last.request.headers["Authorization"] == "Bearer strava-access"
+    assert store.get_user("7")["name"] == "Sam"
+
+
+def test_pending_authorization_is_single_use_via_callback(client):
     _seed_pending(state="nested-state-1")
 
     client.get("/oauth/strava/callback?state=nested-state-1&error=denied", follow_redirects=False)
-    # Second attempt with the same state should now be unknown/expired
+    # Second attempt with the same state is now unknown
     response = client.get(
         "/oauth/strava/callback?state=nested-state-1&error=denied",
         follow_redirects=False,

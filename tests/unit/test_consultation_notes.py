@@ -1,299 +1,264 @@
-"""Integration tests for consultation notes tools."""
+"""Unit tests for the consultation-notes tools (save/read/list/search).
 
-import pytest
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
-from datetime import datetime
-
-from train_with_gpt.server import call_tool
-
-
-@pytest.mark.asyncio
-async def test_save_and_read_consultation_notes(training_repo):
-    """Test complete consultation notes workflow."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
-
-    note_content = """Discussed marathon training plan.
-
-Key Points:
-- Increase mileage gradually
-- Focus on long runs
-
-Next Steps:
-- Start with 40km/week
+Handlers run against a real git clone (`training_repo`) of a local bare
+remote (`git_remote`); notes written "by another device" are pushed to the
+remote first, so every read also exercises the real `git pull`.
 """
 
-    # Save note
-    with patch('subprocess.run'):
-        result = await call_tool("save_consultation_notes", {
-            "notes": note_content
-        })
+import re
 
-    assert len(result) == 1
-    assert "saved" in result[0].text.lower() or "success" in result[0].text.lower()
+import pytest
 
-    # Create mock note file
-    note_file = notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}_consultation.md"
-    note_file.write_text(note_content)
+from tests.support import push_files, remote_file, remote_files, text_of
+from train_with_gpt.config import config
+from train_with_gpt.tools import (
+    list_consultation_notes_handler,
+    read_consultation_notes_handler,
+    save_consultation_notes_handler,
+    search_consultation_notes_handler,
+)
 
-    # Read notes back (explicit full-history read)
-    with patch('subprocess.run'):
-        result = await call_tool("read_consultation_notes", {"all": True})
+NOT_CONFIGURED = "Training repository not configured"
 
-    assert len(result) == 1
-    output = result[0].text
-    assert "marathon" in output.lower()
+
+def eight_daily_notes():
+    return {f"notes/2024-01-{15 + i:02d}-08-00-00.md": f"Note {i + 1}\n" for i in range(8)}
+
+
+# --- save ----------------------------------------------------------------------
+
+async def test_save_writes_commits_and_pushes(training_repo, git_remote):
+    notes = "Discussed marathon training plan.\n\nNext Steps:\n- Start with 40km/week"
+
+    output = text_of(await save_consultation_notes_handler({"notes": notes}))
+
+    assert output.startswith("✅ Consultation notes saved, committed and pushed to remote:")
+    saved = sorted((training_repo / "notes").glob("*.md"))
+    assert len(saved) == 1
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md", saved[0].name)
+    content = saved[0].read_text()
+    assert content.startswith("# Consultation Notes\nDate: ")
+    assert notes in content
+    # ...and it landed in the remote, as its own commit
+    assert f"notes/{saved[0].name}" in remote_files(git_remote)
+    assert remote_file(git_remote, f"notes/{saved[0].name}") == content
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Known issue: save_* doesn't pull before committing, so if the remote moved "
+    "ahead (another device pushed) the push is rejected and the clone diverges."
+))
+async def test_save_after_remote_moved_ahead_still_pushes(training_repo, git_remote):
+    push_files(git_remote, {"notes/2024-01-10-08-00-00.md": "From another device\n"})
+
+    output = text_of(await save_consultation_notes_handler({"notes": "New note"}))
+
+    assert "pushed to remote" in output
+
+
+async def test_saved_note_can_be_read_back(training_repo):
+    await save_consultation_notes_handler({"notes": "Increase mileage gradually, 40km/week"})
+
+    output = text_of(await read_consultation_notes_handler({"all": True}))
+
+    assert output.startswith("Found 1 consultation note(s)")
     assert "40km/week" in output
 
 
-@pytest.mark.asyncio
-async def test_read_consultation_notes_no_range_returns_guidance(training_repo):
-    """Calling without since/until/note_date/all should not dump everything."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
+async def test_save_requires_notes(training_repo):
+    assert text_of(await save_consultation_notes_handler({})) == "❌ Error: No notes provided"
 
-    for i in range(3):
-        note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
-        note_file.write_text(f"Note {i+1}")
 
-    with patch('subprocess.run'):
-        result = await call_tool("read_consultation_notes", {})
+async def test_save_without_repo_configured():
+    output = text_of(await save_consultation_notes_handler({"notes": "Test note"}))
+    assert NOT_CONFIGURED in output
 
-    assert len(result) == 1
-    output = result[0].text
+
+async def test_save_when_repo_path_is_gone(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "training_repo_path", str(tmp_path / "deleted"))
+
+    output = text_of(await save_consultation_notes_handler({"notes": "x"}))
+
+    assert "path no longer exists" in output
+
+
+# --- read ----------------------------------------------------------------------
+
+async def test_read_without_range_returns_guidance(training_repo, git_remote):
+    push_files(git_remote, eight_daily_notes())
+
+    output = text_of(await read_consultation_notes_handler({}))
+
     assert "list_consultation_notes" in output
-    for i in range(3):
-        assert f"Note {i+1}" not in output
+    assert "Note 1" not in output
 
 
-@pytest.mark.asyncio
-async def test_read_consultation_notes_all(training_repo):
-    """Test that all=true returns every note."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
+async def test_read_all(training_repo, git_remote):
+    push_files(git_remote, eight_daily_notes())
 
-    # Create multiple notes
-    for i in range(8):
-        note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
-        note_file.write_text(f"Note {i+1}")
+    output = text_of(await read_consultation_notes_handler({"all": True}))
 
-    with patch('subprocess.run'):
-        result = await call_tool("read_consultation_notes", {"all": True})
-
-    assert len(result) == 1
-    output = result[0].text
-    # Should show all 8 notes
     assert "Found 8 consultation note(s)" in output
-    # Verify all notes are present
     for i in range(8):
-        assert f"Note {i+1}" in output
+        assert f"Note {i + 1}" in output
+    # newest first
+    assert output.index("Note 8") < output.index("Note 1")
 
 
-@pytest.mark.asyncio
-async def test_read_consultation_notes_since_until_range(training_repo):
-    """Test that since/until filters to the matching date range only."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
+async def test_read_picks_up_notes_pushed_elsewhere_and_says_so(training_repo, git_remote):
+    push_files(git_remote, {"notes/2024-01-15-08-00-00.md": "From the other laptop\n"})
 
-    for i in range(8):
-        note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
-        note_file.write_text(f"Note {i+1}")
+    output = text_of(await read_consultation_notes_handler({"all": True}))
 
-    with patch('subprocess.run'):
-        result = await call_tool("read_consultation_notes", {
-            "since": "2024-01-17",
-            "until": "2024-01-19",
-        })
+    assert "From the other laptop" in output
+    assert "notes/2024-01-15-08-00-00.md" in output  # git pull's summary is surfaced
 
-    assert len(result) == 1
-    output = result[0].text
+
+async def test_read_since_until_range(training_repo, git_remote):
+    push_files(git_remote, eight_daily_notes())
+
+    output = text_of(await read_consultation_notes_handler({"since": "2024-01-17", "until": "2024-01-19"}))
+
     assert "Found 3 consultation note(s)" in output
-    # 2024-01-17, 18, 19 -> Note 3, 4, 5
     for i in (2, 3, 4):
-        assert f"Note {i+1}" in output
+        assert f"Note {i + 1}" in output
     for i in (0, 1, 5, 6, 7):
-        assert f"Note {i+1}" not in output
+        assert f"Note {i + 1}" not in output
 
 
-@pytest.mark.asyncio
-async def test_read_consultation_notes_note_date(training_repo):
-    """Test that note_date returns only the note(s) from that exact date."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
+async def test_read_open_ended_since(training_repo, git_remote):
+    push_files(git_remote, eight_daily_notes())
 
-    for i in range(3):
-        note_file = notes_dir / f"2024-01-{15+i:02d}_consultation.md"
-        note_file.write_text(f"Note {i+1}")
+    output = text_of(await read_consultation_notes_handler({"since": "2024-01-21"}))
 
-    with patch('subprocess.run'):
-        result = await call_tool("read_consultation_notes", {"note_date": "2024-01-16"})
+    assert "Found 2 consultation note(s)" in output
 
-    assert len(result) == 1
-    output = result[0].text
+
+async def test_read_note_date(training_repo, git_remote):
+    push_files(git_remote, eight_daily_notes())
+
+    output = text_of(await read_consultation_notes_handler({"note_date": "2024-01-16"}))
+
     assert "Found 1 consultation note(s)" in output
     assert "Note 2" in output
-    assert "Note 1" not in output
-    assert "Note 3" not in output
+    assert "Note 1\n" not in output and "Note 3" not in output
 
 
-@pytest.mark.asyncio
-async def test_save_consultation_notes_without_repo():
-    """Test that save fails when repo not configured."""
-    from train_with_gpt.config import config
-    old_path = config.training_repo_path
-    config.training_repo_path = None
+async def test_read_range_without_matches(training_repo, git_remote):
+    push_files(git_remote, eight_daily_notes())
 
-    try:
-        result = await call_tool("save_consultation_notes", {
-            "notes": "Test note"
-        })
+    output = text_of(await read_consultation_notes_handler({"since": "2025-01-01"}))
 
-        assert len(result) == 1
-        assert "not configured" in result[0].text.lower() or "setup" in result[0].text.lower()
-    finally:
-        config.training_repo_path = old_path
+    assert output == "ℹ️ No consultation notes found for that date range."
 
 
-@pytest.mark.asyncio
-async def test_list_consultation_notes(training_repo):
-    """Test that list_consultation_notes returns a dated index with headlines."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
-
-    (notes_dir / "2024-01-15-08-00-00.md").write_text(
-        "# Consultation Notes\nDate: 2024-01-15 08:00:00\n\nDiscussed marathon training plan and mileage buildup.\n"
-    )
-    (notes_dir / "2024-01-20-08-00-00.md").write_text(
-        "# Consultation Notes\nDate: 2024-01-20 08:00:00\n\n"
-        "========================================\nHEADLINE\n========================================\n"
-        "Follow-up check-in, mileage on track.\n"
-    )
-
-    with patch('subprocess.run'):
-        result = await call_tool("list_consultation_notes", {})
-
-    assert len(result) == 1
-    output = result[0].text
-    assert "2 consultation note(s)" in output
-    assert "spanning 2024-01-15 to 2024-01-20" in output
-    assert "2024-01-15 —" in output
-    assert "2024-01-20 —" in output
-    assert "marathon training plan" in output
-    assert "Follow-up check-in" in output
+async def test_read_with_no_notes_yet(training_repo):
+    output = text_of(await read_consultation_notes_handler({"all": True}))
+    assert "No consultation notes saved yet" in output
 
 
-@pytest.mark.asyncio
-async def test_list_consultation_notes_no_repo():
-    """Test that list fails cleanly when repo not configured."""
-    from train_with_gpt.config import config
-    old_path = config.training_repo_path
-    config.training_repo_path = None
-
-    try:
-        result = await call_tool("list_consultation_notes", {})
-        assert len(result) == 1
-        assert "not configured" in result[0].text.lower() or "setup" in result[0].text.lower()
-    finally:
-        config.training_repo_path = old_path
+async def test_read_without_repo_configured():
+    assert NOT_CONFIGURED in text_of(await read_consultation_notes_handler({"all": True}))
 
 
-@pytest.mark.asyncio
-async def test_search_consultation_notes_finds_match(training_repo):
-    """Test that a matching keyword returns the note's date and a snippet."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
+# --- list ----------------------------------------------------------------------
 
-    (notes_dir / "2024-01-15-08-00-00.md").write_text(
-        "Discussed marathon training plan.\n\nMentioned some calf tightness after the long run.\n"
-    )
-    (notes_dir / "2024-01-20-08-00-00.md").write_text(
-        "Follow-up check-in, mileage on track. No issues to report.\n"
-    )
+async def test_list_is_a_dated_index_of_headlines(training_repo, git_remote):
+    push_files(git_remote, {
+        "notes/2024-01-15-08-00-00.md": (
+            "# Consultation Notes\nDate: 2024-01-15 08:00:00\n\n"
+            "Discussed marathon training plan and mileage buildup.\n"
+        ),
+        "notes/2024-01-20-08-00-00.md": (
+            "# Consultation Notes\nDate: 2024-01-20 08:00:00\n\n"
+            "========================================\nHEADLINE\n========================================\n"
+            "Follow-up check-in, mileage on track.\n"
+        ),
+    })
 
-    with patch('subprocess.run'):
-        result = await call_tool("search_consultation_notes", {"query": "calf"})
+    output = text_of(await list_consultation_notes_handler({}))
 
-    assert len(result) == 1
-    output = result[0].text
-    assert "1 match(es)" in output
-    assert "2024-01-15" in output
-    assert "calf tightness" in output
-    assert "2024-01-20" not in output
+    assert "2 consultation note(s), spanning 2024-01-15 to 2024-01-20" in output
+    assert "2024-01-15 — Discussed marathon training plan and mileage buildup." in output
+    assert "2024-01-20 — Follow-up check-in, mileage on track." in output
+    assert output.index("2024-01-20 —") < output.index("2024-01-15 —")
 
 
-@pytest.mark.asyncio
-async def test_search_consultation_notes_multiple_notes(training_repo):
-    """Test that matches across multiple notes are all returned, newest first."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
+async def test_list_with_no_notes_yet(training_repo):
+    assert "No consultation notes saved yet" in text_of(await list_consultation_notes_handler({}))
 
-    (notes_dir / "2024-01-15-08-00-00.md").write_text("Race goal: sub-4 marathon in spring.\n")
-    (notes_dir / "2024-02-10-08-00-00.md").write_text("Revisited the race goal, still on track.\n")
 
-    with patch('subprocess.run'):
-        result = await call_tool("search_consultation_notes", {"query": "race goal"})
+async def test_list_without_repo_configured():
+    assert NOT_CONFIGURED in text_of(await list_consultation_notes_handler({}))
 
-    assert len(result) == 1
-    output = result[0].text
+
+# --- search --------------------------------------------------------------------
+
+async def test_search_finds_match_with_context(training_repo, git_remote):
+    push_files(git_remote, {
+        "notes/2024-01-15-08-00-00.md": "Discussed marathon training plan.\n\nMentioned some calf tightness after the long run.\n",
+        "notes/2024-01-20-08-00-00.md": "Follow-up check-in, mileage on track. No issues to report.\n",
+    })
+
+    output = text_of(await search_consultation_notes_handler({"query": "calf"}))
+
+    assert '1 match(es) for "calf" across 1 note(s)' in output
+    assert "**2024-01-15**\nDiscussed marathon training plan.\nMentioned some calf tightness after the long run." in output
+    assert "**2024-01-20**" not in output
+
+
+async def test_search_across_notes_newest_first(training_repo, git_remote):
+    push_files(git_remote, {
+        "notes/2024-01-15-08-00-00.md": "Race goal: sub-4 marathon in spring.\n",
+        "notes/2024-02-10-08-00-00.md": "Revisited the race goal, still on track.\n",
+    })
+
+    output = text_of(await search_consultation_notes_handler({"query": "race goal"}))
+
     assert "2 match(es)" in output
     assert "across 2 note(s)" in output
-    assert output.index("2024-02-10") < output.index("2024-01-15")
+    assert output.index("**2024-02-10**") < output.index("**2024-01-15**")
 
 
-@pytest.mark.asyncio
-async def test_search_consultation_notes_case_insensitive(training_repo):
-    """Test that search matches regardless of query/text case."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
+async def test_search_merges_nearby_matches_into_one_snippet(training_repo, git_remote):
+    lines = [f"line {i}" for i in range(20)]
+    lines[5] = "knee sore"
+    lines[7] = "knee better"
+    lines[18] = "knee fine"
+    push_files(git_remote, {"notes/2024-01-15-08-00-00.md": "\n".join(lines)})
 
-    (notes_dir / "2024-01-15-08-00-00.md").write_text("Achilles felt tight during warmup.\n")
+    output = text_of(await search_consultation_notes_handler({"query": "knee"}))
 
-    with patch('subprocess.run'):
-        result = await call_tool("search_consultation_notes", {"query": "ACHILLES"})
-
-    assert len(result) == 1
-    assert "1 match(es)" in result[0].text
+    assert "2 match(es)" in output
+    assert "line 3\nline 4\nknee sore\nline 6\nknee better\nline 8\nline 9" in output
 
 
-@pytest.mark.asyncio
-async def test_search_consultation_notes_no_match(training_repo):
-    """Test that no matches returns a clear message pointing at list_consultation_notes."""
-    repo_path = training_repo
-    notes_dir = repo_path / "notes"
-    notes_dir.mkdir()
+async def test_search_is_case_insensitive(training_repo, git_remote):
+    push_files(git_remote, {"notes/2024-01-15-08-00-00.md": "Achilles felt tight during warmup.\n"})
 
-    (notes_dir / "2024-01-15-08-00-00.md").write_text("Easy week, nothing notable.\n")
+    output = text_of(await search_consultation_notes_handler({"query": "ACHILLES"}))
 
-    with patch('subprocess.run'):
-        result = await call_tool("search_consultation_notes", {"query": "hamstring"})
+    assert "1 match(es)" in output
 
-    assert len(result) == 1
-    output = result[0].text
-    assert "no matches" in output.lower()
+
+async def test_search_without_matches(training_repo, git_remote):
+    push_files(git_remote, {"notes/2024-01-15-08-00-00.md": "Easy week, nothing notable.\n"})
+
+    output = text_of(await search_consultation_notes_handler({"query": "hamstring"}))
+
+    assert "No matches" in output
     assert "list_consultation_notes" in output
 
 
-@pytest.mark.asyncio
-async def test_search_consultation_notes_without_repo():
-    """Test that search fails cleanly when repo not configured."""
-    from train_with_gpt.config import config
-    old_path = config.training_repo_path
-    config.training_repo_path = None
+@pytest.mark.parametrize("query", ["", "   ", None])
+async def test_search_requires_query(training_repo, query):
+    output = text_of(await search_consultation_notes_handler({"query": query}))
+    assert output == "❌ Error: 'query' is required."
 
-    try:
-        result = await call_tool("search_consultation_notes", {"query": "calf"})
-        assert len(result) == 1
-        assert "not configured" in result[0].text.lower() or "setup" in result[0].text.lower()
-    finally:
-        config.training_repo_path = old_path
+
+async def test_search_with_no_notes_yet(training_repo):
+    assert "No consultation notes saved yet" in text_of(await search_consultation_notes_handler({"query": "x"}))
+
+
+async def test_search_without_repo_configured():
+    assert NOT_CONFIGURED in text_of(await search_consultation_notes_handler({"query": "calf"}))

@@ -1,102 +1,93 @@
-"""Integration tests for get_resting_heart_rate tool."""
+"""Unit tests for the get_resting_heart_rate tool handler (real IntervalsClient, stubbed HTTP)."""
 
 import pytest
-from unittest.mock import patch, AsyncMock
+from httpx import Response
 
-from train_with_gpt.server import call_tool
+from tests.support import text_of
+from train_with_gpt.helpers import NO_WELLNESS_DATA_MESSAGE
+from train_with_gpt.intervals_client import IntervalsClient
+from train_with_gpt.strava_client import StravaClient
+from train_with_gpt.tools import get_resting_heart_rate_handler
+
+WELLNESS_URL = "https://intervals.icu/api/v1/athlete/0/wellness"
 
 
 @pytest.fixture
-def mock_intervals():
-    """Mock the server's IntervalsClient instance."""
-    with patch('train_with_gpt.server.intervals') as mock:
-        mock.get_wellness = AsyncMock()
-        yield mock
+def intervals(intervals_api_key):
+    return IntervalsClient()
 
 
-@pytest.mark.asyncio
-async def test_get_resting_heart_rate_single_day(mock_intervals):
-    """Test fetching resting heart rate for a single day."""
-    mock_intervals.get_wellness.return_value = [
-        {"id": "2024-01-15", "restingHR": 52},
-    ]
-
-    result = await call_tool("get_resting_heart_rate", {
-        "start_date": "2024-01-15",
-        "end_date": "2024-01-15"
-    })
-
-    assert len(result) == 1
-    output = result[0].text
-    assert "52 bpm" in output
+@pytest.fixture
+def wellness(http_mock):
+    return http_mock.get(WELLNESS_URL)
 
 
-@pytest.mark.asyncio
-async def test_get_resting_heart_rate_date_range(mock_intervals):
-    """Test fetching resting heart rate for multiple days."""
-    mock_intervals.get_wellness.return_value = [
+async def test_single_day(intervals, wellness):
+    wellness.mock(return_value=Response(200, json=[{"id": "2024-01-15", "restingHR": 52}]))
+
+    output = text_of(await get_resting_heart_rate_handler(
+        {"start_date": "2024-01-15", "end_date": "2024-01-15"}, intervals,
+    ))
+
+    assert "RHR: 52 bpm" in output
+    assert dict(wellness.calls.last.request.url.params) == {"oldest": "2024-01-15", "newest": "2024-01-15"}
+
+
+async def test_date_range_with_summary(intervals, wellness):
+    wellness.mock(return_value=Response(200, json=[
         {"id": "2024-01-15", "restingHR": 52},
         {"id": "2024-01-16", "restingHR": 54},
-    ]
+        {"id": "2024-01-17", "hrv": 60},  # no RHR that day: skipped
+    ]))
 
-    result = await call_tool("get_resting_heart_rate", {
-        "start_date": "2024-01-15",
-        "end_date": "2024-01-16"
-    })
+    output = text_of(await get_resting_heart_rate_handler(
+        {"start_date": "2024-01-15", "end_date": "2024-01-17"}, intervals,
+    ))
 
-    assert len(result) == 1
-    output = result[0].text
-    assert "2024-01-15" in output
-    assert "2024-01-16" in output
-    assert "52 bpm" in output
-    assert "54 bpm" in output
-    assert "Summary" in output
+    assert "Found 2 day(s) with RHR data" in output
+    assert "2024-01-15" in output and "2024-01-16" in output
+    assert "Average RHR: 53.0 bpm" in output
+    assert "Range: 52 - 54 bpm" in output
 
 
-@pytest.mark.asyncio
-async def test_get_resting_heart_rate_no_data_found(mock_intervals):
-    """Test when no resting heart rate data is found."""
-    mock_intervals.get_wellness.return_value = []
+async def test_no_data_found(intervals, wellness):
+    wellness.mock(return_value=Response(200, json=[]))
 
-    result = await call_tool("get_resting_heart_rate", {
-        "start_date": "2024-01-15",
-        "end_date": "2024-01-15"
-    })
+    output = text_of(await get_resting_heart_rate_handler(
+        {"start_date": "2024-01-15", "end_date": "2024-01-15"}, intervals,
+    ))
 
-    assert len(result) == 1
-    assert "No resting heart rate data found" in result[0].text
+    assert output == "No resting heart rate data found for the period 2024-01-15 to 2024-01-15"
 
 
-@pytest.mark.asyncio
-async def test_get_resting_heart_rate_invalid_date_range(mock_intervals):
-    """Test validation of date range."""
-    result = await call_tool("get_resting_heart_rate", {
-        "start_date": "2024-01-20",
-        "end_date": "2024-01-15"
-    })
+async def test_api_error(intervals, wellness):
+    wellness.mock(return_value=Response(403))
 
-    assert len(result) == 1
-    assert "cannot be after" in result[0].text.lower()
+    output = text_of(await get_resting_heart_rate_handler(
+        {"start_date": "2024-01-15", "end_date": "2024-01-15"}, intervals,
+    ))
+
+    assert output.startswith("❌ Error:")
 
 
-@pytest.mark.asyncio
-async def test_get_resting_heart_rate_range_too_large(mock_intervals):
-    """Test that date ranges over 30 days are rejected."""
-    result = await call_tool("get_resting_heart_rate", {
-        "start_date": "2024-01-01",
-        "end_date": "2024-02-15"
-    })
+@pytest.mark.parametrize("args, message", [
+    ({"start_date": "2024-01-15"}, "Both start_date and end_date are required"),
+    ({"start_date": "2024-13-01", "end_date": "2024-01-15"}, "Invalid date format"),
+    ({"start_date": "2024-01-20", "end_date": "2024-01-15"}, "cannot be after end_date"),
+    ({"start_date": "2024-01-01", "end_date": "2024-02-15"}, "Date range too large (45 days)"),
+])
+async def test_invalid_arguments_make_no_request(intervals, wellness, args, message):
+    output = text_of(await get_resting_heart_rate_handler(args, intervals))
 
-    assert len(result) == 1
-    assert "too large" in result[0].text.lower()
+    assert output.startswith("❌")
+    assert message in output
+    assert not wellness.called
 
 
-@pytest.mark.asyncio
-async def test_get_resting_heart_rate_missing_parameters(mock_intervals):
-    """Test that missing parameters are handled."""
-    result = await call_tool("get_resting_heart_rate", {
-        "start_date": "2024-01-15"
-    })
+async def test_strava_accounts_have_no_wellness_data(wellness):
+    output = text_of(await get_resting_heart_rate_handler(
+        {"start_date": "2024-01-15", "end_date": "2024-01-15"}, StravaClient(access_token="t"),
+    ))
 
-    assert len(result) == 1
-    assert "required" in result[0].text.lower()
+    assert output == NO_WELLNESS_DATA_MESSAGE
+    assert not wellness.called

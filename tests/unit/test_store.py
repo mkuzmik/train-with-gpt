@@ -1,21 +1,12 @@
-"""Tests for the multi-user OAuth SQLite store."""
+"""Unit tests for the multi-user OAuth SQLite store, against a real temp DB.
 
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
+The `db` fixture (tests/conftest.py) initialises a fresh store.db in the
+test's own tmp HOME.
+"""
 
-import pytest
+import stat
 
 from train_with_gpt import store
-
-
-@pytest.fixture
-def db(tmp_path):
-    """Point the store at an isolated temp DB file for each test."""
-    db_path = tmp_path / "store.db"
-    with patch("train_with_gpt.store.DB_PATH", db_path):
-        store.init_db()
-        yield db_path
 
 
 def test_client_round_trip(db):
@@ -122,8 +113,6 @@ def test_get_user_missing(db):
 
 
 def test_db_file_is_private(db):
-    import stat
-
     assert stat.S_IMODE(db.stat().st_mode) == 0o600
 
 
@@ -135,3 +124,28 @@ def test_delete_user_access_tokens_only_hits_that_user(db):
     assert store.delete_user_access_tokens("alice") == 2
     assert store.get_access_token_row("a1") is None
     assert store.get_access_token_row("b1") is not None
+
+
+def test_init_db_is_idempotent_and_keeps_data(db):
+    store.save_client("client-1", "{}")
+    store.init_db()
+    assert store.get_client("client-1") == "{}"
+
+
+def test_init_db_at_explicit_path_creates_private_file(tmp_path):
+    path = tmp_path / "nested" / "other.db"
+    store.init_db(path)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_pending_authorization_round_trips_resource_and_implicit_redirect(db):
+    store.save_pending_authorization(
+        state="s", client_id="c", redirect_uri="http://x/cb",
+        redirect_uri_provided_explicitly=False, code_challenge="ch",
+        scopes=[], resource="https://server/mcp", claude_state=None,
+    )
+    pending = store.pop_pending_authorization("s")
+    assert pending["redirect_uri_provided_explicitly"] is False
+    assert pending["resource"] == "https://server/mcp"
+    assert pending["claude_state"] is None
+    assert pending["scopes"] == []

@@ -1,54 +1,56 @@
-"""Integration tests for setup_training_repo tool."""
+"""Unit tests for setup_training_repo: real directories, real config file."""
 
-import pytest
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
+import json
 
-from train_with_gpt.server import call_tool
-
-
-@pytest.mark.asyncio
-async def test_setup_training_repo_success():
-    """Test successful repository setup."""
-    from train_with_gpt.config import config
-    old_repo_path = config.training_repo_path
-    
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo_path = Path(tmpdir)
-            (repo_path / ".git").mkdir()
-            
-            with patch('train_with_gpt.config.config.save'):
-                result = await call_tool("setup_training_repo", {
-                    "repo_path": str(repo_path)
-                })
-            
-            assert len(result) == 1
-            assert str(repo_path) in result[0].text
-            assert "success" in result[0].text.lower() or "configured" in result[0].text.lower()
-    finally:
-        config.training_repo_path = old_repo_path
+from tests.support import git, text_of
+from train_with_gpt.config import config
+from train_with_gpt.tools import setup_training_repo_handler
 
 
-@pytest.mark.asyncio
-async def test_setup_training_repo_not_exists():
-    """Test setup with non-existent path."""
-    result = await call_tool("setup_training_repo", {
-        "repo_path": "/nonexistent/path/to/repo"
-    })
-    
-    assert len(result) == 1
-    assert "does not exist" in result[0].text.lower()
+async def test_setup_persists_repo_path_to_config_file(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "--quiet")
+
+    output = text_of(await setup_training_repo_handler({"repo_path": str(repo)}))
+
+    assert output.startswith(f"✅ Training repository configured: {repo}")
+    assert config.training_repo_path == str(repo)
+    assert json.loads(config.config_file.read_text()) == {"trainingRepoPath": str(repo)}
 
 
-@pytest.mark.asyncio
-async def test_setup_training_repo_not_git():
-    """Test setup with non-git directory."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result = await call_tool("setup_training_repo", {
-            "repo_path": tmpdir
-        })
-        
-        assert len(result) == 1
-        assert "not a git repository" in result[0].text.lower()
+async def test_setup_expands_user_home(hermetic):
+    repo = hermetic / "training"
+    repo.mkdir()
+    git(repo, "init", "--quiet")
+
+    text_of(await setup_training_repo_handler({"repo_path": "~/training"}))
+
+    assert config.training_repo_path == str(repo)
+
+
+async def test_setup_requires_path():
+    assert text_of(await setup_training_repo_handler({})) == "❌ Error: No repository path provided"
+
+
+async def test_setup_with_missing_path(tmp_path):
+    output = text_of(await setup_training_repo_handler({"repo_path": str(tmp_path / "nope")}))
+
+    assert "Path does not exist" in output
+    assert config.training_repo_path is None
+    assert not config.config_file.exists()
+
+
+async def test_setup_with_a_file_instead_of_a_directory(tmp_path):
+    (tmp_path / "file.txt").write_text("x")
+
+    output = text_of(await setup_training_repo_handler({"repo_path": str(tmp_path / "file.txt")}))
+
+    assert "Path is not a directory" in output
+
+
+async def test_setup_with_non_git_directory(tmp_path):
+    output = text_of(await setup_training_repo_handler({"repo_path": str(tmp_path)}))
+
+    assert "Not a git repository" in output
+    assert config.training_repo_path is None

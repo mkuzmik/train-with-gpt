@@ -1,88 +1,77 @@
-"""Integration tests for goals tools: discuss_goals, save_goals, read_goals."""
+"""Unit tests for the goals tools (discuss_goals, save_goals, read_goals).
 
-import pytest
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
-
-from train_with_gpt.server import call_tool
-
-
-@pytest.mark.asyncio
-async def test_discuss_goals():
-    """Test that discuss_goals provides coaching guidance."""
-    result = await call_tool("discuss_goals", {
-        "current_situation": "I want to run my first marathon",
-        "questions": "What should my training plan look like?"
-    })
-    
-    assert len(result) == 1
-    output = result[0].text
-    
-    # Should provide meaningful guidance
-    assert len(output) > 100
-    assert any(keyword in output.lower() for keyword in [
-        "training", "plan", "goal", "week", "marathon"
-    ])
-
-
-@pytest.mark.asyncio
-async def test_save_and_read_goals_workflow(training_repo):
-    """Test complete goals workflow: save → read."""
-    repo_path = training_repo
-    
-    goals_content = """# Training Goals 2024
-
-## Marathon Goal
-- Run under 4 hours
-- Build to 60km/week
+save/read run against a real git clone of a local bare remote.
 """
-    
-    # Save goals
-    with patch('subprocess.run'):
-        result = await call_tool("save_goals", {"goals_text": goals_content})
-    
-    assert len(result) == 1
-    assert "saved" in result[0].text.lower() or "success" in result[0].text.lower()
-    
-    # Verify file was created
-    goals_file = repo_path / "goals.md"
-    goals_file.write_text(goals_content)
-    
-    # Read goals back
-    with patch('subprocess.run'):
-        result = await call_tool("read_goals", {})
-    
-    assert len(result) == 1
-    output = result[0].text
+
+from tests.support import push_files, remote_file, text_of
+from train_with_gpt.config import config
+from train_with_gpt.tools import discuss_goals_handler, read_goals_handler, save_goals_handler
+
+GOALS = "## Marathon Goal\n- Run under 4 hours\n- Build to 60km/week"
+
+
+async def test_discuss_goals_returns_the_framework():
+    output = text_of(await discuss_goals_handler({}))
+
+    assert output.startswith("# Training Goal Setting Framework")
+    assert "ASK ONE QUESTION AT A TIME" in output
+    assert "save_goals" in output
+
+
+async def test_save_goals_writes_commits_and_pushes(training_repo, git_remote):
+    output = text_of(await save_goals_handler({"goals_text": GOALS}))
+
+    assert output.startswith("✅ Goals saved, committed and pushed to remote:")
+    content = (training_repo / "goals.md").read_text()
+    assert content.startswith("# Training Goals\nSaved: ")
+    assert GOALS in content
+    assert remote_file(git_remote, "goals.md") == content
+
+
+async def test_saved_goals_can_be_read_back(training_repo):
+    await save_goals_handler({"goals_text": GOALS})
+
+    output = text_of(await read_goals_handler({}))
+
     assert "Marathon Goal" in output
     assert "4 hours" in output
 
 
-@pytest.mark.asyncio
-async def test_save_goals_without_repo():
-    """Test that save_goals fails when repo not configured."""
-    # Clear any existing repo config
-    from train_with_gpt.config import config
-    old_path = config.training_repo_path
-    config.training_repo_path = None
-    
-    try:
-        result = await call_tool("save_goals", {
-            "goals_text": "Test goals"
-        })
-        
-        assert len(result) == 1
-        assert "not configured" in result[0].text.lower() or "setup" in result[0].text.lower()
-    finally:
-        config.training_repo_path = old_path
+async def test_saving_new_goals_replaces_the_old_ones(training_repo):
+    await save_goals_handler({"goals_text": "Old goal: 10k"})
+    await save_goals_handler({"goals_text": "New goal: half marathon"})
+
+    output = text_of(await read_goals_handler({}))
+
+    assert "half marathon" in output
+    assert "10k" not in output
 
 
-@pytest.mark.asyncio
-async def test_read_goals_file_not_exists(training_repo):
-    """Test reading goals when file doesn't exist."""
-    with patch('subprocess.run'):
-        result = await call_tool("read_goals", {})
-    
-    assert len(result) == 1
-    assert "no goals" in result[0].text.lower() or "not found" in result[0].text.lower()
+async def test_read_goals_pulls_updates_from_the_remote(training_repo, git_remote):
+    push_files(git_remote, {"goals.md": "# Training Goals\n\nUpdated on another device\n"})
+
+    output = text_of(await read_goals_handler({}))
+
+    assert "Updated on another device" in output
+
+
+async def test_save_goals_requires_text(training_repo):
+    assert text_of(await save_goals_handler({"goals_text": ""})) == "❌ Error: No goals provided"
+
+
+async def test_save_goals_without_repo_configured():
+    output = text_of(await save_goals_handler({"goals_text": "Test goals"}))
+    assert "Training repository not configured" in output
+
+
+async def test_read_goals_without_repo_configured():
+    assert "Training repository not configured" in text_of(await read_goals_handler({}))
+
+
+async def test_read_goals_when_repo_path_is_gone(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "training_repo_path", str(tmp_path / "deleted"))
+    assert "path no longer exists" in text_of(await read_goals_handler({}))
+
+
+async def test_read_goals_before_any_are_saved(training_repo):
+    assert "No goals saved yet" in text_of(await read_goals_handler({}))
