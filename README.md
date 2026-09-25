@@ -18,9 +18,13 @@ There are two ways to run it: **locally over stdio** (single user, intervals.icu
 
 ### 1. Install
 
+Dependencies are pinned in `uv.lock`; install [uv](https://docs.astral.sh/uv/) (e.g. `brew install uv`), then from the project directory:
+
 ```bash
-pip install -e .
+uv sync
 ```
+
+This creates `.venv/` with the project and its locked dependencies (including the dev/test tools).
 
 ### 2. Get an intervals.icu API Key
 
@@ -50,7 +54,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "train-with-gpt": {
-      "command": "/path/to/python",
+      "command": "/path/to/train-with-gpt/.venv/bin/python",
       "args": ["-m", "train_with_gpt.server"],
       "cwd": "/path/to/train-with-gpt"
     }
@@ -59,8 +63,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```
 
 Replace:
-- `/path/to/python` with your Python path (e.g., `which python` or `~/.pyenv/shims/python`)
-- `/path/to/train-with-gpt` with your project directory
+- `/path/to/train-with-gpt` with your project directory (the `.venv` is the one `uv sync` created)
 
 Restart Claude Desktop.
 
@@ -82,8 +85,8 @@ You'll need a Strava OAuth app (instant/self-serve, unlike intervals.icu's):
 Start the server:
 
 ```bash
-train-with-gpt-http
-# or: PORT=8000 PUBLIC_URL=http://localhost:8000 train-with-gpt-http
+uv run train-with-gpt-http
+# or: PORT=8000 PUBLIC_URL=http://localhost:8000 uv run train-with-gpt-http
 ```
 
 This starts a Starlette/uvicorn app with:
@@ -379,25 +382,27 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Running Tests
 
-**Install development dependencies:**
+**Install development dependencies** (the `dev` group is included by default):
 ```bash
-pip install -e ".[dev]"
+uv sync
 ```
 
 **Run all tests:**
 ```bash
-pytest tests/ -v
+uv run pytest tests/ -v
 ```
 
 **Run specific test file:**
 ```bash
-pytest tests/test_get_activities.py -v
+uv run pytest tests/test_get_activities.py -v
 ```
 
 **Run specific test:**
 ```bash
-pytest tests/test_get_activities.py::test_get_activities_default_last_week -v
+uv run pytest tests/test_get_activities.py::test_get_activities_default_last_week -v
 ```
+
+**Changing dependencies:** edit `pyproject.toml` (or use `uv add` / `uv add --dev`), then run `uv lock` and commit the updated `uv.lock`. CI fails if the lockfile is out of date, and the Docker image installs exactly what's locked.
 
 ### Testing Tools Manually
 
@@ -405,13 +410,13 @@ Test individual tools during development:
 
 ```bash
 # List all available tools
-python test_tools.py --help
+uv run python test_tools.py --help
 
 # Test a specific tool
-python test_tools.py get_activities
+uv run python test_tools.py get_activities
 
 # Test with arguments
-python test_tools.py setup_training_repo '{"repo_path": "/path/to/repo"}'
+uv run python test_tools.py setup_training_repo '{"repo_path": "/path/to/repo"}'
 ```
 
 ### Continuous Integration
@@ -429,7 +434,7 @@ The CI pipeline tests against Python 3.10, 3.11, and 3.12.
 **Critical Rules:**
 
 ✅ **MUST DO:**
-1. **All tests must pass before committing** - Run `pytest tests/ -v`
+1. **All tests must pass before committing** - Run `uv run pytest tests/ -v`
 2. **Add tests for new features** - New tool? Add a `tests/test_<tool_name>.py`
 3. **Test both success and failure cases** - Happy path + error conditions
 4. **Use mocking for external dependencies** - No real API calls, no real filesystem modifications
@@ -526,13 +531,13 @@ async def test_get_activities():
 
 ```bash
 # Verbose output with full traceback
-pytest tests/test_get_activities.py::test_name -vv --tb=long
+uv run pytest tests/test_get_activities.py::test_name -vv --tb=long
 
 # Show print statements
-pytest tests/ -v -s
+uv run pytest tests/ -v -s
 
 # Drop into debugger on failure
-pytest tests/ --pdb
+uv run pytest tests/ --pdb
 ```
 
 **Test Files:**
