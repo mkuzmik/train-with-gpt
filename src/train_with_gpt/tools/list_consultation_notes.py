@@ -5,7 +5,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import git_pull, extract_note_headline
+from ..helpers import current_user_id, git_pull, extract_note_headline, user_scoped_notes_dir
 
 
 def list_consultation_notes_tool() -> Tool:
@@ -39,7 +39,7 @@ async def list_consultation_notes_handler(arguments: dict) -> list[TextContent]:
         # Git pull first to get latest
         pull_output = git_pull(repo_path)
 
-        notes_dir = repo_path / "notes"
+        notes_dir, _ = user_scoped_notes_dir(repo_path, current_user_id())
 
         if not notes_dir.exists():
             return [TextContent(type="text", text="ℹ️ No consultation notes saved yet.\n\nUse **save_consultation_notes** after discussing training plans to save notes for future reference.")]

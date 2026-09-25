@@ -1,148 +1,108 @@
 """Integration tests for analyze_activity tool.
 
-Tests end-to-end: tool call → Strava API calls → data analysis → formatted output.
+Tests end-to-end: tool call → IntervalsClient (mocked) → data analysis → formatted output.
 """
 
 import pytest
-import respx
-from httpx import Response
+from unittest.mock import patch, AsyncMock
 
 from train_with_gpt.server import call_tool
 
 
 @pytest.fixture
-def mock_strava_auth(monkeypatch):
-    """Set mock Strava credentials and patch the strava client."""
-    monkeypatch.setenv("STRAVA_ACCESS_TOKEN", "test_token")
-    monkeypatch.setenv("STRAVA_CLIENT_ID", "12345")
-    monkeypatch.setenv("STRAVA_CLIENT_SECRET", "secret")
-    
-    # Patch the server's strava instance directly
-    from train_with_gpt import server
-    server.strava.access_token = "test_token"
-    server.strava.client_id = "12345"
-    server.strava.client_secret = "secret"
-    
-    yield
+def mock_intervals():
+    """Mock the server's IntervalsClient instance."""
+    with patch('train_with_gpt.server.intervals') as mock:
+        mock.get_activity = AsyncMock()
+        mock.get_activity_streams = AsyncMock()
+        yield mock
 
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_analyze_activity_basic(mock_strava_auth):
-    """Test analyzing an activity with all API calls mocked."""
-    activity_id = "123456"
-    
-    # Mock activity details
-    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}").mock(
-        return_value=Response(200, json={
-            "id": 123456,
-            "name": "Long Run",
-            "type": "Run",
-            "distance": 21000,
-            "moving_time": 7200,
-            "total_elevation_gain": 200,
-            "average_heartrate": 155,
-            "max_heartrate": 180,
-            "start_date_local": "2024-01-15T07:00:00Z",
-        })
-    )
-    
-    # Mock zones
-    respx.get("https://www.strava.com/api/v3/athlete/zones").mock(
-        return_value=Response(200, json={
-            "heart_rate": {
-                "zones": [
-                    {"min": 0, "max": 130},
-                    {"min": 130, "max": 150},
-                    {"min": 150, "max": 170},
-                    {"min": 170, "max": 190},
-                ]
-            }
-        })
-    )
-    
-    # Mock streams - need to return dict with 'time' key
-    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/streams").mock(
-        return_value=Response(200, json={
-            "time": {"data": [0, 60, 120, 180, 240, 300, 360, 420, 480, 540]},
-            "heartrate": {"data": [140, 145, 150, 155, 160, 165, 170, 155, 150, 145]}
-        })
-    )
-    
-    # Mock laps
-    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/laps").mock(
-        return_value=Response(200, json=[
+async def test_analyze_activity_basic(mock_intervals):
+    """Test analyzing an activity with a single lap and precomputed HR zone times."""
+    activity_id = "i123456"
+
+    mock_intervals.get_activity.return_value = {
+        "id": activity_id,
+        "name": "Long Run",
+        "type": "Run",
+        "distance": 21000,
+        "moving_time": 7200,
+        "average_heartrate": 155,
+        "max_heartrate": 180,
+        "start_date_local": "2024-01-15T07:00:00Z",
+        "icu_hr_zones": [130, 150, 170, 190],
+        "icu_hr_zone_times": [1000, 2000, 3000, 1200],
+        "icu_power_zones": None,
+        "icu_zone_times": None,
+        "icu_intervals": [
             {
-                "name": "Lap 1",
-                "distance": 5000,
-                "elapsed_time": 1800,
-                "average_heartrate": 150,
-                "min_heartrate": 140,
-                "max_heartrate": 165
+                "distance": 21000,
+                "moving_time": 7200,
+                "elapsed_time": 7200,
+                "average_heartrate": 155,
+                "min_heartrate": 120,
+                "max_heartrate": 180,
+                "average_speed": 2.9,
+                "start_time": 0,
+                "end_time": 7200,
             }
-        ])
-    )
-    
+        ],
+    }
+
     result = await call_tool("analyze_activity", {"activity_id": activity_id})
-    
+
     assert len(result) == 1
     output = result[0].text
-    
+
     # Verify analysis output structure
-    assert "Activity 123456" in output  # Activity ID is shown
-    assert "Zone" in output or "Heart Rate" in output  # HR analysis present
+    assert f"Activity {activity_id}" in output
+    assert "Heart Rate" in output
+    assert "Zone 1" in output
 
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_analyze_activity_fast_running_uses_pace_not_speed(mock_strava_auth):
+async def test_analyze_activity_multiple_laps_uses_pace_not_speed(mock_intervals):
     """A fast running lap (>21.6 km/h) must still show min/km pace, not km/h."""
-    activity_id = "654321"
-
-    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}").mock(
-        return_value=Response(200, json={
-            "id": 654321,
-            "name": "Sprint Reps",
-            "type": "Run",
-            "distance": 3000,
-            "moving_time": 462,
-            "start_date_local": "2024-01-15T07:00:00Z",
-        })
-    )
-
-    respx.get("https://www.strava.com/api/v3/athlete/zones").mock(
-        return_value=Response(200, json={"heart_rate": {"zones": []}})
-    )
-
-    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/streams").mock(
-        return_value=Response(200, json={
-            "time": {"data": [0, 60, 120]},
-            "heartrate": {"data": [175, 180, 178]},
-        })
-    )
+    activity_id = "i654321"
 
     # 6.5 m/s ≈ 23.4 km/h ≈ 2:34/km — faster than the old 6.0 m/s speed heuristic,
     # which used to misclassify this as cycling.
-    respx.get(f"https://www.strava.com/api/v3/activities/{activity_id}/laps").mock(
-        return_value=Response(200, json=[
+    mock_intervals.get_activity.return_value = {
+        "id": activity_id,
+        "name": "Sprint Reps",
+        "type": "Run",
+        "distance": 3000,
+        "moving_time": 462,
+        "start_date_local": "2024-01-15T07:00:00Z",
+        "icu_hr_zones": None,
+        "icu_hr_zone_times": None,
+        "icu_power_zones": None,
+        "icu_zone_times": None,
+        "icu_intervals": [
             {
-                "name": "Lap 1",
                 "distance": 1000,
+                "moving_time": 154,
                 "elapsed_time": 154,
                 "average_speed": 6.5,
                 "average_heartrate": 175,
                 "average_cadence": 95,
+                "start_time": 0,
+                "end_time": 154,
             },
             {
-                "name": "Lap 2",
                 "distance": 1000,
+                "moving_time": 154,
                 "elapsed_time": 154,
                 "average_speed": 6.5,
                 "average_heartrate": 178,
                 "average_cadence": 95,
+                "start_time": 154,
+                "end_time": 308,
             },
-        ])
-    )
+        ],
+    }
 
     result = await call_tool("analyze_activity", {"activity_id": activity_id})
     text = result[0].text
@@ -154,14 +114,21 @@ async def test_analyze_activity_fast_running_uses_pace_not_speed(mock_strava_aut
 
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_analyze_activity_not_found(mock_strava_auth):
+async def test_analyze_activity_not_found(mock_intervals):
     """Test handling of non-existent activity."""
-    respx.get("https://www.strava.com/api/v3/activities/999999").mock(
-        return_value=Response(404, json={"message": "Not Found"})
-    )
-    
-    result = await call_tool("analyze_activity", {"activity_id": "999999"})
-    
+    mock_intervals.get_activity.side_effect = Exception("Activity not found")
+
+    result = await call_tool("analyze_activity", {"activity_id": "i999999"})
+
     assert len(result) == 1
     assert "error" in result[0].text.lower() or "not found" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_analyze_activity_missing_id(mock_intervals):
+    """Test missing activity_id returns an error without calling the API."""
+    result = await call_tool("analyze_activity", {})
+
+    assert len(result) == 1
+    assert "activity_id" in result[0].text.lower()
+    mock_intervals.get_activity.assert_not_called()

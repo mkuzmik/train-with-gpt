@@ -1,0 +1,48 @@
+services:
+  mcp-http:
+    build: .
+    ports:
+      - "${HOST_PORT:-8123}:8000"
+    environment:
+      PORT: "8000"
+      # Must match the host-reachable URL (the port mapping above), not the
+      # in-container port - it's what gets baked into the OAuth redirect
+      # URIs Claude and Strava are sent back to.
+      PUBLIC_URL: "${PUBLIC_URL:-http://localhost:8123}"
+      # Not secrets - just paths/URLs. Overrides config.json's
+      # trainingRepoPath (a host path, not valid inside the container) so
+      # the multi-user OAuth path gets its own shared repo, separate from
+      # the personal one the stdio/host setup uses.
+      TRAINING_REPO_PATH: /data/training-context
+      TRAINING_REPO_URL: "${TRAINING_REPO_URL:-git@github.com:mkuzmik/training-context-shared.git}"
+    secrets:
+      - training_context_deploy_key
+      - train_with_gpt_config
+    volumes:
+      # Persists store.db (OAuth clients/tokens/users) across container
+      # restarts/rebuilds.
+      - train-with-gpt-config:/home/app/.config/train-with-gpt
+      # The actual clone of TRAINING_REPO_URL, made by docker-entrypoint.sh
+      # on first start using the deploy key below. Persists across restarts.
+      - training-context-repo:/data/training-context
+
+volumes:
+  train-with-gpt-config:
+  training-context-repo:
+
+secrets:
+  # A GitHub deploy key with write access scoped to just this one repo (see
+  # README) - never an env var, never committed. Mounted read-only at
+  # /run/secrets/training_context_deploy_key, which docker-entrypoint.sh
+  # copies into the `app` user's own .ssh dir with correct ownership/perms
+  # before dropping root.
+  training_context_deploy_key:
+    file: ${HOME}/.config/train-with-gpt/training-context-deploy-key
+  # Your existing config.json (Strava clientId/clientSecret), passed as a file
+  # secret instead of STRAVA_CLIENT_ID/SECRET env vars so they don't show up in
+  # `docker inspect`/`docker exec env`. Mounted at
+  # /run/secrets/train_with_gpt_config; docker-entrypoint.sh copies it into the
+  # `app` user's config dir, since a chmod-600 file owned by the host UID isn't
+  # readable by app directly.
+  train_with_gpt_config:
+    file: ${HOME}/.config/train-with-gpt/config.json

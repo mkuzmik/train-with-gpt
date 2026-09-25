@@ -34,3 +34,11 @@ env/
 
 # OS
 .DS_Store
+
+# Secrets (docker compose auto-loads .env if present - never commit one)
+.env
+.env.*
+*deploy-key*
+*deploy_key*
+fly-token*
+*.pem

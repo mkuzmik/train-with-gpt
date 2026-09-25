@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import git_add_commit_push
+from ..helpers import current_user_id, git_add_commit_push, user_scoped_goals_file
 
 
 def save_goals_tool() -> Tool:
@@ -50,13 +50,15 @@ Saved: {timestamp}
 {goals_text}
 """
         
-        # Write to goals.md in the repo
-        goals_file = repo_path / "goals.md"
+        # Write to goals file (user-scoped for OAuth'd multi-user sessions,
+        # goals.md at the repo root for the personal path)
+        goals_file, goals_relative_path = user_scoped_goals_file(repo_path, current_user_id())
+        goals_file.parent.mkdir(parents=True, exist_ok=True)
         with open(goals_file, 'w') as f:
             f.write(content)
-        
+
         # Git add, commit, and push
-        push_status = git_add_commit_push(repo_path, "goals.md", f"Update training goals - {timestamp}")
+        push_status = git_add_commit_push(repo_path, goals_relative_path, f"Update training goals - {timestamp}")
         
         return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
     
