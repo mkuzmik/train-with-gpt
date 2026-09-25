@@ -93,7 +93,7 @@ So the refined design removes the model's ability to submit at all:
 
 - `kind`: `bug` or `improvement`. `related_tool`: one of this server's tool
   names (validated against the list).
-- The server validates and redacts the fields, adds the diagnostics block,
+- The server validates the fields (rejecting personal data), adds the diagnostics block,
   stores the draft, and returns the exact final text plus a **confirmation
   link**. Nothing is sent to GitHub.
 - **HTTP (hosted)**: the link is `https://<server>/report/<token>`, where
