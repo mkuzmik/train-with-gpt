@@ -54,16 +54,17 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "train-with-gpt": {
-      "command": "/path/to/train-with-gpt/.venv/bin/python",
-      "args": ["-m", "train_with_gpt.server"],
-      "cwd": "/path/to/train-with-gpt"
+      "command": "/path/to/train-with-gpt/.venv/bin/train-with-gpt"
     }
   }
 }
 ```
 
 Replace:
-- `/path/to/train-with-gpt` with your project directory (the `.venv` is the one `uv sync` created)
+- `/path/to/train-with-gpt` with your project directory (`train-with-gpt` is the console script `uv sync` installs into `.venv`)
+
+`/path/to/train-with-gpt/.venv/bin/python -m train_with_gpt.server` runs the
+same stdio server, if you prefer that form.
 
 Restart Claude Desktop.
 
@@ -476,10 +477,10 @@ through its public interfaces only:
   intervals.icu page, which is on when a test has
   `@pytest.mark.intervals_login_step`, by skipping it or pasting
   `intervals_api_key=...`.
-- The personal stdio server: `python -m train_with_gpt.server` as a
-  subprocess (`StdioServer`). For intervals.icu-backed tools, which need HTTP
-  stubs a subprocess can't see, use the same `Server` over the MCP SDK's
-  in-memory transport.
+- The personal stdio server: the installed `train-with-gpt` console script
+  or `python -m train_with_gpt.server` as a subprocess (`StdioServer`). For
+  intervals.icu-backed tools, which need HTTP stubs a subprocess can't see,
+  use the same `Server` over the MCP SDK's in-memory transport.
 - Configure the app the way production does, through env vars and
   `config.load()` (the `server_env` fixture).
 - Stub only external dependencies: Strava (`FakeStrava`), intervals.icu
