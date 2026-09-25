@@ -34,6 +34,7 @@ def test_config_initialization():
     config = Config()
     assert config.intervals_api_key is None
     assert config.training_repo_path is None
+    assert config.token_encryption_key is None
 
 
 def test_config_save_and_load():
@@ -70,19 +71,22 @@ def test_config_load_from_file():
         # Create config file
         config_data = {
             "intervalsApiKey": "file_key",
-            "trainingRepoPath": "/tmp/training"
+            "trainingRepoPath": "/tmp/training",
+            "tokenEncryptionKey": "file_fernet_key",
         }
 
         with open(config_file, 'w') as f:
             json.dump(config_data, f)
 
         with patch('train_with_gpt.config.CONFIG_FILE', config_file), \
-             patch('train_with_gpt.config.CONFIG_DIR', config_dir):
+             patch('train_with_gpt.config.CONFIG_DIR', config_dir), \
+             patch.dict('os.environ', {}, clear=True):
             config = Config()
             config.load()
 
             assert config.intervals_api_key == "file_key"
             assert config.training_repo_path == "/tmp/training"
+            assert config.token_encryption_key == "file_fernet_key"
 
 
 def test_config_env_vars_override_file():
@@ -94,6 +98,7 @@ def test_config_env_vars_override_file():
         # Create config file
         config_data = {
             "intervalsApiKey": "file_key",
+            "tokenEncryptionKey": "file_fernet_key",
         }
 
         with open(config_file, 'w') as f:
@@ -103,9 +108,11 @@ def test_config_env_vars_override_file():
              patch('train_with_gpt.config.CONFIG_DIR', config_dir), \
              patch.dict('os.environ', {
                  'INTERVALS_API_KEY': 'env_key',
+                 'TOKEN_ENCRYPTION_KEY': 'env_fernet_key',
              }):
             config = Config()
             config.load()
 
             # Env vars should override file
             assert config.intervals_api_key == "env_key"
+            assert config.token_encryption_key == "env_fernet_key"

@@ -12,7 +12,12 @@ class IntervalsClient:
 
     BASE_URL = "https://intervals.icu/api/v1"
 
-    def __init__(self):
+    def __init__(self, api_key: Optional[str] = None):
+        """Uses the personal configured key, or `api_key` for an OAuth'd user's own key."""
+        if api_key is not None:
+            self.api_key = api_key
+            return
+
         self.api_key = config.intervals_api_key
 
         print(f"[DEBUG] intervals.icu credentials:", file=sys.stderr)
@@ -23,6 +28,13 @@ class IntervalsClient:
         if not self.api_key:
             raise ValueError("INTERVALS_API_KEY not configured")
         return ("API_KEY", self.api_key)
+
+    async def get_athlete(self) -> dict:
+        """The key owner's profile (`id` like "i12345", `name`); also validates the key."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{self.BASE_URL}/athlete/0", auth=self._auth(), timeout=30.0)
+            response.raise_for_status()
+            return response.json()
 
     async def get_activities(self, oldest: str, newest: str) -> list[dict]:
         """

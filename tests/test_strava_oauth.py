@@ -88,13 +88,14 @@ def test_callback_success_mints_code_and_redirects(client, db):
     )
 
     with patch("train_with_gpt.strava_oauth.config.client_id", "app-id"), \
-         patch("train_with_gpt.strava_oauth.config.client_secret", "app-secret"):
+         patch("train_with_gpt.strava_oauth.config.client_secret", "app-secret"), \
+         patch("train_with_gpt.strava_oauth.config.token_encryption_key", None):
         response = client.get(
             "/oauth/strava/callback?state=nested-state-1&code=strava-code",
             follow_redirects=False,
         )
 
-    assert response.status_code in (302, 307)
+    assert response.status_code in (302, 303, 307)
     location = response.headers["location"]
     assert location.startswith("http://localhost:9999/callback")
     assert "code=" in location

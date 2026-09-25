@@ -33,6 +33,7 @@ from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from . import store
+from .intervals_connect import intervals_connect_route
 from .oauth_provider import TrainWithGptOAuthProvider
 from .server import app as mcp_app
 from .strava_oauth import strava_oauth_route
@@ -89,6 +90,7 @@ starlette_app = Starlette(
             MCP_RESOURCE_URL, authorization_servers=[AnyHttpUrl(PUBLIC_URL)]
         ),
         strava_oauth_route,
+        intervals_connect_route,
         # Route, not Mount: a Mount redirects /mcp -> /mcp/, which behind a
         # TLS-terminating proxy risks a downgrade redirect strict clients reject.
         Route("/mcp", mcp_asgi_app),
