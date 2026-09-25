@@ -9,6 +9,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 - **Goal Tracking**: Set training goals and have them persist across conversations
 - **Consultation History**: Claude remembers past conversations and provides continuity
 - **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
+- **Evidence-aware advice**: `start_consultation` carries a short, dated set of training-science principles with confidence labels and DOIs, safety referral rules and conservative weight guidance (see `docs/ideas/science-based-coaching.md`). It is general information, not medical advice.
 
 All training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
 
@@ -329,7 +330,7 @@ This tells Claude to:
 - "Show me my sleep from last night"
 - "How was my sleep on January 15?"
 - "What's my HRV trend this week?"
-- Claude shows: sleep duration/quality score, HRV, resting heart rate, rolling averages
+- Claude shows: sleep duration/quality score, HRV, resting heart rate, rolling averages, read against your own baseline rather than "higher is better"
 
 **Continuing Conversations**
 

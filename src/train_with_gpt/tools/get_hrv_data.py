@@ -4,6 +4,7 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
+from ..coaching_science import BASELINE_NOTE
 from ..helpers import NO_WELLNESS_DATA_MESSAGE
 from ..strava_client import StravaClient
 
@@ -12,7 +13,7 @@ def get_hrv_data_tool() -> Tool:
     """Return the get_hrv_data tool definition."""
     return Tool(
         name="get_hrv_data",
-        description="Get Heart Rate Variability (HRV) data from intervals.icu for a date range. HRV is a key recovery metric - higher values indicate better recovery. Returns nightly HRV values and rolling averages.",
+        description="Get Heart Rate Variability (HRV) data from intervals.icu for a date range. HRV is a recovery metric that only means something against the athlete's own baseline and normal range; single nights are noisy and higher is not always better. Returns nightly HRV values and rolling averages.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -123,6 +124,9 @@ async def get_hrv_data_handler(arguments: dict, intervals) -> list[TextContent]:
             last_28_days = hrv_records[:28]  # Most recent 28 days (4 weeks)
             avg_28d = sum(r["hrv"] for r in last_28_days) / len(last_28_days)
             lines.append(f"   28-day Rolling Avg: {avg_28d:.1f}ms")
+
+        lines.append("")
+        lines.append(BASELINE_NOTE)
 
         return [TextContent(type="text", text="\n".join(lines))]
 

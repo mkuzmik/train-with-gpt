@@ -19,7 +19,7 @@ async def discuss_goals_handler(arguments: dict) -> list[TextContent]:
     """Handle discuss_goals tool calls."""
     guidance = """# Training Goal Setting Framework
 
-**IMPORTANT: Before discussing goals, use `get_last_week_activities` to see the user's recent training data. This provides context about their current fitness level and training patterns.**
+**IMPORTANT: Before discussing goals, use `get_activities` (defaults to the last 7 days) to see the user's recent training data. This provides context about their current fitness level and training patterns.**
 
 ## Conversation Style:
 
@@ -55,7 +55,7 @@ async def discuss_goals_handler(arguments: dict) -> list[TextContent]:
 
 ## Workflow:
 
-1. **First**: Call `get_last_week_activities` to see their recent training
+1. **First**: Call `get_activities` to see their recent training
 2. **Then**: Start the conversation with ONE question about their primary goal
 3. **Continue**: Ask follow-up questions one at a time based on their answers
 4. **Finally**: Write a comprehensive summary and use `save_goals`
