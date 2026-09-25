@@ -1,5 +1,6 @@
 """Search consultation notes tool."""
 
+import asyncio
 import sys
 from pathlib import Path
 from mcp.types import Tool, TextContent
@@ -72,7 +73,7 @@ async def search_consultation_notes_handler(arguments: dict) -> list[TextContent
         if not repo_path.exists():
             return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
 
-        pull_output = git_pull(repo_path)
+        pull_output = await asyncio.to_thread(git_pull, repo_path)
 
         notes_dir, _ = user_scoped_notes_dir(repo_path, current_user_id())
 

@@ -1,5 +1,6 @@
 """List consultation notes tool."""
 
+import asyncio
 import sys
 from pathlib import Path
 from mcp.types import Tool, TextContent
@@ -37,7 +38,7 @@ async def list_consultation_notes_handler(arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
 
         # Git pull first to get latest
-        pull_output = git_pull(repo_path)
+        pull_output = await asyncio.to_thread(git_pull, repo_path)
 
         notes_dir, _ = user_scoped_notes_dir(repo_path, current_user_id())
 
@@ -54,7 +55,7 @@ async def list_consultation_notes_handler(arguments: dict) -> list[TextContent]:
         for note_file in note_files:
             with open(note_file, 'r') as f:
                 text = f.read()
-            date = note_file.stem[:10]  # YYYY-MM-DD from YYYY-MM-DD-HH-MM-SS
+            date = note_file.stem[:10]  # YYYY-MM-DD from YYYY-MM-DD-HH-MM-SS[-suffix]
             headline = extract_note_headline(text)
             lines.append(f"{date} — {headline}")
 

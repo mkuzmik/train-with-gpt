@@ -1,12 +1,13 @@
 """Save goals tool."""
 
+import asyncio
 import sys
 from datetime import datetime
 from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import current_user_id, git_add_commit_push, user_scoped_goals_file
+from ..helpers import GitSyncError, current_user_id, git_save_file, user_scoped_goals_file
 
 
 def save_goals_tool() -> Tool:
@@ -50,18 +51,22 @@ Saved: {timestamp}
 {goals_text}
 """
         
-        # Write to goals file (user-scoped for OAuth'd multi-user sessions,
-        # goals.md at the repo root for the personal path)
+        # Goals file is user-scoped for OAuth'd multi-user sessions, goals.md
+        # at the repo root for the personal path. Saving replaces it wholesale:
+        # if another device saved goals concurrently, the last save wins.
         goals_file, goals_relative_path = user_scoped_goals_file(repo_path, current_user_id())
-        goals_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(goals_file, 'w') as f:
-            f.write(content)
 
-        # Git add, commit, and push
-        push_status = git_add_commit_push(repo_path, goals_relative_path, f"Update training goals - {timestamp}")
-        
+        # Sync, write, commit and push (in a worker thread; git_save_file
+        # serializes access to the repo)
+        push_status = await asyncio.to_thread(
+            git_save_file, repo_path, goals_relative_path, content, f"Update training goals - {timestamp}"
+        )
+
         return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
-    
+
+    except GitSyncError as e:
+        return [TextContent(type="text", text=f"❌ Error: Goals were not saved. {e}")]
+
     except Exception as e:
         print(f"Error saving goals: {e}", file=sys.stderr)
         import traceback

@@ -1,5 +1,6 @@
 """Read goals tool."""
 
+import asyncio
 import sys
 from pathlib import Path
 from mcp.types import Tool, TextContent
@@ -32,7 +33,7 @@ async def read_goals_handler(arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=f"❌ Error: Training repository path no longer exists: {repo_path}")]
         
         # Git pull first to get latest
-        pull_output = git_pull(repo_path)
+        pull_output = await asyncio.to_thread(git_pull, repo_path)
         
         goals_file, _ = user_scoped_goals_file(repo_path, current_user_id())
 

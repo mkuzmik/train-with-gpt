@@ -1,8 +1,11 @@
 """Small helpers shared by unit and integration tests (no fixtures here)."""
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Fake credentials the fixtures configure; never real ones.
 STRAVA_CLIENT_ID = "test-strava-client-id"
@@ -55,6 +58,46 @@ def push_files(remote: Path, files: dict[str, str], message: str = "Add files") 
         git(other, "add", relative)
     git(other, "commit", "--quiet", "-m", message)
     git(other, "push", "--quiet", "origin", "HEAD:main")
+
+
+def race_on_commit(repo: Path, remote: Path, files: dict[str, str], times: int = 1) -> None:
+    """Make another writer push `files` to `remote` right after each of the next
+    `times` commits in `repo` - i.e. between our commit and our push, so our
+    push is rejected. Deterministic: a real git post-commit hook in `repo`.
+    Each run appends its run number to the contents, so every push is a change."""
+    counter = repo / ".git" / "race-count"
+    hook = repo / ".git" / "hooks" / "post-commit"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f"""#!{sys.executable}
+import os, sys
+from pathlib import Path
+for name in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX"):
+    os.environ.pop(name, None)
+sys.path.insert(0, {str(_PROJECT_ROOT)!r})
+from tests.support import push_files
+
+counter = Path({str(counter)!r})
+run = int(counter.read_text()) if counter.exists() else 0
+if run < {times}:
+    counter.write_text(str(run + 1))
+    files = {files!r}
+    push_files(Path({str(remote)!r}), {{p: f"{{c}}(concurrent push {{run}})\\n" for p, c in files.items()}}, "Concurrent write")
+""")
+    hook.chmod(0o755)
+
+
+def assert_clean_and_in_sync(repo: Path) -> None:
+    """`repo` has no uncommitted changes, no rebase in progress, and matches its remote."""
+    git(repo, "fetch", "--quiet")
+    assert git(repo, "status", "--porcelain", "--untracked-files=no") == ""
+    assert not (repo / ".git" / "rebase-merge").exists() and not (repo / ".git" / "rebase-apply").exists()
+    assert git(repo, "rev-parse", "HEAD") == git(repo, "rev-parse", "@{upstream}")
+
+
+def race_runs(repo: Path) -> int:
+    """How many times the race_on_commit hook has pushed."""
+    counter = repo / ".git" / "race-count"
+    return int(counter.read_text()) if counter.exists() else 0
 
 
 def remote_files(remote: Path, ref: str = "main") -> list[str]:
