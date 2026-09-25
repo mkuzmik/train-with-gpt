@@ -3,7 +3,8 @@
 Holds everything the MCP-facing OAuth Authorization Server needs: clients
 Claude dynamically registers, authorization codes and access tokens we issue,
 in-flight Strava authorizations (bridging our /authorize redirect to Strava's
-callback), and each authenticated user's Strava credentials.
+callback), each authenticated user's Strava credentials, and optional
+intervals.icu connections (API key encrypted by the caller, see secret_box.py).
 
 SDK models (OAuthClientInformationFull, AuthorizationCode, AccessToken) are
 stored as their own JSON serialization rather than column-mapped, so this
@@ -83,6 +84,21 @@ def init_db(db_path: Optional[Path] = None) -> None:
                 token_expires_at INTEGER,
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS intervals_connections (
+                user_id TEXT PRIMARY KEY,
+                athlete_id TEXT NOT NULL,
+                athlete_name TEXT,
+                encrypted_api_key TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS pending_connect_steps (
+                token TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                pending TEXT NOT NULL,
+                created_at REAL NOT NULL
             );
             """
         )
@@ -241,3 +257,52 @@ def update_user_tokens(user_id: str, access_token: str, refresh_token: Optional[
                WHERE user_id = ?""",
             (access_token, refresh_token, token_expires_at, time.time(), user_id),
         )
+
+
+# --- intervals_connections ---------------------------------------------------
+
+def save_intervals_connection(user_id: str, athlete_id: str, athlete_name: Optional[str], encrypted_api_key: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO intervals_connections
+               (user_id, athlete_id, athlete_name, encrypted_api_key, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, athlete_id, athlete_name, encrypted_api_key, time.time()),
+        )
+
+
+def get_intervals_connection(user_id: str) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM intervals_connections WHERE user_id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_intervals_connection(user_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM intervals_connections WHERE user_id = ?", (user_id,))
+
+
+# --- pending_connect_steps -----------------------------------------------------
+# The optional "add intervals.icu" page shown between Strava's callback and the
+# redirect back to Claude. Holds the original Claude authorization request
+# until the user submits or skips.
+
+def save_pending_connect_step(token: str, user_id: str, pending: dict) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO pending_connect_steps (token, user_id, pending, created_at) VALUES (?, ?, ?, ?)",
+            (token, user_id, json.dumps(pending), time.time()),
+        )
+
+
+def get_pending_connect_step(token: str, max_age_seconds: float) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM pending_connect_steps WHERE token = ?", (token,)).fetchone()
+        if not row or row["created_at"] < time.time() - max_age_seconds:
+            return None
+        return {"user_id": row["user_id"], "pending": json.loads(row["pending"])}
+
+
+def delete_pending_connect_step(token: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM pending_connect_steps WHERE token = ?", (token,))

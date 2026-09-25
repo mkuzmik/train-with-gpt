@@ -131,7 +131,8 @@ as a file secret, and `docker-entrypoint.sh` copies it into the container's
 config dir owned by the `app` user (the host file's `chmod 600` owner UID
 usually isn't the container's). No code changes or exports are needed, just
 that the file exists on the host (`chmod 600`, and never committed - see
-`.gitignore`).
+`.gitignore`). Add `"tokenEncryptionKey"` (a Fernet key, generated as in the
+Fly.io setup below) to it to turn on the optional intervals.icu login step.
 
 This maps container port 8000 to `localhost:8123` on the host and sets
 `PUBLIC_URL=http://localhost:8123` to match (override either with `HOST_PORT`/
@@ -197,10 +198,13 @@ through `fly secrets` or files under `~/.config/train-with-gpt/`.
    fly secrets set -a <app> \
      STRAVA_CLIENT_ID=... \
      STRAVA_CLIENT_SECRET=... \
-     "TRAINING_CONTEXT_DEPLOY_KEY=$(cat ~/.config/train-with-gpt/training-context-deploy-key)"
+     "TRAINING_CONTEXT_DEPLOY_KEY=$(cat ~/.config/train-with-gpt/training-context-deploy-key)" \
+     "TOKEN_ENCRYPTION_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
    ```
-   Optionally `INTERVALS_API_KEY` if you want the personal intervals.icu path
-   reachable (not needed for Strava OAuth users).
+   `TOKEN_ENCRYPTION_KEY` encrypts users' intervals.icu API keys in `store.db`
+   and turns on the optional intervals.icu step at login (see below). Leave it
+   out to skip that step. Changing it later makes stored keys unreadable, so
+   users would need to add them again.
 5. Deploy:
    ```bash
    fly deploy --ha=false -a <app>
@@ -226,6 +230,23 @@ browser for Strava consent) and call a tool.
 - **Claude Desktop:** use `mcp-remote` as in the local setup, with the
   `https://<app>.fly.dev/mcp` URL.
 
+**Sleep, HRV and resting HR (optional).** Strava has no wellness data. After
+the Strava consent, the login shows one more page asking for your
+intervals.icu API key (intervals.icu → Settings → Developer Settings). If your
+Garmin syncs to intervals.icu, paste it there and the wellness tools use it;
+otherwise press Skip. The key goes from your browser straight to the server
+(never through Claude or the chat), is checked against intervals.icu, and is
+stored encrypted.
+
+- It belongs to your account, not to a device: add it once from any client and
+  it works everywhere you're connected.
+- **Already connected?** Disconnect and reconnect the connector (claude.ai →
+  Settings → Connectors). Strava usually skips its consent screen for an app you
+  already approved, so you go straight to the intervals.icu page. The same page
+  lets you replace or disconnect the key later.
+- Personal intervals.icu keys have full access to the account. To cut the
+  server off, regenerate your key on intervals.icu.
+
 ### Operations
 
 - **Redeploy:** `fly deploy --ha=false -a <app>`. The volume (and therefore
@@ -246,9 +267,8 @@ browser for Strava consent) and call a tool.
 - **`mcp-remote` cache:** clients cache OAuth registrations per server URL in
   `~/.mcp-auth`. If you wipe the server's store, clear that folder too or you
   will get `400` on `/authorize`.
-- **Limitations:** OAuth'd users only get Strava activity data. Wellness
-  (sleep/HRV/resting HR) is only available on the personal intervals.icu path;
-  Strava has none.
+- **Limitations:** OAuth'd users' activities always come from Strava.
+  Wellness (sleep/HRV/resting HR) needs the optional intervals.icu key.
 
 ## Usage
 
