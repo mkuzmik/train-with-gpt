@@ -66,14 +66,18 @@ def _render(token: str, connection: dict | None, error: str | None = None, statu
   .primary {{ background: #1f6feb; color: #fff; border: 0; border-radius: 6px; }}
   .link {{ background: none; border: 0; color: #b42318; padding: 0; text-decoration: underline; }}
   .ok {{ color: #1a7f37; }} .err {{ color: #b42318; }} .muted {{ color: #666; font-size: .9rem; }}
-  @media (prefers-color-scheme: dark) {{ body {{ background: #111; color: #eee; }} .muted {{ color: #aaa; }} }}
+  @media (prefers-color-scheme: dark) {{
+    body {{ background: #111; color: #eee; }} .muted {{ color: #aaa; }}
+    .ok {{ color: #3fb950; }} .err, .link {{ color: #ff7b72; }}
+  }}
 </style></head><body>
 <h1>Add sleep, HRV and resting HR (optional)</h1>
 <p>Strava has no wellness data. If your Garmin syncs to intervals.icu, paste your
 intervals.icu API key to use it.</p>
-<p class="muted">Find it on intervals.icu under Settings &rarr; Developer Settings &rarr; API key.
-It is stored encrypted and only used to read your data. You can cut access
-at any time by regenerating the key there.</p>
+<p class="muted">Find it on intervals.icu under Settings &rarr; Developer Settings &rarr; API key.</p>
+<p class="muted"><b>This key gives full access to your intervals.icu account</b>, not
+just read access. This server stores it encrypted and only uses it to read your
+wellness data. You can cut access at any time by regenerating the key on intervals.icu.</p>
 {status}{error_html}
 <form method="post" action="{CONNECT_PATH}" autocomplete="off">
   <input type="hidden" name="token" value="{esc(token)}">

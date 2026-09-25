@@ -135,3 +135,28 @@ def test_delete_user_access_tokens_only_hits_that_user(db):
     assert store.delete_user_access_tokens("alice") == 2
     assert store.get_access_token_row("a1") is None
     assert store.get_access_token_row("b1") is not None
+
+
+def test_stale_pending_rows_are_pruned_and_rejected(db):
+    import time as _time
+
+    store.save_pending_authorization("old", "c", "http://x", True, "ch", [], None, None)
+    store.save_pending_connect_step("old-step", "42", {"k": "v"})
+    stale = _time.time() - store.PENDING_TTL_SECONDS - 1
+    with store._connect() as conn:
+        conn.execute("UPDATE pending_authorizations SET created_at = ?", (stale,))
+        conn.execute("UPDATE pending_connect_steps SET created_at = ?", (stale,))
+
+    # A stale authorization is rejected even before pruning.
+    assert store.pop_pending_authorization("old") is None
+
+    store.save_pending_authorization("old2", "c", "http://x", True, "ch", [], None, None)
+    with store._connect() as conn:
+        conn.execute("UPDATE pending_authorizations SET created_at = ? WHERE state = 'old2'", (stale,))
+    store.save_pending_authorization("new", "c", "http://x", True, "ch", [], None, None)
+
+    with store._connect() as conn:
+        states = [r["state"] for r in conn.execute("SELECT state FROM pending_authorizations")]
+        steps = conn.execute("SELECT COUNT(*) FROM pending_connect_steps").fetchone()[0]
+    assert states == ["new"]
+    assert steps == 0

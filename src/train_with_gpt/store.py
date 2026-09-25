@@ -21,6 +21,11 @@ from typing import Optional
 
 DB_PATH = Path.home() / ".config" / "train-with-gpt" / "store.db"
 
+# Upper bound on how long a half-finished login (Strava consent, intervals.icu
+# page) stays usable. Older rows are rejected and pruned whenever a new one is
+# saved, so logins abandoned mid-way don't accumulate.
+PENDING_TTL_SECONDS = 60 * 60
+
 
 def _open_private(db_path: Path) -> sqlite3.Connection:
     """Open the DB, making sure only the owner can read it.
@@ -174,6 +179,12 @@ def delete_user_access_tokens(user_id: str) -> int:
 
 # --- pending_authorizations --------------------------------------------------
 
+def _prune_pending(conn: sqlite3.Connection) -> None:
+    cutoff = time.time() - PENDING_TTL_SECONDS
+    conn.execute("DELETE FROM pending_authorizations WHERE created_at < ?", (cutoff,))
+    conn.execute("DELETE FROM pending_connect_steps WHERE created_at < ?", (cutoff,))
+
+
 def save_pending_authorization(
     state: str,
     client_id: str,
@@ -185,6 +196,7 @@ def save_pending_authorization(
     claude_state: Optional[str],
 ) -> None:
     with _connect() as conn:
+        _prune_pending(conn)
         conn.execute(
             """INSERT OR REPLACE INTO pending_authorizations
                (state, client_id, redirect_uri, redirect_uri_provided_explicitly,
@@ -205,12 +217,14 @@ def save_pending_authorization(
 
 
 def pop_pending_authorization(state: str) -> Optional[dict]:
-    """Fetch and delete a pending authorization (single-use)."""
+    """Fetch and delete a pending authorization (single-use, expires after PENDING_TTL_SECONDS)."""
     with _connect() as conn:
         row = conn.execute("SELECT * FROM pending_authorizations WHERE state = ?", (state,)).fetchone()
         if not row:
             return None
         conn.execute("DELETE FROM pending_authorizations WHERE state = ?", (state,))
+        if row["created_at"] < time.time() - PENDING_TTL_SECONDS:
+            return None
         return {
             "client_id": row["client_id"],
             "redirect_uri": row["redirect_uri"],
@@ -289,6 +303,7 @@ def delete_intervals_connection(user_id: str) -> None:
 
 def save_pending_connect_step(token: str, user_id: str, pending: dict) -> None:
     with _connect() as conn:
+        _prune_pending(conn)
         conn.execute(
             "INSERT OR REPLACE INTO pending_connect_steps (token, user_id, pending, created_at) VALUES (?, ?, ?, ?)",
             (token, user_id, json.dumps(pending), time.time()),

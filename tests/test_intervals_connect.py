@@ -52,6 +52,7 @@ def _login_via_strava(client) -> str:
 
     assert response.status_code == 200
     assert "intervals.icu API key" in response.text
+    assert "full access" in response.text
     assert response.headers["cache-control"] == "no-store"
     return re.search(r'name="token" value="([^"]+)"', response.text).group(1)
 
