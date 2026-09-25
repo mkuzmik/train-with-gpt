@@ -181,8 +181,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     raise ValueError(f"Unknown tool: {name}")
 
 
-async def main():
-    """Run the MCP server."""
+async def serve_stdio():
+    """Run the MCP server over stdio until the client disconnects."""
     async with stdio_server() as (read_stream, write_stream):
         await app.run(
             read_stream,
@@ -191,5 +191,10 @@ async def main():
         )
 
 
+def main():
+    """Console-script entry point (`train-with-gpt`): run the stdio server."""
+    asyncio.run(serve_stdio())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

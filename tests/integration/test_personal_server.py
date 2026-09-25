@@ -1,8 +1,8 @@
 """The personal (single-user) MCP server, black box.
 
 Two ways in, both speaking real MCP:
-- the actual stdio entrypoint (`python -m train_with_gpt.server`) as a
-  subprocess, configured purely through its environment - used for
+- the actual stdio entrypoints (`python -m train_with_gpt.server`, and the
+  installed `train-with-gpt` console script) as a subprocess, configured purely through its environment - used for
   everything that needs no HTTP stubs (a subprocess can't see respx);
 - the same `Server` over the SDK's in-memory transport, in-process, for the
   intervals.icu-backed tools, whose HTTP API is stubbed with respx.
@@ -11,7 +11,9 @@ Two ways in, both speaking real MCP:
 import contextlib
 import json
 import os
+import shutil
 import sys
+import sysconfig
 
 import pytest
 from httpx import Response
@@ -39,10 +41,16 @@ def stdio_env(hermetic):
     return env
 
 
+# The console script `uv sync` installs (pyproject `[project.scripts]`), next to
+# this interpreter.
+CONSOLE_SCRIPT = shutil.which("train-with-gpt", path=sysconfig.get_path("scripts"))
+PYTHON_M = [sys.executable, "-m", "train_with_gpt.server"]
+
+
 @contextlib.asynccontextmanager
-async def StdioServer(env):
-    """Spawn the stdio entrypoint; yields an initialized MCP ClientSession."""
-    params = StdioServerParameters(command=sys.executable, args=["-m", "train_with_gpt.server"], env=env)
+async def StdioServer(env, command=PYTHON_M):
+    """Spawn a stdio entrypoint; yields an initialized MCP ClientSession."""
+    params = StdioServerParameters(command=command[0], args=command[1:], env=env)
     async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
         await session.initialize()
         yield session
@@ -52,6 +60,18 @@ async def StdioServer(env):
 
 async def test_stdio_lists_all_tools(stdio_env):
     async with StdioServer(stdio_env) as session:
+        tools = (await session.list_tools()).tools
+
+    assert len(tools) == 16
+    assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
+
+
+async def test_console_script_serves_stdio(stdio_env):
+    """The installed `train-with-gpt` command really serves MCP (it once just
+    created an un-awaited coroutine and exited)."""
+    assert CONSOLE_SCRIPT, "train-with-gpt console script not installed (run `uv sync`)"
+
+    async with StdioServer(stdio_env, command=[CONSOLE_SCRIPT]) as session:
         tools = (await session.list_tools()).tools
 
     assert len(tools) == 16
