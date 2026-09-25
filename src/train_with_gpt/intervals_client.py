@@ -14,14 +14,20 @@ class IntervalsClient:
 
     def __init__(self, api_key: Optional[str] = None):
         """Uses the personal configured key, or `api_key` for an OAuth'd user's own key."""
+        self._own_api_key = api_key
         if api_key is not None:
-            self.api_key = api_key
             return
-
-        self.api_key = config.intervals_api_key
 
         print(f"[DEBUG] intervals.icu credentials:", file=sys.stderr)
         print(f"  API_KEY: {'SET' if self.api_key else 'NOT SET'}", file=sys.stderr)
+
+    @property
+    def api_key(self) -> Optional[str]:
+        """The user's own key if given, else the personal key, read from config
+        on each use (config is the single source of truth)."""
+        if self._own_api_key is not None:
+            return self._own_api_key
+        return config.intervals_api_key
 
     def _auth(self) -> tuple[str, str]:
         """HTTP Basic auth tuple for intervals.icu (literal username 'API_KEY')."""

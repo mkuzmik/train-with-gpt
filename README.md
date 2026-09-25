@@ -387,20 +387,37 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 uv sync
 ```
 
-**Run all tests:**
+**Run everything (both levels):**
 ```bash
-uv run pytest tests/ -v
+uv run pytest
 ```
 
-**Run specific test file:**
+**Run one level:**
 ```bash
-uv run pytest tests/test_get_activities.py -v
+uv run pytest tests/unit          # or: uv run pytest -m unit
+uv run pytest tests/integration   # or: uv run pytest -m integration
 ```
 
-**Run specific test:**
+**Run a specific file or test:**
 ```bash
-uv run pytest tests/test_get_activities.py::test_get_activities_default_last_week -v
+uv run pytest tests/unit/test_get_activities.py -v
+uv run pytest tests/unit/test_get_activities.py::test_explicit_date_range -v
 ```
+
+The suite is hermetic, so it passes the same way on any machine, in any order
+(`uv run --with pytest-randomly pytest` shuffles it). `tests/conftest.py`
+enforces this for every test:
+- `HOME` is a throwaway directory, set *before* `train_with_gpt` is imported.
+  The global `config` loads at import time, so without this the tests would
+  read your real `~/.config/train-with-gpt/config.json` and `store.db`.
+- `INTERVALS_API_KEY`, `STRAVA_CLIENT_*`, `TOKEN_ENCRYPTION_KEY`,
+  `TRAINING_REPO_PATH`, `PUBLIC_URL`, `PORT` and all `GIT_*` env vars are
+  cleared, and git gets a fixed test identity.
+- The global `config` starts empty, and its file and the SQLite store live in
+  the test's `tmp_path`.
+- All httpx traffic goes through a respx router (the `http_mock` fixture).
+  Any request that isn't stubbed fails the test, and so does any non-loopback
+  socket connection.
 
 **Changing dependencies:** edit `pyproject.toml` (or use `uv add` / `uv add --dev`), then run `uv lock` and commit the updated `uv.lock`. CI fails if the lockfile is out of date, and the Docker image installs exactly what's locked.
 
@@ -425,128 +442,107 @@ Tests run automatically via GitHub Actions on:
 - Every push to main branch
 - Every pull request
 
-The CI pipeline tests against Python 3.10 through 3.14. The Docker image and local dev (`.python-version`) use 3.14.
+The CI pipeline tests against Python 3.10 through 3.14, running the unit and integration levels as separate steps. The Docker image and local dev (`.python-version`) use 3.14.
 
 **⚠️ IMPORTANT: All tests must pass before merging PRs.**
 
 ### Writing Tests
 
-**Critical Rules:**
+Tests come in two levels. Pick the level by what you're testing, not by what's
+easiest to set up.
 
-✅ **MUST DO:**
-1. **All tests must pass before committing** - Run `uv run pytest tests/ -v`
-2. **Add tests for new features** - New tool? Add a `tests/test_<tool_name>.py`
-3. **Test both success and failure cases** - Happy path + error conditions
-4. **Use mocking for external dependencies** - No real API calls, no real filesystem modifications
-5. **Keep tests isolated** - Use `tempfile.TemporaryDirectory()` and patch config
+**Unit tests (`tests/unit/`)** test one module or tool handler directly, with
+as little faking as possible:
+- Use real objects: a real `IntervalsClient`/`StravaClient`, a real temp
+  SQLite store (the `db` fixture), real config files in `tmp_path`, and real
+  git repos. The `training_repo` fixture is a clone of `git_remote`, a local
+  bare repo, and is already set as the training repo.
+- Stub only true I/O boundaries: HTTP to intervals.icu or Strava, through the
+  `http_mock` respx router.
+- Don't patch internals (`subprocess.run`, client methods, `train_with_gpt.*`
+  functions). If something is hard to test without patching, make it
+  injectable instead, like `Config(config_file)` or `create_app()`.
+- Assert on behaviour: the tool's output text, files in the repo or its
+  remote, rows in the store, and the HTTP requests that were or weren't made
+  (`route.calls`, `route.called`). Don't assert that a mock was called.
 
-❌ **MUST NOT DO:**
-1. **Never skip tests** without documenting why with `@pytest.mark.skip(reason="...")`
-2. **Never make real API calls** in tests - Always mock `IntervalsClient` methods
-3. **Never commit commented-out tests** - Fix or remove them
-4. **Never ignore test failures** - Fix the test or fix the code
+**Integration tests (`tests/integration/`)** test the app as a black box,
+through its public interfaces only:
+- The HTTP server: `create_app()` behind Starlette's `TestClient` (the `http`
+  fixture). Drive the OAuth endpoints (`/register`, `/authorize`,
+  `/oauth/strava/callback`, `/token`, `/revoke`) and `/mcp` with real MCP
+  JSON-RPC (`McpHttpClient`). `login(athlete_id)` runs the full OAuth round
+  trip and returns an initialised MCP client. It walks through the optional
+  intervals.icu page, which is on when a test has
+  `@pytest.mark.intervals_login_step`, by skipping it or pasting
+  `intervals_api_key=...`.
+- The personal stdio server: `python -m train_with_gpt.server` as a
+  subprocess (`StdioServer`). For intervals.icu-backed tools, which need HTTP
+  stubs a subprocess can't see, use the same `Server` over the MCP SDK's
+  in-memory transport.
+- Configure the app the way production does, through env vars and
+  `config.load()` (the `server_env` fixture).
+- Stub only external dependencies: Strava (`FakeStrava`), intervals.icu
+  (`http_mock`), and the git remote (`git_remote`, a local bare repo). Check
+  results through the public interface or in the bare remote, e.g. that notes
+  landed under `notes/<user_id>/`.
 
-**Test Structure:**
+**Rules for both levels:**
+1. Never touch the real `~/.config/train-with-gpt/`, real env vars or the
+   network. The autouse fixtures enforce this, so don't work around them.
+2. Don't depend on the current date or time. Use fixed dates, or compare
+   against values taken before and after the call.
+3. Don't leak state: use `monkeypatch` and fixtures, not manual
+   save-and-restore.
+4. Test both the happy path and the error cases.
+5. Don't skip tests silently. Use `@pytest.mark.skip(reason=...)` or
+   `xfail(strict=True, reason=...)` for a known bug.
 
-```python
-@pytest.mark.asyncio  # Required for async tests
-async def test_new_tool_success():
-    """Test new_tool with valid inputs."""
-    with patch('train_with_gpt.server.dependency') as mock_dep:
-        # Setup
-        mock_dep.return_value = "expected_value"
-        
-        # Execute
-        result = await call_tool("new_tool", {"arg": "value"})
-        
-        # Assert
-        assert len(result) == 1
-        assert "✅" in result[0].text
-
-@pytest.mark.asyncio
-async def test_new_tool_error_case():
-    """Test new_tool with missing required argument."""
-    result = await call_tool("new_tool", {})
-    
-    assert "❌" in result[0].text
-    assert "required" in result[0].text.lower()
-```
-
-**Common Mocking Patterns:**
-
-```python
-# Mock config
-with patch('train_with_gpt.server.config') as mock_config:
-    mock_config.training_repo_path = "/tmp/test"
-    # Run test
-
-# Mock the intervals.icu client (used by most tools)
-with patch('train_with_gpt.server.intervals') as mock_intervals:
-    mock_intervals.get_activities = AsyncMock(return_value=[...])
-    # Run test
-
-# Mock subprocess (git commands)
-with patch('subprocess.run') as mock_run:
-    mock_run.return_value = MagicMock(returncode=0, stdout="Success")
-    # Run test
-
-# Mock filesystem
-with tempfile.TemporaryDirectory() as tmpdir:
-    test_file = Path(tmpdir) / "test.txt"
-    test_file.write_text("content")
-    # Run test with isolated filesystem
-```
-
-**When Adding a New Tool:**
-
-1. Add the tool to `list_tools()` and `call_tool()` in `server.py`
-2. Add `test_{tool_name}_success` for the happy path
-3. Add `test_{tool_name}_error` for each error condition
-4. Mock all external dependencies (`intervals` client, git, filesystem)
-
-**Common Pitfalls:**
+Async tests need no decorator (`asyncio_mode = "auto"`):
 
 ```python
-# ❌ WRONG - Forgetting @pytest.mark.asyncio
-async def test_something():
-    result = await call_tool(...)
+async def test_get_activities_date_range(http_mock, intervals_api_key):
+    route = http_mock.get("https://intervals.icu/api/v1/athlete/0/activities").mock(
+        return_value=Response(200, json=[{"id": "i1", "type": "Run", "distance": 5000,
+                                          "moving_time": 1500, "start_date": "2024-01-10T10:00:00Z"}])
+    )
 
-# ✅ CORRECT
-@pytest.mark.asyncio
-async def test_something():
-    result = await call_tool(...)
+    result = await get_activities_handler(
+        {"start_date": "2024-01-10", "end_date": "2024-01-15"}, IntervalsClient()
+    )
 
-# ❌ WRONG - Making real API call
-async def test_get_activities():
-    activities = await client.get_activities()
-
-# ✅ CORRECT - Mocking the API call
-async def test_get_activities():
-    with patch('train_with_gpt.server.intervals') as mock:
-        mock.get_activities = AsyncMock(return_value=[])
-        activities = await client.get_activities()
+    assert "5.00km" in result[0].text
+    assert route.calls.last.request.url.params["oldest"] == "2024-01-10"
 ```
 
-**Debugging Failed Tests:**
+**When adding a new tool:**
+1. Add it to `list_tools()` and `call_tool()` in `server.py`.
+2. Add `tests/unit/test_<tool_name>.py` covering the handler's success and
+   error cases.
+3. Add or extend an integration test that calls it over MCP, e.g. in
+   `tests/integration/test_oauth_flow.py` or `test_personal_server.py`.
+
+**Debugging failed tests:**
 
 ```bash
-# Verbose output with full traceback
-uv run pytest tests/test_get_activities.py::test_name -vv --tb=long
-
-# Show print statements
-uv run pytest tests/ -v -s
-
-# Drop into debugger on failure
-uv run pytest tests/ --pdb
+uv run pytest tests/unit/test_get_activities.py::test_name -vv --tb=long
+uv run pytest -s        # show print/stderr output
+uv run pytest --pdb     # drop into the debugger on failure
 ```
 
-**Test Files:**
-- `tests/test_config.py` - Configuration management
-- `tests/test_get_activities.py`, `tests/test_analyze_activity.py`, `tests/test_analyze_lap.py` - Activity tools
-- `tests/test_get_sleep_data.py`, `tests/test_get_hrv_data.py`, `tests/test_get_resting_heart_rate.py` - Wellness tools
-- `tests/test_consultation_notes.py`, `tests/test_goals.py`, `tests/test_setup_training_repo.py` - Notes/goals persistence
-
-See test file headers for specific guidance on testing each module.
+**Test layout:**
+- `tests/conftest.py`: the hermetic environment and shared fixtures
+  (`http_mock`, `db`, `git_remote`, `training_repo`, credentials).
+  `tests/support.py` has plain git and text helpers.
+- `tests/unit/`: `test_config.py`, `test_store.py`, `test_helpers.py` (git
+  operations, headlines, zones), the HTTP clients (`test_intervals_client.py`,
+  `test_strava_client.py`), OAuth (`test_oauth_provider.py`,
+  `test_strava_oauth.py`, `test_intervals_connect.py` for the optional
+  intervals.icu login step and `secret_box`) and one file per tool.
+- `tests/integration/`: `test_oauth_flow.py` (full OAuth round trip, then
+  MCP tool calls), `test_http_auth.py` (the /mcp auth boundary),
+  `test_user_isolation.py` (per-user notes and goals) and
+  `test_personal_server.py` (the stdio server).
 
 ## Extending
 

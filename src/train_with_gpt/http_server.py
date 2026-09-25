@@ -13,6 +13,7 @@ bearer token this server itself issued.
 import contextlib
 import os
 import sys
+from typing import Optional
 
 import uvicorn
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
@@ -38,65 +39,80 @@ from .oauth_provider import TrainWithGptOAuthProvider
 from .server import app as mcp_app
 from .strava_oauth import strava_oauth_route
 
-PUBLIC_URL = os.environ.get("PUBLIC_URL", f"http://localhost:{os.environ.get('PORT', '8000')}")
 
-store.init_db()
-
-provider = TrainWithGptOAuthProvider(issuer_base_url=PUBLIC_URL)
-token_verifier = ProviderTokenVerifier(provider)
-
-session_manager = StreamableHTTPSessionManager(app=mcp_app, stateless=True)
+def default_public_url() -> str:
+    """The issuer/base URL from the environment (PUBLIC_URL, else localhost:PORT)."""
+    return os.environ.get("PUBLIC_URL", f"http://localhost:{os.environ.get('PORT', '8000')}")
 
 
-async def handle_mcp(scope: Scope, receive: Receive, send: Send) -> None:
-    await session_manager.handle_request(scope, receive, send)
-
-
-# /mcp requires a valid bearer token this server issued: AuthenticationMiddleware
-# (Starlette's own) populates scope["user"]/scope["auth"] from the token via
-# BearerAuthBackend, AuthContextMiddleware makes it available to tool handlers
-# via get_access_token(), and RequireAuthMiddleware 401s if it's missing/invalid.
-MCP_RESOURCE_URL = AnyHttpUrl(f"{PUBLIC_URL.rstrip('/')}/mcp")
-mcp_asgi_app = RequireAuthMiddleware(
-    handle_mcp,
-    required_scopes=[],
-    resource_metadata_url=build_resource_metadata_url(MCP_RESOURCE_URL),
-)
-mcp_asgi_app = AuthContextMiddleware(mcp_asgi_app)
-mcp_asgi_app = AuthenticationMiddleware(mcp_asgi_app, backend=BearerAuthBackend(token_verifier))
+PUBLIC_URL = default_public_url()
 
 
 async def health(request):
     return JSONResponse({"status": "ok"})
 
 
-@contextlib.asynccontextmanager
-async def lifespan(_app):
-    async with session_manager.run():
-        print(f"[HTTP] MCP Streamable HTTP server ready at /mcp (issuer: {PUBLIC_URL})", file=sys.stderr)
-        yield
+def create_app(public_url: Optional[str] = None) -> Starlette:
+    """Build the HTTP app: OAuth AS routes, the Strava callback and the /mcp endpoint.
+
+    Each call gets its own OAuth provider and MCP session manager (a session
+    manager can only be run once), so tests can build a fresh app per test.
+    The store is initialised on startup (lifespan), not at import time.
+    """
+    public_url = public_url or default_public_url()
+
+    provider = TrainWithGptOAuthProvider(issuer_base_url=public_url)
+    token_verifier = ProviderTokenVerifier(provider)
+
+    session_manager = StreamableHTTPSessionManager(app=mcp_app, stateless=True)
+
+    async def handle_mcp(scope: Scope, receive: Receive, send: Send) -> None:
+        await session_manager.handle_request(scope, receive, send)
+
+    # /mcp requires a valid bearer token this server issued: AuthenticationMiddleware
+    # (Starlette's own) populates scope["user"]/scope["auth"] from the token via
+    # BearerAuthBackend, AuthContextMiddleware makes it available to tool handlers
+    # via get_access_token(), and RequireAuthMiddleware 401s if it's missing/invalid.
+    mcp_resource_url = AnyHttpUrl(f"{public_url.rstrip('/')}/mcp")
+    mcp_asgi_app = RequireAuthMiddleware(
+        handle_mcp,
+        required_scopes=[],
+        resource_metadata_url=build_resource_metadata_url(mcp_resource_url),
+    )
+    mcp_asgi_app = AuthContextMiddleware(mcp_asgi_app)
+    mcp_asgi_app = AuthenticationMiddleware(mcp_asgi_app, backend=BearerAuthBackend(token_verifier))
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        store.init_db()
+        async with session_manager.run():
+            print(f"[HTTP] MCP Streamable HTTP server ready at /mcp (issuer: {public_url})", file=sys.stderr)
+            yield
+
+    return Starlette(
+        routes=[
+            Route("/health", health),
+            *create_auth_routes(
+                provider,
+                issuer_url=AnyHttpUrl(public_url),
+                client_registration_options=ClientRegistrationOptions(enabled=True),
+                revocation_options=RevocationOptions(enabled=True),
+            ),
+            *create_protected_resource_routes(
+                mcp_resource_url, authorization_servers=[AnyHttpUrl(public_url)]
+            ),
+            strava_oauth_route,
+            intervals_connect_route,
+            # Route, not Mount: a Mount redirects /mcp -> /mcp/, which behind a
+            # TLS-terminating proxy risks a downgrade redirect strict clients reject.
+            Route("/mcp", mcp_asgi_app),
+        ],
+        lifespan=lifespan,
+    )
 
 
-starlette_app = Starlette(
-    routes=[
-        Route("/health", health),
-        *create_auth_routes(
-            provider,
-            issuer_url=AnyHttpUrl(PUBLIC_URL),
-            client_registration_options=ClientRegistrationOptions(enabled=True),
-            revocation_options=RevocationOptions(enabled=True),
-        ),
-        *create_protected_resource_routes(
-            MCP_RESOURCE_URL, authorization_servers=[AnyHttpUrl(PUBLIC_URL)]
-        ),
-        strava_oauth_route,
-        intervals_connect_route,
-        # Route, not Mount: a Mount redirects /mcp -> /mcp/, which behind a
-        # TLS-terminating proxy risks a downgrade redirect strict clients reject.
-        Route("/mcp", mcp_asgi_app),
-    ],
-    lifespan=lifespan,
-)
+# The app uvicorn serves (main() below, or `uvicorn train_with_gpt.http_server:starlette_app`).
+starlette_app = create_app(PUBLIC_URL)
 
 
 def main():

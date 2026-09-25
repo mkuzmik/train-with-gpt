@@ -14,7 +14,10 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 class Config:
     """Manages train-with-gpt configuration."""
 
-    def __init__(self):
+    def __init__(self, config_file: Optional[Path] = None):
+        # Where load()/save() read and write; the per-user default unless a
+        # caller (e.g. a test) points it somewhere else.
+        self.config_file: Path = Path(config_file) if config_file else CONFIG_FILE
         self.intervals_api_key: Optional[str] = None
         self.training_repo_path: Optional[str] = None
         # Strava app credentials, used only by the multi-user OAuth path
@@ -43,7 +46,7 @@ class Config:
         self.client_secret = os.getenv("STRAVA_CLIENT_SECRET") or file_config.get("clientSecret")
         self.token_encryption_key = os.getenv("TOKEN_ENCRYPTION_KEY") or file_config.get("tokenEncryptionKey")
 
-        print(f"[CONFIG] Loaded from: {CONFIG_FILE}", file=sys.stderr)
+        print(f"[CONFIG] Loaded from: {self.config_file}", file=sys.stderr)
         print(f"[CONFIG] Intervals API Key: {'SET' if self.intervals_api_key else 'NOT SET'}", file=sys.stderr)
         print(f"[CONFIG] Strava Client ID: {self.client_id or 'NOT SET'}", file=sys.stderr)
         print(f"[CONFIG] Token Encryption Key: {'SET' if self.token_encryption_key else 'NOT SET'}", file=sys.stderr)
@@ -51,11 +54,11 @@ class Config:
 
     def _load_file(self) -> dict:
         """Load configuration from JSON file."""
-        if not CONFIG_FILE.exists():
+        if not self.config_file.exists():
             return {}
 
         try:
-            with open(CONFIG_FILE, 'r') as f:
+            with open(self.config_file, 'r') as f:
                 return json.load(f)
         except Exception as e:
             print(f"[CONFIG] Error loading config file: {e}", file=sys.stderr)
@@ -64,7 +67,7 @@ class Config:
     def save(self, **kwargs):
         """Save configuration to file."""
         # Ensure directory exists
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        self.config_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Load existing config
         existing = self._load_file()
@@ -79,14 +82,14 @@ class Config:
             self.training_repo_path = kwargs["training_repo_path"]
 
         # Write to file
-        with open(CONFIG_FILE, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(existing, f, indent=2)
 
-        print(f"[CONFIG] Saved to: {CONFIG_FILE}", file=sys.stderr)
+        print(f"[CONFIG] Saved to: {self.config_file}", file=sys.stderr)
 
     def get_config_path(self) -> str:
         """Get the configuration file path."""
-        return str(CONFIG_FILE)
+        return str(self.config_file)
 
 
 # Global config instance
