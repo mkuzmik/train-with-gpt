@@ -21,7 +21,8 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+# Build deps aren't covered by uv.lock; bound hatchling to a major version.
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project.scripts]

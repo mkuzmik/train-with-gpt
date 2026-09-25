@@ -85,8 +85,8 @@ You'll need a Strava OAuth app (instant/self-serve, unlike intervals.icu's):
 Start the server:
 
 ```bash
-train-with-gpt-http
-# or: PORT=8000 PUBLIC_URL=http://localhost:8000 train-with-gpt-http
+uv run train-with-gpt-http
+# or: PORT=8000 PUBLIC_URL=http://localhost:8000 uv run train-with-gpt-http
 ```
 
 This starts a Starlette/uvicorn app with:
