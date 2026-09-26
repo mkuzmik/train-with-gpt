@@ -5,6 +5,7 @@ Strava stubbed with respx. All credentials are fake.
 """
 
 import asyncio
+import importlib.metadata
 import time
 
 import pytest
@@ -69,11 +70,14 @@ async def test_all_checks_pass(intervals_ok, training_repo, git_remote, git_sha)
     assert "wellness: data returned" in checks["Data reads"].detail
     assert "clean" in checks["Repo read"].detail and "at origin/main" in checks["Repo read"].detail
     assert "verified on origin/main" in checks["Repo write"].detail
-    assert "GIT_SHA abc1234" in checks["Build info"].detail and "mcp " in checks["Build info"].detail
+    version = importlib.metadata.version("train-with-gpt")
+    assert checks["Build info"].detail.startswith(f"train-with-gpt {version}; GIT_SHA abc1234; ")
+    assert "mcp " in checks["Build info"].detail
     assert "self_test" in checks["Tools registered"].detail and "save_goals" in checks["Tools registered"].detail
 
     marker = remote_file(git_remote, "selftest/local.md")
     assert f"run_id: {report.run_id}" in marker and "git_sha: abc1234" in marker
+    assert f"version: {version}" in marker
 
     output = format_report(report)
     assert output.startswith("## Self-test: PASS\n")

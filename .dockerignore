@@ -8,3 +8,5 @@ tests/
 docs/
 test_tools.py
 README.md
+scripts/
+RELEASING.md

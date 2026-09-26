@@ -8,7 +8,7 @@ checks:
 2. Data reads      - activity COUNT for the last 7 days, whether wellness came back
 3. Repo read       - pull; clean, at @{upstream}, remote configured, unsynced-* branches
 4. Repo write      - save selftest/<user>.md through git_save_file, then verify on the remote
-5. Build info      - GIT_SHA, uptime, versions
+5. Build info      - release version, GIT_SHA, uptime, versions
 6. Tools registered
 
 Every check runs even if an earlier one failed, each under its own timeout.
@@ -344,6 +344,7 @@ async def check_repo_write(ctx: _Context) -> tuple[str, str]:
         "Overwritten by every self-test run; safe to delete.\n\n"
         f"- run_id: {ctx.run_id}\n"
         f"- timestamp: {ctx.started.strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
+        f"- version: {app_version()}\n"
         f"- git_sha: {git_sha()}\n"
     )
     try:
@@ -358,6 +359,14 @@ async def check_repo_write(ctx: _Context) -> tuple[str, str]:
 
 def git_sha() -> str:
     return os.environ.get("GIT_SHA") or "unknown"
+
+
+def app_version() -> str:
+    """The installed package version (pyproject.toml's; a release tag vX.Y.Z matches it)."""
+    try:
+        return importlib.metadata.version("train-with-gpt")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 
 def _duration(seconds: float) -> str:
@@ -381,7 +390,7 @@ def _machine_uptime() -> Optional[float]:
 
 async def check_build_info(ctx: _Context) -> tuple[str, str]:
     sha = git_sha()
-    parts = [f"GIT_SHA {sha}"]
+    parts = [f"train-with-gpt {app_version()}", f"GIT_SHA {sha}"]
     if ctx.in_server:
         parts.append(f"server uptime {_duration(time.monotonic() - STARTED_AT)}")
     else:
@@ -390,11 +399,10 @@ async def check_build_info(ctx: _Context) -> tuple[str, str]:
     if machine is not None:
         parts.append(f"machine uptime {_duration(machine)}")
     parts.append(f"Python {platform.python_version()}")
-    for package in ("mcp", "train-with-gpt"):
-        try:
-            parts.append(f"{package} {importlib.metadata.version(package)}")
-        except importlib.metadata.PackageNotFoundError:
-            parts.append(f"{package} ?")
+    try:
+        parts.append(f"mcp {importlib.metadata.version('mcp')}")
+    except importlib.metadata.PackageNotFoundError:
+        parts.append("mcp ?")
     return (WARN if sha == "unknown" else PASS), "; ".join(parts)
 
 
