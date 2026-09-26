@@ -202,6 +202,20 @@ async def test_missing_repo_path_degrades_gracefully(training_repo, monkeypatch)
     assert "## Path A" in output and "## Path B" in output
 
 
+async def test_a_directory_that_is_not_a_git_repo_is_not_reported_as_set_up(tmp_path, monkeypatch):
+    from train_with_gpt.config import config
+    plain = tmp_path / "plain-dir"
+    (plain / "notes").mkdir(parents=True)
+    (plain / "goals.md").write_text("# Training Goals\nSynthetic\n")
+    monkeypatch.setattr(config, "training_repo_path", str(plain))
+
+    output = await _start()
+
+    assert f"- **Notes storage:** unavailable (Not a git repository: {plain})" in output
+    assert "- **Saved goals:**" not in output
+    assert "the server can't tell" in output
+
+
 async def test_storage_error_degrades_gracefully(training_repo, monkeypatch):
     from train_with_gpt.tools import start_consultation as module
 

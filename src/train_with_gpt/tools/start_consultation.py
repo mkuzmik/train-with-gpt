@@ -70,6 +70,9 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
     repo_path = Path(config.training_repo_path)
     if not repo_path.exists():
         return TrainingHistory(storage="missing", note=f"Training repository path no longer exists: {repo_path}")
+    if not (repo_path / ".git").exists():
+        # Same check as setup_training_repo: the save tools need a git repo.
+        return TrainingHistory(storage="error", note=f"Not a git repository: {repo_path}")
     try:
         goals_file, _ = user_scoped_goals_file(repo_path, user_id)
         notes_dir, _ = user_scoped_notes_dir(repo_path, user_id)
