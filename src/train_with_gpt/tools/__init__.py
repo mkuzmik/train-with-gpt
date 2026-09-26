@@ -16,6 +16,7 @@ from .save_consultation_notes import save_consultation_notes_tool, save_consulta
 from .read_consultation_notes import read_consultation_notes_tool, read_consultation_notes_handler
 from .list_consultation_notes import list_consultation_notes_tool, list_consultation_notes_handler
 from .search_consultation_notes import search_consultation_notes_tool, search_consultation_notes_handler
+from .self_test import self_test_tool, self_test_handler
 
 __all__ = [
     "setup_training_repo_tool",
@@ -50,4 +51,6 @@ __all__ = [
     "list_consultation_notes_handler",
     "search_consultation_notes_tool",
     "search_consultation_notes_handler",
+    "self_test_tool",
+    "self_test_handler",
 ]

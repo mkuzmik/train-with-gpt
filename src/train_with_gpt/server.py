@@ -2,10 +2,13 @@
 """MCP server for training analysis."""
 
 import asyncio
+from typing import Optional
+
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import GetPromptResult, Prompt, Tool, TextContent
 
+from .helpers import current_user_id
 from .intervals_client import IntervalsClient
 from .strava_client import StravaClient
 from .tools import (
@@ -41,7 +44,10 @@ from .tools import (
     list_consultation_notes_handler,
     search_consultation_notes_tool,
     search_consultation_notes_handler,
+    self_test_tool,
+    self_test_handler,
 )
+from .tools.self_test import SELF_TEST_PROMPT_NAME, self_test_prompt, self_test_prompt_result
 
 
 app = Server("train-with-gpt")
@@ -54,8 +60,13 @@ _strava_refresh_locks: dict[str, asyncio.Lock] = {}
 
 
 def _get_active_data_client():
+    """Resolve the data client for the current request (see data_client_for)."""
+    return data_client_for(current_user_id())
+
+
+def data_client_for(user_id: Optional[str]):
     """
-    Resolve the data client for the current request.
+    Resolve the data client for `user_id` (None: stdio/personal paths).
 
     HTTP/OAuth requests carry an access token this server's own OAuth
     Authorization Server issued (see oauth_provider.py); its `.subject` is
@@ -64,15 +75,11 @@ def _get_active_data_client():
     personal local-HTTP path) has no such token in context and keeps using
     the single personal `intervals` (IntervalsClient) instance, unchanged.
     """
-    from mcp.server.auth.middleware.auth_context import get_access_token
-
-    access_token = get_access_token()
-    if not access_token or not access_token.subject:
+    if not user_id:
         return intervals
 
     from . import store
 
-    user_id = access_token.subject
     user = store.get_user(user_id)
     if not user:
         raise ValueError(f"No stored Strava credentials for user {user_id}")
@@ -95,28 +102,30 @@ def _get_active_data_client():
 
 
 def _get_wellness_client():
+    """Resolve the wellness client for the current request (see wellness_client_for)."""
+    return wellness_client_for(current_user_id())
+
+
+def wellness_client_for(user_id: Optional[str]):
     """
-    Resolve the client for sleep/HRV/resting-HR tools.
+    Resolve the client for sleep/HRV/resting-HR tools for `user_id`.
 
     OAuth'd users get an IntervalsClient on their own intervals.icu key if they
     added one at login (intervals_connect.py); otherwise their StravaClient,
     which the wellness handlers answer with NO_WELLNESS_DATA_MESSAGE.
     stdio/personal paths keep the personal `intervals` client.
     """
-    from mcp.server.auth.middleware.auth_context import get_access_token
-
-    access_token = get_access_token()
-    if not access_token or not access_token.subject:
+    if not user_id:
         return intervals
 
     from . import secret_box, store
 
-    connection = store.get_intervals_connection(access_token.subject)
+    connection = store.get_intervals_connection(user_id)
     if connection and secret_box.is_configured():
         api_key = secret_box.decrypt(connection["encrypted_api_key"])
         if api_key:
             return IntervalsClient(api_key=api_key)
-    return _get_active_data_client()
+    return data_client_for(user_id)
 
 
 @app.list_tools()
@@ -139,6 +148,7 @@ async def list_tools() -> list[Tool]:
         read_consultation_notes_tool(),
         list_consultation_notes_tool(),
         search_consultation_notes_tool(),
+        self_test_tool(),
     ]
 
 
@@ -177,8 +187,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await list_consultation_notes_handler(arguments)
     elif name == "search_consultation_notes":
         return await search_consultation_notes_handler(arguments)
+    elif name == "self_test":
+        return await self_test_handler(arguments)
 
     raise ValueError(f"Unknown tool: {name}")
+
+
+@app.list_prompts()
+async def list_prompts() -> list[Prompt]:
+    return [self_test_prompt()]
+
+
+@app.get_prompt()
+async def get_prompt(name: str, arguments: Optional[dict] = None) -> GetPromptResult:
+    if name == SELF_TEST_PROMPT_NAME:
+        return self_test_prompt_result()
+    raise ValueError(f"Unknown prompt: {name}")
 
 
 async def serve_stdio():

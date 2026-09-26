@@ -47,6 +47,11 @@ if [ -f "$DEPLOY_KEY_SRC" ]; then
 
     export GIT_SSH_COMMAND="ssh -i $SSH_DIR/deploy_key -o UserKnownHostsFile=$SSH_DIR/known_hosts -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
+    # Also as app's git default, so commands run later over `fly ssh console`
+    # (e.g. su app -c 'train-with-gpt-selftest ...') can fetch/push without
+    # repeating this line.
+    su app -c "git config --global core.sshCommand '$GIT_SSH_COMMAND'"
+
     mkdir -p "$REPO_DIR"
     chown -R app:app "$REPO_DIR"
     if [ -n "$REPO_URL" ] && [ ! -d "$REPO_DIR/.git" ]; then
