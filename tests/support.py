@@ -1,5 +1,7 @@
 """Small helpers shared by unit and integration tests (no fixtures here)."""
 
+import contextlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -114,3 +116,25 @@ def text_of(result) -> str:
     """The single TextContent's text from a tool handler's result."""
     assert len(result) == 1, result
     return result[0].text
+
+
+@contextlib.contextmanager
+def as_oauth_user(user_id: str):
+    """Run as an OAuth'd user, the way the /mcp bearer-auth middleware sets it up."""
+    from mcp.server.auth.middleware.auth_context import auth_context_var
+    from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+    from mcp.server.auth.provider import AccessToken
+
+    token = AccessToken(token="t", client_id="claude", scopes=[], subject=user_id)
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        yield
+    finally:
+        auth_context_var.reset(reset)
+
+
+def referenced_tool_names(guidance: str) -> set[str]:
+    """Tool-like names a guidance text tells the model to call: `snake_case` or
+    **snake_case** (at least one underscore, so plain bold words don't count)."""
+    pairs = re.findall(r"`([a-z]+(?:_[a-z]+)+)`|\*\*([a-z]+(?:_[a-z]+)+)\*\*", guidance)
+    return {name for pair in pairs for name in pair if name}

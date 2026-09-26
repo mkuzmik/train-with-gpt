@@ -1,8 +1,10 @@
 # Idea: new-user onboarding (proposal, for review)
 
-Not implemented. This proposes how a new athlete goes from "just added the
+**Status:** Phase 0 is implemented (see "Phase 0" below). Phases 1 and 2
+are still proposals. This proposes how a new athlete goes from "just added the
 connector" to a useful first consultation on the hosted (Strava OAuth) server.
-Validated against `main` on 2026-09-25; see "What the code does today".
+Validated against `main` on 2026-09-25; "What the code does today" describes
+the code before Phase 0.
 
 ## Problem
 
@@ -93,6 +95,21 @@ lands.
 - README: a short "Using the hosted server" section at the top (add on
   claude.ai, syncs to Desktop and mobile, what to type first). Keep
   `mcp-remote` as the fallback for clients without custom connectors.
+
+**Implemented.** Notes on how it was done:
+
+- `start_consultation` takes the same data and wellness clients the data tools
+  get in `server.py` and words its "Available Data Sources" from their type:
+  Strava or intervals.icu for activities; the wellness tools are described only
+  when the wellness client is intervals.icu. Otherwise the guidance says
+  wellness isn't connected, tells the model not to call those tools, and gives
+  the "how to add intervals.icu" text.
+- The OAuth "not configured" text lives in
+  `helpers.training_repo_not_configured_message()`, shared by all six
+  goals/notes tools.
+- Until Phase 1 adds the "Set me up as a new athlete" flow, the README's
+  first message is "Start a training consultation" (whose guidance already
+  sends the model to `discuss_goals` when no goals exist).
 
 ### Phase 1: onboarding on today's storage (M)
 

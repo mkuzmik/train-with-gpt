@@ -41,6 +41,28 @@ def user_scoped_goals_file(repo_path: Path, user_id: Optional[str]) -> tuple[Pat
     return repo_path / "goals.md", "goals.md"
 
 
+def training_repo_not_configured_message() -> str:
+    """
+    The "no training repository configured" error, worded for who is asking.
+
+    Personal (stdio / local-HTTP) users can fix it themselves with
+    setup_training_repo. OAuth'd users can't: the repository is server
+    configuration, and setup_training_repo is hidden from (and refuses) them.
+    """
+    if current_user_id():
+        return (
+            "❌ Error: This server's notes storage isn't set up, so goals and consultation "
+            "notes can't be read or saved yet.\n\n"
+            "It's configured by whoever runs the server, not from the chat: please contact "
+            "the server's operator. Activity data still works in the meantime."
+        )
+    return (
+        "❌ Error: Training repository not configured.\n\n"
+        "Please use **setup_training_repo** first to set the location of your training "
+        "notes repository."
+    )
+
+
 NO_WELLNESS_DATA_MESSAGE = (
     "ℹ️ Wellness data (sleep, HRV, resting heart rate) isn't available: Strava has no "
     "wellness data. To add it, connect intervals.icu: disconnect and reconnect this "

@@ -8,7 +8,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import GitSyncError, current_user_id, git_save_file, user_scoped_notes_dir
+from ..helpers import GitSyncError, current_user_id, git_save_file, user_scoped_notes_dir, training_repo_not_configured_message
 
 
 def save_consultation_notes_tool() -> Tool:
@@ -34,7 +34,7 @@ async def save_consultation_notes_handler(arguments: dict) -> list[TextContent]:
     try:
         # Check if training repo is configured
         if not config.training_repo_path:
-            return [TextContent(type="text", text="❌ Error: Training repository not configured.\n\nPlease use **setup_training_repo** first to set the location of your training notes repository.")]
+            return [TextContent(type="text", text=training_repo_not_configured_message())]
         
         repo_path = Path(config.training_repo_path)
         if not repo_path.exists():

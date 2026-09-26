@@ -12,6 +12,7 @@ from datetime import datetime
 import pytest
 
 from tests.support import (
+    as_oauth_user,
     assert_clean_and_in_sync,
     git,
     push_files,
@@ -27,11 +28,41 @@ from train_with_gpt.tools import save_consultation_notes as save_consultation_no
 from train_with_gpt.tools import (
     list_consultation_notes_handler,
     read_consultation_notes_handler,
+    read_goals_handler,
     save_consultation_notes_handler,
+    save_goals_handler,
     search_consultation_notes_handler,
 )
 
 NOT_CONFIGURED = "Training repository not configured"
+
+# Every tool that needs the training repo, with valid arguments.
+REPO_TOOLS = [
+    pytest.param(save_consultation_notes_handler, {"notes": "Easy run"}, id="save_consultation_notes"),
+    pytest.param(read_consultation_notes_handler, {"all": True}, id="read_consultation_notes"),
+    pytest.param(list_consultation_notes_handler, {}, id="list_consultation_notes"),
+    pytest.param(search_consultation_notes_handler, {"query": "calf"}, id="search_consultation_notes"),
+    pytest.param(save_goals_handler, {"goals_text": "Sub-50 10k"}, id="save_goals"),
+    pytest.param(read_goals_handler, {}, id="read_goals"),
+]
+
+
+@pytest.mark.parametrize("handler, arguments", REPO_TOOLS)
+async def test_repo_not_configured_on_the_personal_path_points_to_setup(handler, arguments):
+    output = text_of(await handler(arguments))
+
+    assert NOT_CONFIGURED in output
+    assert "setup_training_repo" in output
+
+
+@pytest.mark.parametrize("handler, arguments", REPO_TOOLS)
+async def test_repo_not_configured_for_an_oauth_user_points_to_the_operator(handler, arguments):
+    with as_oauth_user("1001"):
+        output = text_of(await handler(arguments))
+
+    assert "This server's notes storage isn't set up" in output
+    assert "contact the server's operator" in output
+    assert "setup_training_repo" not in output
 
 
 def eight_daily_notes():

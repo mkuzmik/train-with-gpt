@@ -2,6 +2,9 @@
 
 from mcp.types import Tool, TextContent
 
+from ..helpers import NO_WELLNESS_DATA_MESSAGE
+from ..strava_client import StravaClient
+
 
 def start_consultation_tool() -> Tool:
     """Return the start_consultation tool definition."""
@@ -15,8 +18,68 @@ def start_consultation_tool() -> Tool:
     )
 
 
-async def start_consultation_handler(arguments: dict) -> list[TextContent]:
-    """Handle start_consultation tool calls."""
+def _data_sources_section(data_client, wellness_client) -> str:
+    """
+    The "Available Data Sources" part of the guidance, matching where this
+    user's data actually comes from: the same clients the data tools get
+    (server.py), so hosted users see Strava and stdio users intervals.icu, and
+    wellness data is described only when a wellness source is connected.
+    """
+    activities_source = "Strava" if isinstance(data_client, StravaClient) else "intervals.icu"
+    section = f"""## Available Data Sources
+
+**Training Activities ({activities_source}):**
+- **get_activities** - Recent training patterns and trends
+- **analyze_activity** - Deep dive on specific workouts with zones, intervals, splits
+
+"""
+    if isinstance(wellness_client, StravaClient):
+        section += f"""**Recovery Metrics: not connected.** Sleep, HRV and resting heart rate aren't
+available for this athlete, so don't call get_sleep_data, get_hrv_data or
+get_resting_heart_rate. Rely on how the athlete says they feel. If recovery
+comes up, you can tell them how to add it: {NO_WELLNESS_DATA_MESSAGE}
+
+**When Analyzing Activities:**
+- Use get_activities to see recent training patterns
+- Use analyze_activity for deep dives on specific workouts
+- Comment on trends, not just individual workouts
+- Connect observations to their goals
+
+"""
+    else:
+        section += """**Recovery Metrics (intervals.icu wellness data):**
+- **get_sleep_data** - Sleep duration and quality score
+  - Essential for understanding recovery capacity
+- **get_hrv_data** - Heart Rate Variability (key recovery indicator)
+  - Shows nightly HRV, 7/14/28-day rolling averages
+  - Higher HRV = better recovery, lower = potential fatigue/stress
+- **get_resting_heart_rate** - Daily resting heart rate trends
+  - Lower RHR = better fitness, elevated = possible overtraining or illness
+
+**When to Check Recovery Data:**
+- When discussing training load or planning volume increases
+- If athlete mentions fatigue, poor performance, or illness
+- When evaluating if they're recovering adequately from hard sessions
+- To validate subjective feelings with objective metrics
+
+**When Analyzing Activities:**
+- Use get_activities to see recent training patterns
+- Use analyze_activity for deep dives on specific workouts
+- Comment on trends, not just individual workouts
+- Connect observations to their goals
+- Consider recovery metrics alongside training data
+
+"""
+    return section
+
+
+async def start_consultation_handler(arguments: dict, data_client, wellness_client) -> list[TextContent]:
+    """Handle start_consultation tool calls.
+
+    `data_client` and `wellness_client` are the clients the activity and
+    wellness tools would get for this user; only their type is used, to word
+    the data sources (no data is read here).
+    """
     
     guidance = """🏃 Starting Training Consultation Session
 
@@ -74,35 +137,7 @@ async def start_consultation_handler(arguments: dict) -> list[TextContent]:
 - Celebrate progress, normalize setbacks
 - End consultations by summarizing key points and next steps
 
-## Available Data Sources
-
-**Training Activities (intervals.icu):**
-- **get_activities** - Recent training patterns and trends
-- **analyze_activity** - Deep dive on specific workouts with zones, intervals, splits
-
-**Recovery Metrics (intervals.icu wellness data):**
-- **get_sleep_data** - Sleep duration and quality score
-  - Essential for understanding recovery capacity
-- **get_hrv_data** - Heart Rate Variability (key recovery indicator)
-  - Shows nightly HRV, 7/14/28-day rolling averages
-  - Higher HRV = better recovery, lower = potential fatigue/stress
-- **get_resting_heart_rate** - Daily resting heart rate trends
-  - Lower RHR = better fitness, elevated = possible overtraining or illness
-
-**When to Check Recovery Data:**
-- When discussing training load or planning volume increases
-- If athlete mentions fatigue, poor performance, or illness
-- When evaluating if they're recovering adequately from hard sessions
-- To validate subjective feelings with objective metrics
-
-**When Analyzing Activities:**
-- Use get_activities to see recent training patterns
-- Use analyze_activity for deep dives on specific workouts
-- Comment on trends, not just individual workouts
-- Connect observations to their goals
-- Consider recovery metrics alongside training data
-
-**Important Reminders:**
+{data_sources}**Important Reminders:**
 - ONE question at a time - let them answer before moving on
 - Save consultation notes at the END of meaningful conversations
 - Update goals when they evolve (save_goals)
@@ -115,6 +150,6 @@ Now that you have context, start by:
 2. Ask ONE open question about how they're doing or what's on their mind
 3. Let the athlete guide where the conversation goes
 
-Ready to begin? 🎯"""
+Ready to begin? 🎯""".replace("{data_sources}", _data_sources_section(data_client, wellness_client))
 
     return [TextContent(type="text", text=guidance)]

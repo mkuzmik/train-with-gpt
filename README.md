@@ -14,6 +14,16 @@ All training and health data comes from a single source: your [intervals.icu](ht
 
 There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Deploying to Fly.io"). Hosted users get Strava activity data only; sleep/HRV/resting HR need the intervals.icu path.
 
+## Using the hosted server
+
+If someone runs a hosted server for you, there's nothing to install. You need its connector URL, `https://<server>/mcp`.
+
+1. **Add it on claude.ai** (in a browser): Settings → Connectors → Add custom connector, and paste the URL. Custom connectors can't be added from the mobile app, but once added on claude.ai the connector syncs to Claude Desktop and mobile too. If its tools don't show up in a chat, turn the connector on from the chat's "+" / tools menu.
+2. **Sign in with Strava** and approve access. Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV and resting heart rate; you can skip it and add it later by disconnecting and reconnecting the connector.
+3. **Type this first, in a new chat:** "Start a training consultation". With no goals saved yet, Claude offers to set them with you (or say "Let's discuss my training goals"). After that, start each chat the same way; say "Save notes" at the end of a useful one.
+
+Hosted users skip the local setup below; there's no training repository to configure. To run your own hosted server, see "Deploying to Fly.io".
+
 ## Quick Start
 
 ### 1. Install
@@ -168,8 +178,10 @@ pushed to on every save. Set it up once:
 
 Compose mounts the key as a Docker secret; the entrypoint copies it to the
 `app` user with correct permissions. `setup_training_repo` is deliberately
-disabled for OAuth sessions — the repo is server configuration
-(`TRAINING_REPO_PATH`/`TRAINING_REPO_URL`), not a per-user setting.
+hidden from (and refused for) OAuth sessions — the repo is server configuration
+(`TRAINING_REPO_PATH`/`TRAINING_REPO_URL`), not a per-user setting. Without it,
+OAuth users' goals/notes tools say the server's notes storage isn't set up and
+to contact the operator.
 
 ## Deploying to Fly.io (public, HTTPS)
 
@@ -276,11 +288,12 @@ fly ssh console -a <app> -C "su app -c 'train-with-gpt-selftest --user-id <strav
 
 ### Connecting clients
 
-- **Claude mobile / web:** claude.ai → Settings → Connectors → Add custom
-  connector → `https://<app>.fly.dev/mcp`, sign in with Strava. It syncs to the
-  mobile app (paid plan required).
-- **Claude Desktop:** use `mcp-remote` as in the local setup, with the
-  `https://<app>.fly.dev/mcp` URL.
+- **claude.ai, Claude Desktop and mobile:** claude.ai → Settings → Connectors →
+  Add custom connector → `https://<app>.fly.dev/mcp`, sign in with Strava. The
+  connector then shows up in Desktop and mobile too (it can't be added from
+  mobile). See "Using the hosted server" above for what users see.
+- **Clients without custom connectors:** use `mcp-remote` as in the local
+  setup, with the `https://<app>.fly.dev/mcp` URL.
 
 **Sleep, HRV and resting HR (optional).** Strava has no wellness data. After
 the Strava consent, the login shows one more page asking for your
@@ -324,7 +337,9 @@ stored encrypted.
 
 ## Usage
 
-### First Time Setup
+### First Time Setup (local stdio server)
+
+Hosted-server users skip this: see "Using the hosted server" above.
 
 **Step 1: Set Up Training Repository** (Recommended)
 
