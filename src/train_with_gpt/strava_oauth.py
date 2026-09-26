@@ -6,6 +6,10 @@ Strava). `build_strava_authorize_url` is called from `oauth_provider.py`'s
 route here handles Strava's redirect back once the user approves, then shows
 the optional intervals.icu step (intervals_connect.py) or goes straight to
 minting our own authorization code for Claude (authorization.py).
+
+Only athletes on the allowlist (allowlist.py) get past the callback. Anyone
+else is refused right after the token exchange, before anything about them
+is stored: their Strava grant is revoked and no code is issued.
 """
 
 import sys
@@ -14,14 +18,14 @@ from urllib.parse import urlencode
 import httpx
 from mcp.server.auth.provider import construct_redirect_uri
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, RedirectResponse
+from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
 from . import secret_box, store
 from .authorization import complete_authorization
 from .config import config
 from .intervals_connect import start_connect_step
-from .strava_client import AUTHORIZE_URL, SCOPES, TOKEN_URL, StravaClient
+from .strava_client import AUTHORIZE_URL, SCOPES, TOKEN_URL, StravaClient, deauthorize
 
 STRAVA_CALLBACK_PATH = "/oauth/strava/callback"
 
@@ -44,7 +48,35 @@ def build_strava_authorize_url(issuer_base_url: str, state: str) -> str:
     return f"{AUTHORIZE_URL}?{urlencode(params)}"
 
 
-async def handle_strava_callback(request: Request):
+NOT_ALLOWED_PAGE = """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Train with GPT - not available</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem;">
+<h1>This server is private</h1>
+<p>This Train with GPT server isn't available for your Strava account.
+Nothing from your Strava account was stored, and the server has asked Strava
+to remove its access to your account.</p>
+<p>You can close this window.</p>
+</body>
+</html>
+"""
+
+
+def not_allowed_response() -> HTMLResponse:
+    return HTMLResponse(NOT_ALLOWED_PAGE, status_code=403)
+
+
+def create_strava_oauth_route(allowed_athlete_ids: frozenset[str]) -> Route:
+    """The Strava callback route, admitting only `allowed_athlete_ids` (see allowlist.py)."""
+
+    async def endpoint(request: Request):
+        return await handle_strava_callback(request, allowed_athlete_ids)
+
+    return Route(STRAVA_CALLBACK_PATH, endpoint, methods=["GET"])
+
+
+async def handle_strava_callback(request: Request, allowed_athlete_ids: frozenset[str]):
     """Handle Strava's redirect back after the user approves/denies our app."""
     params = request.query_params
     error = params.get("error")
@@ -94,7 +126,20 @@ async def handle_strava_callback(request: Request):
         user_id = str(profile["id"])
         name = f"{profile.get('firstname', '')} {profile.get('lastname', '')}".strip() or None
 
-    print(f"[Strava OAuth] Authenticated user {user_id} ({name})", file=sys.stderr)
+    if user_id not in allowed_athlete_ids:
+        # Refuse before storing anything: no user row, tokens or name, no code
+        # for Claude. Revoke the grant Strava just gave us, so we hold nothing.
+        # The pending authorization was already consumed above. Deliberately
+        # no id or name in the log.
+        revoked = await deauthorize(access_token)
+        print(
+            "[Strava OAuth] Refused sign-in: athlete not on the allowlist "
+            f"(Strava grant {'revoked' if revoked else 'NOT revoked - deauthorize failed'})",
+            file=sys.stderr,
+        )
+        return not_allowed_response()
+
+    print(f"[Strava OAuth] Authenticated user {user_id}", file=sys.stderr)
 
     store.upsert_user(
         user_id=user_id,
@@ -108,6 +153,3 @@ async def handle_strava_callback(request: Request):
     if secret_box.is_configured():
         return start_connect_step(pending, user_id)
     return complete_authorization(pending, user_id)
-
-
-strava_oauth_route = Route(STRAVA_CALLBACK_PATH, handle_strava_callback, methods=["GET"])

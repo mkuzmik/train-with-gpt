@@ -209,3 +209,39 @@ def test_expired_connect_step_is_rejected(db):
     assert store.claim_pending_connect_step("tok", max_age_seconds=60) is None
 
 
+def _seed_user(user_id):
+    store.upsert_user(user_id, "strava", f"Name {user_id}", f"access-{user_id}", f"refresh-{user_id}", 9999999999)
+    store.save_intervals_connection(user_id, f"i{user_id}", None, "encrypted")
+    store.save_access_token(f"token-{user_id}", f'{{"subject": "{user_id}"}}')
+    store.save_auth_code(f"code-{user_id}", f'{{"subject": "{user_id}"}}')
+    store.save_pending_connect_step(f"step-{user_id}", user_id, {})
+
+
+def test_purge_user_deletes_everything_stored_for_that_user_only(db):
+    _seed_user("101")
+    _seed_user("202")
+
+    deleted = store.purge_user("101")
+
+    assert deleted == {
+        "users": 1, "intervals_connections": 1, "access_tokens": 1, "auth_codes": 1, "pending_connect_steps": 1,
+    }
+    assert store.get_user("101") is None
+    assert store.get_intervals_connection("101") is None
+    assert store.get_access_token_row("token-101") is None
+    assert store.get_auth_code("code-101") is None
+    assert store.claim_pending_connect_step("step-101", 60) is None
+    # The other user is untouched.
+    assert store.get_user("202")["name"] == "Name 202"
+    assert store.get_intervals_connection("202") is not None
+    assert store.get_access_token_row("token-202") is not None
+    assert store.get_auth_code("code-202") is not None
+
+
+def test_purge_unknown_user_deletes_nothing(db):
+    _seed_user("202")
+
+    assert set(store.purge_user("999").values()) == {0}
+    assert store.get_user("202") is not None
+
+

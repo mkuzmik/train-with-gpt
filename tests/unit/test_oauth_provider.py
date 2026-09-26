@@ -21,7 +21,10 @@ from train_with_gpt.oauth_provider import ACCESS_TOKEN_TTL_SECONDS, TrainWithGpt
 
 @pytest.fixture
 def provider(db):
-    return TrainWithGptOAuthProvider(issuer_base_url="http://localhost:8123")
+    return TrainWithGptOAuthProvider(
+        issuer_base_url="http://localhost:8123",
+        allowed_athlete_ids=frozenset({"user-1", "strava-user-42", "u"}),
+    )
 
 
 @pytest.fixture
@@ -185,3 +188,51 @@ async def test_revoke_token_invalidates_only_that_token(provider):
 
     assert await provider.load_access_token("laptop-token") is None
     assert await provider.load_access_token("phone-token") == phone
+
+
+# --- allowlist ---------------------------------------------------------------
+
+def _issue_token(token, subject):
+    access_token = AccessToken(
+        token=token, client_id="claude-client", scopes=[], expires_at=int(time.time()) + 3600, subject=subject,
+    )
+    store.save_access_token(token, access_token.model_dump_json())
+    return access_token
+
+
+async def test_load_access_token_rejects_a_user_not_on_the_allowlist(provider):
+    _issue_token("outsider-token", "someone-else")
+
+    assert await provider.load_access_token("outsider-token") is None
+
+
+async def test_load_access_token_rejects_a_token_without_subject(provider):
+    _issue_token("anonymous-token", None)
+
+    assert await provider.load_access_token("anonymous-token") is None
+
+
+async def test_taking_a_user_off_the_allowlist_rejects_their_existing_token(db):
+    issued = _issue_token("user-token", "user-1")
+    before = TrainWithGptOAuthProvider("http://localhost:8123", allowed_athlete_ids=frozenset({"user-1"}))
+    after = TrainWithGptOAuthProvider("http://localhost:8123", allowed_athlete_ids=frozenset({"user-2"}))
+
+    assert await before.load_access_token("user-token") == issued
+    assert await after.load_access_token("user-token") is None
+    # Not deleted: putting the user back on the list restores access.
+    assert await before.load_access_token("user-token") == issued
+
+
+async def test_empty_allowlist_rejects_every_token_and_code(db, claude_client):
+    provider = TrainWithGptOAuthProvider("http://localhost:8123", allowed_athlete_ids=frozenset())
+    _issue_token("user-token", "user-1")
+    store.save_auth_code("code-1", _auth_code("code-1").model_dump_json())
+
+    assert await provider.load_access_token("user-token") is None
+    assert await provider.load_authorization_code(claude_client, "code-1") is None
+
+
+async def test_load_authorization_code_rejects_a_user_not_on_the_allowlist(provider, claude_client):
+    store.save_auth_code("outsider-code", _auth_code("outsider-code", subject="someone-else").model_dump_json())
+
+    assert await provider.load_authorization_code(claude_client, "outsider-code") is None
