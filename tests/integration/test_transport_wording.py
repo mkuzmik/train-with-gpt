@@ -3,7 +3,9 @@ server vs the personal stdio server.
 
 Hosted users get Strava activities, no setup_training_repo, and an "ask the
 operator" message when the server has no notes storage; the stdio user gets
-intervals.icu, setup_training_repo, and is told to run it.
+intervals.icu, setup_training_repo, and is told to run it. Both get one entry
+point, start_consultation, which reports whether this athlete is new or
+returning (no separate discuss_goals tool).
 """
 
 import pytest
@@ -11,7 +13,7 @@ from httpx import Response
 from mcp.shared.memory import create_connected_server_and_client_session
 from starlette.testclient import TestClient
 
-from tests.support import referenced_tool_names
+from tests.support import push_files, referenced_tool_names
 from train_with_gpt.config import config
 from train_with_gpt.http_server import create_app
 from train_with_gpt.server import app as mcp_server
@@ -118,20 +120,94 @@ def test_hosted_guidance_only_references_offered_tools(login):
     mcp = login(5106)
     offered = {tool["name"] for tool in mcp.list_tools()}
 
-    for tool in ("start_consultation", "discuss_goals"):
-        referenced = referenced_tool_names(mcp.call_tool(tool))
-        assert "get_activities" in referenced
-        assert referenced <= offered, (tool, referenced - offered)
+    referenced = referenced_tool_names(mcp.call_tool("start_consultation"))
+    assert {"get_activities", "save_goals"} <= referenced
+    assert referenced <= offered, referenced - offered
 
 
 async def test_stdio_guidance_only_references_offered_tools(stdio_env):
     async with StdioServer(stdio_env) as session:
         offered = {tool.name for tool in (await session.list_tools()).tools}
-        guidance = {
-            tool: _text(await session.call_tool(tool, {})) for tool in ("start_consultation", "discuss_goals")
-        }
+        guidance = _text(await session.call_tool("start_consultation", {}))
 
-    for tool, text in guidance.items():
-        referenced = referenced_tool_names(text)
-        assert "get_activities" in referenced
-        assert referenced <= offered, (tool, referenced - offered)
+    referenced = referenced_tool_names(guidance)
+    assert {"get_activities", "save_goals", "setup_training_repo"} <= referenced
+    assert referenced <= offered, referenced - offered
+
+
+# --- single entry point: start_consultation tells new from returning athletes ---------
+
+def test_hosted_has_one_entry_point(login):
+    names = {tool["name"] for tool in login(5107).list_tools()}
+
+    assert "start_consultation" in names
+    assert "discuss_goals" not in names
+
+
+async def test_stdio_has_one_entry_point(stdio_env):
+    async with StdioServer(stdio_env) as session:
+        names = {tool.name for tool in (await session.list_tools()).tools}
+        result = await session.call_tool("discuss_goals", {})
+
+    assert "start_consultation" in names
+    assert "discuss_goals" not in names
+    assert result.isError and "Unknown tool: discuss_goals" in result.content[0].text
+
+
+def test_hosted_new_athlete_becomes_returning(login):
+    mcp = login(5108)
+
+    first = mcp.call_tool("start_consultation")
+    assert "- **Saved goals:** none" in first
+    assert "- **Consultation notes:** none" in first
+    assert "NEW athlete** (Path A)" in first
+
+    mcp.call_tool("save_goals", {"goals_text": "Half marathon under 1:50"})
+    mcp.call_tool("save_consultation_notes", {"notes": "First session: goals set."})
+    later = mcp.call_tool("start_consultation")
+
+    assert "- **Saved goals:** yes" in later
+    assert "- **Consultation notes:** 1, most recent" in later
+    assert "RETURNING athlete** (Path B)" in later
+
+    # Another athlete on the same server is still new.
+    assert "NEW athlete** (Path A)" in login(5109).call_tool("start_consultation")
+
+
+def test_hosted_start_consultation_without_notes_storage(server_env, strava, monkeypatch):
+    monkeypatch.delenv("TRAINING_REPO_PATH")
+    monkeypatch.setattr(config, "training_repo_path", None)
+    config.load()
+
+    with TestClient(create_app(), base_url=PUBLIC_URL) as http:
+        mcp = McpHttpClient(http, oauth_login(http, strava, 5110))
+        mcp.initialize()
+        output = mcp.call_tool("start_consultation")
+
+    assert "- **Notes storage:** not set up on this server" in output
+    assert "contact the server's operator" in output
+    assert "the server can't tell" in output
+    assert "setup_training_repo" not in output
+
+
+async def test_stdio_returning_athlete(stdio_env, training_repo, git_remote):
+    push_files(git_remote, {
+        "goals.md": "# Training Goals\nSub-40 10k\n",
+        "notes/2026-05-01-07-00-00.md": "# Consultation Notes\nDate: synthetic\n\nTempo went well.\n",
+    })
+
+    async with StdioServer({**stdio_env, "TRAINING_REPO_PATH": str(training_repo)}) as session:
+        output = _text(await session.call_tool("start_consultation", {}))
+
+    assert "- **Activities source:** intervals.icu" in output
+    assert "- **Saved goals:** yes" in output
+    assert "- **Consultation notes:** 1, most recent 2026-05-01" in output
+    assert "RETURNING athlete** (Path B)" in output
+
+
+async def test_stdio_without_notes_storage_offers_setup(stdio_env):
+    async with StdioServer(stdio_env) as session:
+        output = _text(await session.call_tool("start_consultation", {}))
+
+    assert "- **Notes storage:** not set up on this server" in output
+    assert "**setup_training_repo**" in output

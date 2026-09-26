@@ -36,7 +36,7 @@ def _basic_auth_key(request) -> str:
 # Every tool a hosted (OAuth'd) user is offered: setup_training_repo is personal-only.
 HOSTED_TOOLS = {
     "start_consultation", "get_current_date", "get_activities", "get_sleep_data", "get_hrv_data",
-    "get_resting_heart_rate", "analyze_activity", "analyze_lap", "discuss_goals", "save_goals",
+    "get_resting_heart_rate", "analyze_activity", "analyze_lap", "save_goals",
     "read_goals", "save_consultation_notes", "read_consultation_notes", "list_consultation_notes",
     "search_consultation_notes", "self_test",
 }

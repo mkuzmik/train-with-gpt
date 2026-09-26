@@ -1,6 +1,6 @@
 # Train With GPT
 
-A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. Connects to your [intervals.icu](https://intervals.icu) data (activities, sleep, HRV, resting heart rate — synced from Strava/Garmin/etc.) and maintains context about your goals and training history across conversations.
+A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. It reads your training data and keeps context about your goals and training history across conversations. Where the data comes from depends on how you use it: a **hosted server** reads activities from Strava (sleep, HRV and resting heart rate only if you also connect intervals.icu), and a **local (stdio) install** reads everything from [intervals.icu](https://intervals.icu).
 
 ## What This Does
 
@@ -10,7 +10,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 - **Consultation History**: Claude remembers past conversations and provides continuity
 - **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
 
-All training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
+On a local install, all training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
 
 There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Deploying to Fly.io"). Hosted users get Strava activity data only; sleep/HRV/resting HR need the intervals.icu path.
 
@@ -20,7 +20,7 @@ If someone runs a hosted server for you, there's nothing to install. You need it
 
 1. **Add it on claude.ai** (in a browser): Settings → Connectors → Add custom connector, and paste the URL. Custom connectors can't be added from the mobile app, but once added on claude.ai the connector syncs to Claude Desktop and mobile too. If its tools don't show up in a chat, turn the connector on from the chat's "+" / tools menu.
 2. **Sign in with Strava** and approve access. Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV and resting heart rate; you can skip it and add it later by disconnecting and reconnecting the connector.
-3. **Type this first, in a new chat:** "Start a training consultation". With no goals saved yet, Claude offers to set them with you (or say "Let's discuss my training goals"). After that, start each chat the same way; say "Save notes" at the end of a useful one.
+3. **Type this first, in a new chat:** "Start a training consultation". It's the one entry point: the server tells Claude whether you're new (no goals or notes saved yet) or returning, so the first time Claude introduces itself and sets your goals with you, and after that it picks up from your goals and past notes. Start each chat the same way; say "Save notes" at the end of a useful one.
 
 Hosted users skip the local setup below; there's no training repository to configure. To run your own hosted server, see "Deploying to Fly.io".
 
@@ -354,12 +354,12 @@ Then tell Claude: **"Setup my training repository at ~/training-notes"**
 
 This enables goal tracking and consultation history across sessions.
 
-**Step 2: Set Your Goals**
+**Step 2: Start Your First Consultation**
 
-Say: **"Let's discuss my training goals"**
-- Claude will guide you through setting clear goals
+Say: **"Start a training consultation"**
+- With no goals or notes saved yet, Claude treats you as a new athlete: it looks at your recent activities and guides you through setting clear goals
 - Your goals are saved and referenced in future conversations
-- Say **"Save these goals"** when ready
+- Later, say **"Update my goals"** whenever they change
 
 ---
 
@@ -369,7 +369,7 @@ Say: **"Let's discuss my training goals"**
 
 Best practice: **"Start a consultation"**
 
-This tells Claude to:
+This single entry point tells Claude what's saved for you (goals, how many consultation notes) and which data sources are connected; Claude decides from that and your message whether to onboard you or run a consultation. For a returning athlete it will:
 1. Check today's date
 2. Review your goals
 3. Read recent consultation notes

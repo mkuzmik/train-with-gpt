@@ -1,8 +1,27 @@
-"""Start consultation tool."""
+"""Start consultation tool: the single entry point for every training conversation.
+
+It returns what the server knows about the caller (saved goals, consultation
+notes, connected data sources) plus guidance for both paths - onboarding a new
+athlete, or a consultation with a returning one - and leaves the choice to the
+model, which also sees the athlete's message.
+"""
+
+import asyncio
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
 from mcp.types import Tool, TextContent
 
-from ..helpers import NO_WELLNESS_DATA_MESSAGE
+from ..config import config
+from ..helpers import (
+    NO_WELLNESS_DATA_MESSAGE,
+    current_user_id,
+    git_pull_and_read,
+    user_scoped_goals_file,
+    user_scoped_notes_dir,
+)
 from ..strava_client import StravaClient
 
 
@@ -10,13 +29,146 @@ def start_consultation_tool() -> Tool:
     """Return the start_consultation tool definition."""
     return Tool(
         name="start_consultation",
-        description="Begin a training consultation session. Provides guidance on gathering context and establishing coaching approach.",
+        description=(
+            "Call this first in any training conversation. It works for a brand-new athlete "
+            "(introduces the tool, sets up their goals) and for a returning one (a coaching "
+            "consultation). Returns what the server knows about this athlete - whether goals "
+            "and consultation notes are saved, which data sources are connected - and guidance "
+            "for both paths; decide which one fits from those facts and the athlete's message."
+        ),
         inputSchema={
             "type": "object",
             "properties": {},
         },
     )
 
+
+# --- Facts about the caller ---------------------------------------------------------
+
+@dataclass
+class TrainingHistory:
+    """What the training repo holds for the current user (our own storage only;
+    no activity data). `storage` is "ok", "not_configured", "missing" or "error"."""
+    storage: str
+    has_goals: bool = False
+    notes_count: int = 0
+    latest_note: Optional[str] = None  # YYYY-MM-DD
+    note: Optional[str] = None  # sync note or error detail for the model
+
+
+def _goals_and_note_dates(goals_file: Path, notes_dir: Path) -> tuple[bool, list[str]]:
+    """Whether the goals file exists, and the notes' dates (newest first), from
+    file names only - no note is read."""
+    stems = sorted((p.stem for p in notes_dir.glob("*.md")), reverse=True) if notes_dir.exists() else []
+    return goals_file.exists(), [stem[:10] for stem in stems]
+
+
+def read_training_history(user_id: Optional[str]) -> TrainingHistory:
+    """Sync the training repo and look up `user_id`'s goals and notes (blocking)."""
+    if not config.training_repo_path:
+        return TrainingHistory(storage="not_configured")
+    repo_path = Path(config.training_repo_path)
+    if not repo_path.exists():
+        return TrainingHistory(storage="missing", note=f"Training repository path no longer exists: {repo_path}")
+    try:
+        goals_file, _ = user_scoped_goals_file(repo_path, user_id)
+        notes_dir, _ = user_scoped_notes_dir(repo_path, user_id)
+        sync_note, (has_goals, dates) = git_pull_and_read(
+            repo_path, lambda: _goals_and_note_dates(goals_file, notes_dir)
+        )
+    except Exception as e:  # never let a storage problem block the conversation
+        print(f"Error reading training history: {e}", file=sys.stderr)
+        return TrainingHistory(storage="error", note=str(e))
+    return TrainingHistory(
+        storage="ok",
+        has_goals=has_goals,
+        notes_count=len(dates),
+        latest_note=dates[0] if dates else None,
+        note=sync_note,
+    )
+
+
+def _facts_section(data_client, wellness_client, history: TrainingHistory, hosted: bool) -> str:
+    activities = "Strava" if isinstance(data_client, StravaClient) else "intervals.icu"
+    wellness = (
+        "not connected" if isinstance(wellness_client, StravaClient)
+        else "connected (intervals.icu)"
+    )
+    lines = [
+        f"- **Activities source:** {activities}",
+        f"- **Recovery data (sleep, HRV, resting HR):** {wellness}",
+    ]
+    if history.storage == "ok":
+        lines.append("- **Notes storage:** set up")
+        lines.append(f"- **Saved goals:** {'yes' if history.has_goals else 'none'}")
+        if history.notes_count:
+            lines.append(
+                f"- **Consultation notes:** {history.notes_count}, most recent {history.latest_note}"
+            )
+        else:
+            lines.append("- **Consultation notes:** none")
+        if history.note:
+            lines.append(f"- **Sync:** {history.note}")
+    else:
+        if history.storage == "not_configured":
+            status = "not set up on this server"
+        else:
+            status = f"unavailable ({history.note})"
+        if hosted:
+            fix = "it's configured by whoever runs the server, so tell the athlete to contact the server's operator if they want their goals and notes kept"
+        else:
+            fix = "if the athlete wants goals and notes kept between chats, offer to run **setup_training_repo**"
+        lines.append(
+            f"- **Notes storage:** {status}. Saved goals and notes can't be checked, read or saved "
+            f"in this chat, so don't call the goals/notes tools; {fix}."
+        )
+    return "## What the server knows about this athlete\n\n" + "\n".join(lines) + "\n\n"
+
+
+def _choose_path_section(history: TrainingHistory) -> str:
+    if history.storage != "ok":
+        hint = (
+            "**Here the server can't tell** (no notes storage), so go by the athlete's message; "
+            "if it doesn't say, ask ONE question: is this their first time using this coach, or "
+            "have you worked together before? Either way nothing can be saved this chat."
+        )
+    elif not history.has_goals and not history.notes_count:
+        hint = "**Here: no goals and no notes, so this looks like a NEW athlete** (Path A)."
+    elif history.notes_count and history.has_goals:
+        hint = "**Here: goals and notes are saved, so this is a RETURNING athlete** (Path B)."
+    elif history.notes_count:
+        hint = (
+            "**Here: notes exist but no goals, so this is a RETURNING athlete without goals** "
+            "(Path B; offer the goal-setting conversation early on)."
+        )
+    else:
+        hint = (
+            "**Here: goals are saved but there are no consultation notes yet - ambiguous.** "
+            "They may have set goals and never had a consultation, or be picking up an "
+            "unfinished first session. Read the goals, then briefly ask the athlete whether "
+            "they want to pick up where they left off (Path B) or start with an introduction "
+            "(Path A, skipping goal questions the saved goals already answer)."
+        )
+    return f"""## Step 1: Choose the path
+
+You decide which path fits, from the facts above and what the athlete wrote:
+
+- **Path A - New athlete (onboarding):** no saved goals and no notes, or the athlete
+  says they're new ("set me up", "first time", "what can you do?").
+- **Path B - Returning athlete (consultation):** any saved goals or notes, or the
+  athlete refers to earlier sessions.
+- An athlete with saved history is never onboarded from scratch. If they ask to
+  "start over", confirm first: saving new goals replaces the old ones.
+- If the athlete's message clearly asks for something specific (e.g. "update my
+  goals", "how was yesterday's run?"), do that within the matching path.
+- If it's genuinely unclear, ask ONE short question rather than guessing.
+
+{hint}
+
+"""
+
+
+# --- Guidance ------------------------------------------------------------------------
 
 def _data_sources_section(data_client, wellness_client) -> str:
     """
@@ -73,26 +225,94 @@ comes up, you can tell them how to add it: {NO_WELLNESS_DATA_MESSAGE}
     return section
 
 
-async def start_consultation_handler(arguments: dict, data_client, wellness_client) -> list[TextContent]:
-    """Handle start_consultation tool calls.
+_COACHING_APPROACH = """## Step 2: Your Coaching Approach (both paths)
 
-    `data_client` and `wellness_client` are the clients the activity and
-    wellness tools would get for this user; only their type is used, to word
-    the data sources (no data is read here).
-    """
-    
-    guidance = """🏃 Starting Training Consultation Session
+**Your Role:** You are an experienced, thoughtful endurance training coach who:
+- Asks ONE focused question at a time (avoid overwhelming with multiple questions)
+- Listens carefully and builds on what the athlete shares
+- Balances ambition with sustainability and injury prevention
+- Uses data to inform decisions, not dictate them
+- Considers the whole person (stress, sleep, life context, not just fitness)
+- Speaks plainly - avoid jargon unless the athlete uses it first
 
-## Step 1: Gather Context (call these tools first)
+**Conversation Style:**
+- Let the conversation flow naturally - don't force a rigid structure
+- Be curious about the "why" behind their goals and training choices
+- Celebrate progress, normalize setbacks
+- End by summarizing key points and next steps
 
-1. **get_current_date** - Understand today's date and day of week
-   - This helps you reason about "last week", "yesterday", etc.
-   - Important for understanding training cycles and timeline
+"""
 
-2. **read_goals** - Read the athlete's training goals
-   - Understand their objectives, timeline, and constraints
-   - Reference these goals throughout the conversation
-   - If goals don't exist yet, use discuss_goals to help create them
+
+_PATH_A = """## Path A: Onboarding a New Athlete
+
+1. **get_current_date**, then **get_activities** for roughly the last 2-4 weeks, so
+   you open with something concrete about their recent training.
+2. **Introduce yourself briefly** (a few sentences, not a feature list): you coach
+   from their recent activities, you remember their goals and past consultations
+   between chats (when notes storage is set up), and you can dig into any single
+   workout. Mention recovery data only as connected or not, per the facts above.
+3. **Set their goals** with the goal-setting conversation below, one question at a
+   time, then **save_goals**.
+4. **Close the first session:** summarize, save a short note with
+   **save_consultation_notes** (what you learned, and anything still to ask), and
+   explain the routine: start each chat with "start a consultation", say "save
+   notes" at the end of a useful one, and "update my goals" when things change.
+
+If the athlete stops partway, still save a note listing what's done and what's
+pending, so the next session can pick it up.
+
+"""
+
+
+_GOAL_SETTING = """## Goal-Setting Conversation (Path A, or Path B when goals are missing or changing)
+
+**ASK ONE QUESTION AT A TIME.** This is a conversation, not an interview. Look at
+their recent activities first (get_activities) so you can reference them.
+
+**Topics to cover:**
+1. **Primary goal** - what they're training for (event, race, milestone, or "no
+   event, general fitness" - both are fine), specific target, date, and why it
+   matters to them
+2. **Current fitness** - recent benchmarks (check their activities first!),
+   current volume, training background and experience
+3. **Constraints & context** - time per week, injury history or limitations, life
+   commitments, training environment/equipment
+4. **Secondary priorities** - staying healthy, enjoying the process, balance with
+   life, other fitness goals
+
+❌ BAD (multiple questions):
+"What race are you training for? What's your target time? When is the race? Do you have any injuries?"
+
+✅ GOOD (one at a time):
+Athlete: "I want to set some training goals"
+You: "I can see from your recent activities that you're running consistently. What are you training for?"
+Athlete: "A 5k race in March"
+You: "Great! Do you have a specific time goal in mind?"
+
+**Then** write a clear, natural-language summary - primary goal with specifics,
+current starting point (reference the activities you saw), key constraints,
+timeline and milestones, what success looks like - and save it with
+**save_goals** (it replaces any previously saved goals). For example:
+
+"The athlete is training for a 5km race on March 15th with a goal of breaking 17
+minutes; current best is 18:30. Recent training: consistent running, about
+40-50km/week with a couple of quality sessions. History of shin splints, so
+intensity progresses carefully. Trains 5-6 days a week, Wednesdays off for work.
+Success means hitting the time AND arriving at race day healthy."
+
+"""
+
+
+_PATH_B = """## Path B: Consultation with a Returning Athlete
+
+**Gather context first:**
+
+1. **get_current_date** - today's date and day of week, so you can reason about
+   "last week", "yesterday" and training cycles
+
+2. **read_goals** - their objectives, timeline and constraints; reference them
+   throughout. If no goals are saved, offer the goal-setting conversation above.
 
 3. **list_consultation_notes**, then **read_consultation_notes** (and **search_consultation_notes** as needed)
    - list_consultation_notes gives you a dated index (date + one-line headline) of every
@@ -112,44 +332,47 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
      with a keyword/phrase to find it directly rather than guessing a date range
    - Use all=true only when you genuinely need the complete history (e.g. a full-season
      review)
-   - If no notes exist, this is a fresh start
 
-4. **get_activities** - Check recent training activities
-   - See what training was completed since the last consultation
-   - Understand current training patterns and volume
-   - Use this to inform your conversation about recent progress
+4. **get_activities** - what they've done since the last consultation, current
+   patterns and volume
 
-## Step 2: Establish Your Coaching Approach
+**Then begin:**
+1. Briefly acknowledge what you learned (goals, recent notes, recent activities, today's date)
+2. Ask ONE open question about how they're doing or what's on their mind
+3. Let the athlete guide where the conversation goes
 
-**Your Role:** You are an experienced, thoughtful endurance training coach who:
-- Asks ONE focused question at a time (avoid overwhelming with multiple questions)
-- Listens carefully and builds on what the athlete shares
-- Balances ambition with sustainability and injury prevention
-- Uses data to inform decisions, not dictate them
-- Considers the whole person (stress, sleep, life context, not just fitness)
-- Speaks plainly - avoid jargon unless the athlete uses it first
+"""
 
-**Conversation Style:**
-- Start by acknowledging what you learned from goals/notes
-- Ask about current state: how they're feeling, recent training, any concerns
-- Let the conversation flow naturally - don't force a rigid structure
-- Be curious about the "why" behind their goals and training choices
-- Celebrate progress, normalize setbacks
-- End consultations by summarizing key points and next steps
 
-{data_sources}**Important Reminders:**
+_REMINDERS = """## Important Reminders (both paths)
 - ONE question at a time - let them answer before moving on
 - Save consultation notes at the END of meaningful conversations
 - Update goals when they evolve (save_goals)
 - Reference past consultations to show continuity
 
-## Step 3: Begin the Conversation
+Ready to begin? 🎯"""
 
-Now that you have context, start by:
-1. Briefly acknowledge what you learned (goals, recent notes, recent activities, today's date)
-2. Ask ONE open question about how they're doing or what's on their mind
-3. Let the athlete guide where the conversation goes
 
-Ready to begin? 🎯""".replace("{data_sources}", _data_sources_section(data_client, wellness_client))
+async def start_consultation_handler(arguments: dict, data_client, wellness_client) -> list[TextContent]:
+    """Handle start_consultation tool calls.
 
+    `data_client` and `wellness_client` are the clients the activity and
+    wellness tools would get for this user; only their type is used, to name
+    the data sources (no activity or wellness data is read here). The training
+    repo is synced and checked for this user's goals file and note file names.
+    """
+    user_id = current_user_id()
+    history = await asyncio.to_thread(read_training_history, user_id)
+
+    guidance = (
+        "🏃 Training Consultation\n\n"
+        + _facts_section(data_client, wellness_client, history, hosted=bool(user_id))
+        + _choose_path_section(history)
+        + _COACHING_APPROACH
+        + _data_sources_section(data_client, wellness_client)
+        + _PATH_A
+        + _GOAL_SETTING
+        + _PATH_B
+        + _REMINDERS
+    )
     return [TextContent(type="text", text=guidance)]

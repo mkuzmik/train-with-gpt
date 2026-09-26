@@ -39,7 +39,7 @@ async def read_goals_handler(arguments: dict) -> list[TextContent]:
         )
 
         if content is None:
-            return [TextContent(type="text", text="ℹ️ No goals saved yet.\n\nUse **discuss_goals** to start a conversation about training goals, then **save_goals** to save them.")]
+            return [TextContent(type="text", text="ℹ️ No goals saved yet.\n\nHave a goal-setting conversation with the athlete (see the guidance from **start_consultation**), then use **save_goals** to save them.")]
 
         # Add pull info if there were updates
         if pull_output:

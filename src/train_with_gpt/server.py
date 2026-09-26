@@ -30,8 +30,6 @@ from .tools import (
     analyze_activity_handler,
     analyze_lap_tool,
     analyze_lap_handler,
-    discuss_goals_tool,
-    discuss_goals_handler,
     save_goals_tool,
     save_goals_handler,
     read_goals_tool,
@@ -141,7 +139,6 @@ async def list_tools() -> list[Tool]:
         analyze_activity_tool(),
         analyze_lap_tool(),
         setup_training_repo_tool(),
-        discuss_goals_tool(),
         save_goals_tool(),
         read_goals_tool(),
         save_consultation_notes_tool(),
@@ -179,8 +176,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await analyze_activity_handler(arguments, _get_active_data_client())
     elif name == "analyze_lap":
         return await analyze_lap_handler(arguments, _get_active_data_client())
-    elif name == "discuss_goals":
-        return await discuss_goals_handler(arguments)
     elif name == "save_goals":
         return await save_goals_handler(arguments)
     elif name == "read_goals":

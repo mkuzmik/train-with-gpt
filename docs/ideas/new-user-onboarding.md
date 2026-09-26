@@ -1,7 +1,9 @@
 # Idea: new-user onboarding (proposal, for review)
 
-**Status:** Phase 0 is implemented (see "Phase 0" below). Phases 1 and 2
-are still proposals. This proposes how a new athlete goes from "just added the
+**Status:** Phase 0 is implemented, and so is a single entry point
+(`start_consultation` reports whether the athlete is new or returning and
+carries both paths; `discuss_goals` is gone), which pulls the "detect state"
+part of Phase 1 forward. The rest of Phase 1 and Phase 2 are still proposals. This proposes how a new athlete goes from "just added the
 connector" to a useful first consultation on the hosted (Strava OAuth) server.
 Validated against `main` on 2026-09-25; "What the code does today" describes
 the code before Phase 0.
@@ -81,7 +83,8 @@ lands.
 
 ### Phase 0: remove the dead ends (S, no dependencies)
 
-- Fix `discuss_goals`: `get_last_week_activities` → `get_activities`.
+- Fix `discuss_goals`: `get_last_week_activities` → `get_activities`. (The
+  tool has since been folded into `start_consultation`; see "Single entry point".)
 - Make `start_consultation`'s data-source wording match the transport
   (Strava for hosted users, intervals.icu for stdio; wellness "only if
   connected").
@@ -107,9 +110,62 @@ lands.
 - The OAuth "not configured" text lives in
   `helpers.training_repo_not_configured_message()`, shared by all six
   goals/notes tools.
-- Until Phase 1 adds the "Set me up as a new athlete" flow, the README's
-  first message is "Start a training consultation" (whose guidance already
-  sends the model to `discuss_goals` when no goals exist).
+- The README's first message is "Start a training consultation"; see the
+  single entry point below for how it handles new athletes.
+
+### Single entry point (implemented; pulled forward from Phase 1)
+
+There used to be two entry points: `start_consultation` for a returning
+athlete and `discuss_goals` for goal setting, and the model had to pick one
+before knowing anything about the athlete. Now there is one,
+`start_consultation`, and the model decides the path.
+
+**Facts it returns** (cheap, server-side, our own storage only):
+
+- activities source (Strava or intervals.icu) and whether recovery data is
+  connected, from the type of the clients `server.py` resolves (no data read);
+- whether notes storage is set up;
+- whether this user's goals file exists, and how many consultation notes they
+  have plus the most recent note's date (from file names; no note is read).
+
+The repo is synced first (`git_pull_and_read`, under the per-repo lock), so
+goals or notes written from another device count. No Strava data is read,
+processed or stored. If storage isn't configured, the path no longer exists
+or the read fails, the facts say so and the rest of the guidance still comes
+back: for stdio it offers `setup_training_repo`, for OAuth users it points to
+the operator.
+
+**How the path is chosen.** The guidance gives both paths and says the model
+chooses from the facts and the athlete's message, asking one short question
+when it's unclear. It also states the server's reading of the facts:
+
+| Facts | Server's hint |
+|---|---|
+| no goals, no notes | new athlete → Path A (onboarding) |
+| goals and notes | returning → Path B (consultation) |
+| notes, no goals | returning without goals → Path B, offer goal setting early |
+| goals, no notes | ambiguous → read goals, ask whether to pick up or start with an introduction |
+| storage unavailable | can't tell → go by the message, or ask whether they've used the coach before |
+
+An athlete with saved history is never onboarded from scratch; "start over"
+is confirmed first, because `save_goals` replaces the old goals.
+
+- **Path A (onboarding):** date and the last 2–4 weeks of activities, a short
+  introduction of what the coach does (recovery data only as connected or not),
+  the goal-setting conversation, `save_goals`, a first note with
+  `save_consultation_notes` (including anything still to ask, so an
+  interrupted onboarding resumes as "notes, no goals"), and the routine.
+- **Goal-setting conversation:** the old `discuss_goals` framework (goal,
+  current fitness, constraints, secondary priorities; one question at a time;
+  summary; `save_goals`), shortened. Used by Path A and by Path B when goals
+  are missing or changing.
+- **Path B (consultation):** unchanged from the old `start_consultation`
+  (date, goals, notes index and last 60 days, activities, then one open
+  question).
+
+What this does **not** do from Phase 1 yet: the landing page, the
+in-progress onboarding note with a checklist, the health screen and the
+12-week baseline. Those still need the owner's decisions below.
 
 ### Phase 1: onboarding on today's storage (M)
 
@@ -135,15 +191,16 @@ without an extra click on every login. Instead:
   it also handles first-time setup". Once #9 adds server instructions, a plain
   "hi" works too.
 
-**2. Detect the athlete's state.** `start_consultation` (stays argument-free)
-looks at the current user's goals file, notes directory and, in Phase 1, an
+**2. Detect the athlete's state.** The new / existing part of this is already
+implemented (see "Single entry point"); Phase 1 adds the in-progress state.
+`start_consultation` (stays argument-free) looks at the current user's goals file, notes directory and, in Phase 1, an
 onboarding note:
 
 | State | Condition | Response |
 |---|---|---|
 | New | no goals, no notes | onboarding guidance (steps 3–7) |
 | Onboarding in progress | an `Onboarding (in progress)` note exists, no goals | onboarding guidance, starting from the first pending item listed in that note |
-| Existing, no goals | notes exist (none of them an onboarding note), no goals | today's daily guidance plus "no goals saved yet; offer `discuss_goals`" |
+| Existing, no goals | notes exist (none of them an onboarding note), no goals | today's daily guidance plus "no goals saved yet; offer the goal-setting conversation" |
 | Onboarded | goals exist | today's daily guidance (Phase 2: plus a one-time offer to run the #10 backfill if there is no profile yet) |
 
 An existing user with months of notes is never treated as new: any saved
@@ -222,7 +279,8 @@ pending. It rewrites the note in place if the notes-sync fix (#8) supports
 same-day updates, and otherwise saves a new note. When the minimum profile is
 complete:
 `save_goals` writes goal + background + constraints + health status (the
-goals format already has room for all of these, see `discuss_goals`), a final
+goals format already has room for all of these, see the goal-setting
+conversation in `start_consultation`), a final
 note marks onboarding done, and `start_consultation` switches to daily
 guidance.
 
@@ -306,7 +364,8 @@ memory.
   correctly. Routing through `start_consultation` means the user's usual
   words trigger it.
 - **Wait for #9 and #10.** Cleaner end state, but new users stay stuck until
-  then. Phase 1 reuses `discuss_goals`, goals and notes, and migrates later.
+  then. Phase 1 reuses the goal-setting guidance, goals and notes, and
+  migrates later.
 
 ## Open questions (with recommended answers)
 

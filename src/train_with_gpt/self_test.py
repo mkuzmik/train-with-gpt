@@ -61,7 +61,6 @@ TIMEOUTS = {
 READ_ONLY_TOOLS = {
     "get_current_date": "{}",
     "start_consultation": "{}",
-    "discuss_goals": "{}",
     "read_goals": "{}",
     "list_consultation_notes": "{}",
     "read_consultation_notes": "{}",
