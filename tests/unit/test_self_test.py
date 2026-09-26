@@ -318,6 +318,25 @@ async def test_push_verified_independently(intervals_ok, training_repo, monkeypa
     assert "does not contain run" in write.detail
 
 
+async def test_marker_overwritten_by_a_concurrent_run_still_passes(intervals_ok, training_repo, git_remote, monkeypatch):
+    """Another self-test pushing its marker between our push and our verify
+    doesn't turn our successful push into a FAIL."""
+    real_save = self_test.git_save_file
+
+    def save_then_race(*args):
+        status = real_save(*args)
+        push_files(git_remote, {"selftest/local.md": "- run_id: someotherrun\n"}, "Self-test run someotherrun")
+        return status
+
+    monkeypatch.setattr(self_test, "git_save_file", save_then_race)
+
+    report = await run_self_test(None)
+
+    write = by_name(report)["Repo write"]
+    assert write.status == PASS, write.detail
+    assert "history" in write.detail
+
+
 async def test_git_sync_error_is_not_saved(intervals_ok, training_repo, monkeypatch):
     def refuse(*args):
         raise self_test.GitSyncError("The remote kept changing while saving, so this was NOT saved")

@@ -317,10 +317,15 @@ def _verify_on_remote(repo: Path, relative: str, run_id: str) -> tuple[str, str]
         if not upstream:  # `git show :path` would read the index, not the remote
             return FAIL, "push reported success, but the branch has no upstream to verify against"
         shown = _git(repo, "show", f"{upstream}:{relative}")
-        if shown.returncode != 0 or run_id not in shown.stdout:
-            return FAIL, f"push reported success, but {upstream}:{relative} does not contain run {run_id}"
-        sha = _git(repo, "rev-parse", "--short", upstream).stdout.strip()
-        return PASS, f"saved {relative}, pushed, verified on {upstream} ({sha})"
+        if shown.returncode == 0 and run_id in shown.stdout:
+            sha = _git(repo, "rev-parse", "--short", upstream).stdout.strip()
+            return PASS, f"saved {relative}, pushed, verified on {upstream} ({sha})"
+        # A concurrent self-test for the same user may have overwritten the
+        # marker between our push and this fetch; our commit is still upstream.
+        landed = _git(repo, "log", "-1", "--format=%h", f"-S{run_id}", upstream, "--", relative).stdout.strip()
+        if landed:
+            return PASS, f"saved {relative}, pushed, verified in {upstream} history ({landed}; since overwritten by a later run)"
+        return FAIL, f"push reported success, but {upstream}:{relative} does not contain run {run_id}"
 
 
 async def check_repo_write(ctx: _Context) -> tuple[str, str]:
