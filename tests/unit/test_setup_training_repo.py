@@ -2,8 +2,9 @@
 
 import json
 
-from tests.support import git, text_of
+from tests.support import as_oauth_user, git, text_of
 from train_with_gpt.config import config
+from train_with_gpt.server import list_tools
 from train_with_gpt.tools import setup_training_repo_handler
 
 
@@ -53,4 +54,31 @@ async def test_setup_with_non_git_directory(tmp_path):
     output = text_of(await setup_training_repo_handler({"repo_path": str(tmp_path)}))
 
     assert "Not a git repository" in output
+    assert config.training_repo_path is None
+
+
+# --- OAuth'd (hosted) users -----------------------------------------------------
+
+async def test_list_tools_offers_setup_training_repo_on_the_personal_path():
+    assert "setup_training_repo" in {tool.name for tool in await list_tools()}
+
+
+async def test_list_tools_hides_only_setup_training_repo_from_oauth_users():
+    personal = {tool.name for tool in await list_tools()}
+    with as_oauth_user("1001"):
+        hosted = {tool.name for tool in await list_tools()}
+
+    assert personal - hosted == {"setup_training_repo"}
+    assert hosted < personal
+
+
+async def test_oauth_user_is_refused_even_with_a_cached_tool_list(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "--quiet")
+
+    with as_oauth_user("1001"):
+        output = text_of(await setup_training_repo_handler({"repo_path": str(repo)}))
+
+    assert "can't be changed from an OAuth'd session" in output
     assert config.training_repo_path is None

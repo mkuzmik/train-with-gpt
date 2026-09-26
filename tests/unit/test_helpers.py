@@ -6,10 +6,12 @@ from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
 
+from tests.support import as_oauth_user
 from train_with_gpt.helpers import (
     calculate_zone_distribution,
     current_user_id,
     extract_note_headline,
+    training_repo_not_configured_message,
     user_scoped_goals_file,
     user_scoped_notes_dir,
 )
@@ -40,6 +42,22 @@ def test_current_user_id_is_the_access_token_subject():
         assert current_user_id() == "1001"
     finally:
         auth_context_var.reset(reset)
+
+
+def test_repo_not_configured_message_on_the_personal_path_points_to_setup():
+    message = training_repo_not_configured_message()
+
+    assert message.startswith("❌ Error: Training repository not configured.")
+    assert "setup_training_repo" in message
+
+
+def test_repo_not_configured_message_for_an_oauth_user_points_to_the_operator():
+    with as_oauth_user("1001"):
+        message = training_repo_not_configured_message()
+
+    assert message.startswith("❌ Error: This server's notes storage isn't set up")
+    assert "contact the server's operator" in message
+    assert "setup_training_repo" not in message
 
 
 # --- extract_note_headline ------------------------------------------------------

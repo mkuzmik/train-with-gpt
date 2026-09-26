@@ -33,11 +33,12 @@ def _basic_auth_key(request) -> str:
     assert user == "API_KEY"
     return key
 
-ALL_TOOLS = {
+# Every tool a hosted (OAuth'd) user is offered: setup_training_repo is personal-only.
+HOSTED_TOOLS = {
     "start_consultation", "get_current_date", "get_activities", "get_sleep_data", "get_hrv_data",
-    "get_resting_heart_rate", "analyze_activity", "analyze_lap", "setup_training_repo", "discuss_goals",
-    "save_goals", "read_goals", "save_consultation_notes", "read_consultation_notes",
-    "list_consultation_notes", "search_consultation_notes", "self_test",
+    "get_resting_heart_rate", "analyze_activity", "analyze_lap", "save_goals",
+    "read_goals", "save_consultation_notes", "read_consultation_notes", "list_consultation_notes",
+    "search_consultation_notes", "self_test",
 }
 
 
@@ -53,7 +54,7 @@ def test_full_round_trip_then_authenticated_tool_calls(http, strava, git_remote)
     info = mcp.initialize()
     assert info["serverInfo"]["name"] == "train-with-gpt"
 
-    assert {tool["name"] for tool in mcp.list_tools()} == ALL_TOOLS
+    assert {tool["name"] for tool in mcp.list_tools()} == HOSTED_TOOLS
 
     # get_activities goes to Strava with the user's own Strava token
     activities = mcp.call_tool("get_activities", {"start_date": "2024-01-14", "end_date": "2024-01-16"})

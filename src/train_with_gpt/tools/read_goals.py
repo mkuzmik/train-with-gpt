@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import current_user_id, git_pull_and_read, read_file_if_exists, user_scoped_goals_file
+from ..helpers import current_user_id, git_pull_and_read, read_file_if_exists, user_scoped_goals_file, training_repo_not_configured_message
 
 
 def read_goals_tool() -> Tool:
@@ -26,7 +26,7 @@ async def read_goals_handler(arguments: dict) -> list[TextContent]:
     try:
         # Check if training repo is configured
         if not config.training_repo_path:
-            return [TextContent(type="text", text="❌ Error: Training repository not configured.\n\nPlease use **setup_training_repo** first to set the location of your training notes repository.")]
+            return [TextContent(type="text", text=training_repo_not_configured_message())]
         
         repo_path = Path(config.training_repo_path)
         if not repo_path.exists():
@@ -39,7 +39,7 @@ async def read_goals_handler(arguments: dict) -> list[TextContent]:
         )
 
         if content is None:
-            return [TextContent(type="text", text="ℹ️ No goals saved yet.\n\nUse **discuss_goals** to start a conversation about training goals, then **save_goals** to save them.")]
+            return [TextContent(type="text", text="ℹ️ No goals saved yet.\n\nHave a goal-setting conversation with the athlete (see the guidance from **start_consultation**), then use **save_goals** to save them.")]
 
         # Add pull info if there were updates
         if pull_output:
