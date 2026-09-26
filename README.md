@@ -82,6 +82,8 @@ You'll need a Strava OAuth app (instant/self-serve, unlike intervals.icu's):
    Callback Domain" to `localhost` for local/Docker testing).
 2. Save its Client ID/Secret to `~/.config/train-with-gpt/config.json` as
    `clientId`/`clientSecret`, or export `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET`.
+3. Export `ALLOWED_STRAVA_ATHLETE_IDS` with your own Strava athlete id. Without
+   it nobody can sign in (see [Who can sign in](#who-can-sign-in-allowlist)).
 
 Start the server:
 
@@ -116,6 +118,50 @@ whole OAuth dance (opens a browser, runs its own callback listener):
 See "Deploying to Fly.io" below for the public deployment. The Docker setup
 below simulates a remote deployment locally.
 
+### Who can sign in (allowlist)
+
+The HTTP server only lets in the Strava athletes listed in the
+`ALLOWED_STRAVA_ATHLETE_IDS` environment variable. This is a privacy (GDPR)
+stopgap: until there is a privacy policy and the Strava API policy work is
+done, the server should only process data of people who were explicitly let
+in. The personal stdio server doesn't use it.
+
+- **Format:** comma-separated numeric athlete ids, e.g. `111,222`. Spaces are
+  fine. Anything else (including `*`) stops the server at startup with an
+  error that names the variable but not the value.
+- **Fails closed:** unset or empty means nobody can sign in, and the server
+  logs a warning at startup. On a hosted deployment, set it (as a secret, never
+  in the repo) **before** deploying a version that has the allowlist, or
+  sign-in is blocked for everyone, including you. The log only shows how many
+  ids are allowed, never the ids.
+- **Someone not on the list** gets a "This server is private" page after the
+  Strava consent screen. Nothing about them is stored, Claude gets no code,
+  and the server asks Strava to revoke the access the athlete just granted.
+  The log records the refusal without their id or name.
+- **Taking someone off the list** locks them out on their next request, even
+  with a token they already have (the server re-reads the variable when it
+  restarts). Their stored data stays, so putting them back restores access.
+- **Finding your athlete id:** on strava.com, open your profile (avatar → My
+  Profile). The number in the URL, `strava.com/athletes/<id>`, is your id. It
+  identifies you, so put it straight into your environment or secret store
+  and keep it out of issues, commits and chats.
+
+For example, on Fly.io (setting a secret restarts the app):
+
+```bash
+fly secrets set -a <app> ALLOWED_STRAVA_ATHLETE_IDS=<your_athlete_id>
+```
+
+**Deleting a user's stored data.** Taking someone off the list doesn't delete
+anything. `train-with-gpt-purge-user <user_id>`, run next to the server's
+`store.db` (as the `app` user in the container, e.g.
+`su app -c 'train-with-gpt-purge-user <user_id>'`), removes their Strava
+tokens and name, intervals.icu key, and the server's tokens and codes for
+them. It first asks Strava to revoke the app's access (skip with
+`--no-deauthorize`). Their notes and goals in the training repo
+(`notes/<user_id>/`, `goals/<user_id>.md`) aren't touched; delete them there in
+a normal commit if needed. Git history keeps them until it's rewritten.
+
 ### Running the HTTP server in Docker
 
 A `Dockerfile`/`docker-compose.yml` at the repo root run the HTTP entrypoint
@@ -142,7 +188,9 @@ This maps container port 8000 to `localhost:8123` on the host and sets
 `PUBLIC_URL=http://localhost:8123` to match (override either with `HOST_PORT`/
 `PUBLIC_URL` env vars — they must stay in sync, since `PUBLIC_URL` is what
 gets baked into the OAuth redirect URIs sent to Claude and Strava). Point
-`mcp-remote` at `http://localhost:8123/mcp` as above.
+`mcp-remote` at `http://localhost:8123/mcp` as above. Compose passes
+`ALLOWED_STRAVA_ATHLETE_IDS` through from your shell, so export it first or
+nobody can sign in.
 
 The container's `~/.config/train-with-gpt` directory is a named Docker
 volume (`train-with-gpt-config`), so the SQLite store (users/tokens/OAuth
@@ -520,7 +568,10 @@ through its public interfaces only:
 - The HTTP server: `create_app()` behind Starlette's `TestClient` (the `http`
   fixture). Drive the OAuth endpoints (`/register`, `/authorize`,
   `/oauth/strava/callback`, `/token`, `/revoke`) and `/mcp` with real MCP
-  JSON-RPC (`McpHttpClient`). `login(athlete_id)` runs the full OAuth round
+  JSON-RPC (`McpHttpClient`). The server's allowlist is
+  `ALLOWED_ATHLETES` in `tests/integration/conftest.py` (synthetic ids; add
+  new ones there, or override with `@pytest.mark.allowed_athletes("...")`).
+  `login(athlete_id)` runs the full OAuth round
   trip and returns an initialised MCP client. It walks through the optional
   intervals.icu page, which is on when a test has
   `@pytest.mark.intervals_login_step`, by skipping it or pasting

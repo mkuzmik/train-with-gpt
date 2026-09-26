@@ -33,6 +33,7 @@ _SCRUBBED_ENV = (
     "TOKEN_ENCRYPTION_KEY",
     "PUBLIC_URL",
     "PORT",
+    "ALLOWED_STRAVA_ATHLETE_IDS",
 )
 for _name in list(os.environ):
     if _name in _SCRUBBED_ENV or _name.startswith("GIT_"):

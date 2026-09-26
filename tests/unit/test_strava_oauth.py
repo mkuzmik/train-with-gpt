@@ -5,8 +5,10 @@ store; Strava's token/profile endpoints are stubbed with respx. The full
 round trip through the real app lives in tests/integration/test_oauth_flow.py.
 """
 
+import sqlite3
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 import pytest
 from httpx import Response
 from mcp.server.auth.provider import AuthorizationCode
@@ -15,14 +17,16 @@ from starlette.testclient import TestClient
 
 from tests.support import STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET
 from train_with_gpt import store
-from train_with_gpt.strava_oauth import build_strava_authorize_url, strava_oauth_route
+from train_with_gpt.strava_oauth import build_strava_authorize_url, create_strava_oauth_route
 
 TOKEN_URL = "https://www.strava.com/oauth/token"
+DEAUTHORIZE_URL = "https://www.strava.com/oauth/deauthorize"
+ALLOWED = frozenset({"42", "7"})
 
 
 @pytest.fixture
 def client(db, strava_app_credentials):
-    return TestClient(Starlette(routes=[strava_oauth_route]))
+    return TestClient(Starlette(routes=[create_strava_oauth_route(ALLOWED)]))
 
 
 def _seed_pending(state="nested-state-1", claude_redirect="http://localhost:9999/callback"):
@@ -158,3 +162,105 @@ def test_pending_authorization_is_single_use_via_callback(client):
         follow_redirects=False,
     )
     assert response.status_code == 400
+
+
+# --- allowlist ---------------------------------------------------------------
+
+def _stub_token_exchange(http_mock, athlete_id):
+    return http_mock.post(TOKEN_URL).mock(
+        return_value=Response(200, json={
+            "access_token": "strava-access",
+            "refresh_token": "strava-refresh",
+            "expires_at": 9999999999,
+            "athlete": {"id": athlete_id, "firstname": "Eve", "lastname": "Outsider"},
+        })
+    )
+
+
+def _stored_rows():
+    tables = ("users", "auth_codes", "access_tokens", "pending_authorizations", "pending_connect_steps")
+    with sqlite3.connect(store.DB_PATH) as conn:
+        return {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in tables}
+
+
+@pytest.mark.parametrize("intervals_step", [False, True], ids=["no-intervals-step", "intervals-step"])
+def test_callback_refuses_an_athlete_not_on_the_allowlist(client, http_mock, request, intervals_step, capsys):
+    if intervals_step:
+        request.getfixturevalue("token_encryption_key")
+    _seed_pending(state="nested-state-1")
+    _stub_token_exchange(http_mock, 666)
+    deauthorize = http_mock.post(DEAUTHORIZE_URL).mock(return_value=Response(200, json={}))
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=strava-code", follow_redirects=False)
+
+    assert response.status_code == 403
+    assert "location" not in response.headers  # no code for Claude
+    assert "This server is private" in response.text
+    # Nothing stored about the athlete, and the pending request is used up.
+    assert set(_stored_rows().values()) == {0}
+    # The grant Strava just gave us is revoked.
+    assert parse_qs(deauthorize.calls.last.request.content.decode()) == {"access_token": ["strava-access"]}
+    # The log says what happened without naming the athlete.
+    err = capsys.readouterr().err
+    assert "Refused sign-in" in err
+    assert "666" not in err and "Eve" not in err and "Outsider" not in err
+
+
+@pytest.mark.parametrize("failure", [
+    Response(500, json={}),
+    httpx.ConnectError("strava down"),
+], ids=["strava-500", "network-error"])
+def test_callback_still_refuses_when_deauthorize_fails(client, http_mock, failure, capsys):
+    _seed_pending(state="nested-state-1")
+    _stub_token_exchange(http_mock, 666)
+    if isinstance(failure, Exception):
+        http_mock.post(DEAUTHORIZE_URL).mock(side_effect=failure)
+    else:
+        http_mock.post(DEAUTHORIZE_URL).mock(return_value=failure)
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=strava-code", follow_redirects=False)
+
+    assert response.status_code == 403
+    assert set(_stored_rows().values()) == {0}
+    assert "NOT revoked" in capsys.readouterr().err
+
+
+def test_callback_refuses_via_the_profile_fallback_too(client, http_mock):
+    _seed_pending()
+    http_mock.post(TOKEN_URL).mock(
+        return_value=Response(200, json={"access_token": "strava-access", "expires_at": 9999999999})
+    )
+    http_mock.get("https://www.strava.com/api/v3/athlete").mock(
+        return_value=Response(200, json={"id": 666, "firstname": "Eve", "lastname": ""})
+    )
+    deauthorize = http_mock.post(DEAUTHORIZE_URL).mock(return_value=Response(200, json={}))
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=c", follow_redirects=False)
+
+    assert response.status_code == 403
+    assert store.get_user("666") is None
+    assert deauthorize.called
+
+
+def test_callback_with_empty_allowlist_refuses_everyone(db, strava_app_credentials, http_mock):
+    client = TestClient(Starlette(routes=[create_strava_oauth_route(frozenset())]))
+    _seed_pending()
+    _stub_token_exchange(http_mock, 42)
+    http_mock.post(DEAUTHORIZE_URL).mock(return_value=Response(200, json={}))
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=c", follow_redirects=False)
+
+    assert response.status_code == 403
+    assert store.get_user("42") is None
+
+
+def test_callback_allowed_athlete_is_not_deauthorized(client, http_mock):
+    _seed_pending()
+    _stub_token_exchange(http_mock, 42)
+    deauthorize = http_mock.post(DEAUTHORIZE_URL)
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=c", follow_redirects=False)
+
+    assert response.status_code in (302, 303, 307)
+    assert store.get_user("42") is not None
+    assert not deauthorize.called

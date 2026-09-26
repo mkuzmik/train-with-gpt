@@ -34,10 +34,11 @@ from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from . import store
+from .allowlist import load_allowlist
 from .intervals_connect import intervals_connect_route
 from .oauth_provider import TrainWithGptOAuthProvider
 from .server import app as mcp_app
-from .strava_oauth import strava_oauth_route
+from .strava_oauth import create_strava_oauth_route
 
 
 def default_public_url() -> str:
@@ -52,16 +53,22 @@ async def health(request):
     return JSONResponse({"status": "ok"})
 
 
-def create_app(public_url: Optional[str] = None) -> Starlette:
+def create_app(public_url: Optional[str] = None, allowed_athlete_ids: Optional[frozenset[str]] = None) -> Starlette:
     """Build the HTTP app: OAuth AS routes, the Strava callback and the /mcp endpoint.
 
     Each call gets its own OAuth provider and MCP session manager (a session
     manager can only be run once), so tests can build a fresh app per test.
     The store is initialised on startup (lifespan), not at import time.
+
+    `allowed_athlete_ids` defaults to ALLOWED_STRAVA_ATHLETE_IDS from the
+    environment (allowlist.py): a malformed value raises here, so the server
+    refuses to start; unset/empty starts but lets nobody sign in.
     """
     public_url = public_url or default_public_url()
+    if allowed_athlete_ids is None:
+        allowed_athlete_ids = load_allowlist()
 
-    provider = TrainWithGptOAuthProvider(issuer_base_url=public_url)
+    provider = TrainWithGptOAuthProvider(issuer_base_url=public_url, allowed_athlete_ids=allowed_athlete_ids)
     token_verifier = ProviderTokenVerifier(provider)
 
     session_manager = StreamableHTTPSessionManager(app=mcp_app, stateless=True)
@@ -101,7 +108,7 @@ def create_app(public_url: Optional[str] = None) -> Starlette:
             *create_protected_resource_routes(
                 mcp_resource_url, authorization_servers=[AnyHttpUrl(public_url)]
             ),
-            strava_oauth_route,
+            create_strava_oauth_route(allowed_athlete_ids),
             intervals_connect_route,
             # Route, not Mount: a Mount redirects /mcp -> /mcp/, which behind a
             # TLS-terminating proxy risks a downgrade redirect strict clients reject.

@@ -15,6 +15,9 @@ services:
       # the personal one the stdio/host setup uses.
       TRAINING_REPO_PATH: /data/training-context
       TRAINING_REPO_URL: "${TRAINING_REPO_URL:-git@github.com:mkuzmik/training-context-shared.git}"
+      # Strava athletes allowed to sign in, from your shell (see README,
+      # "Who can sign in"). Unset lets nobody in.
+      ALLOWED_STRAVA_ATHLETE_IDS: "${ALLOWED_STRAVA_ATHLETE_IDS:-}"
     secrets:
       - training_context_deploy_key
       - train_with_gpt_config
