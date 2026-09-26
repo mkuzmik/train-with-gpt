@@ -6,7 +6,8 @@ shared computations. Other proposals depend on it: `athlete-profile.md` (#10)
 for its computed sections, `science-based-coaching.md` (#13) for its load and
 recovery checks, `consultation-context.md` (#9) for weekly totals and
 wellness vs baseline, and `new-user-onboarding.md` (#11) for the day-one data
-baseline.
+baseline. The data-source decision it rests on is analysed in
+`data-source-policy.md`.
 
 Checked against public docs on 2026-09-25: the intervals.icu OpenAPI spec
 (`https://intervals.icu/api/v1/docs`), the Strava API reference, rate-limit
@@ -15,43 +16,36 @@ effective 2026-06-01). Claims about current code refer to `origin/main`.
 Fields the Strava reference does not list but the API returns in practice are
 marked *(undocumented)*.
 
-## Blocker to resolve first: Strava API Policy and AI use
+## Data-source policy (read first)
 
-The Strava API Policy effective 2026-06-01 (`strava.com/legal/api_policy`)
-contains rules that bear on this whole server, not only on this proposal:
+The Strava API Policy effective 2026-06-01 bars operating "any MCP Server
+... that exposes ... Strava Data" (§5.16(b)) and using Strava data with an AI
+application, including "ingestion into a context window" (§5.3). The only
+exception is Strava's own MCP (§3.5). Read literally, today's hosted Strava
+path already conflicts with this. The full analysis, with clause quotes, a
+comparison of seven options and the owner's decisions, is in
+**[`data-source-policy.md`](data-source-policy.md)**. This is not legal
+advice.
 
-- **§5.16(b):** developers may not "operate any MCP Server, agent-mediated
-  interface, or analogous mechanism that exposes the Strava API Materials,
-  Strava Data, or any subset thereof". "The Strava MCP is the sole authorized
-  first-party agent-mediated interface."
-- **§5.3:** Strava Data and data derived from it may not be used "in
-  connection with the ... operation of any AI Application", explicitly
-  including "ingestion into a context window or working memory". The only
-  exception named is Strava's own MCP server (§3.5).
-- **§5.4:** Strava Data may not be processed for "analytics, analyses" or
-  combined "with other customer data".
-- **§6.2 / §6.3:** caches may hold Strava Data for at most 7 days, and
-  deletions on Strava must be reflected within 48 hours.
-- **§5.5:** no storing Strava Data or derived data in a "Persistent Index"
-  (archives, search indexes and similar).
+What this proposal assumes, following that doc's recommendation:
 
-Read literally, the existing remote path (an MCP server returning Strava
-activities to Claude) is already affected, and every Strava-derived feature
-below adds to that. This is not legal advice and the owner has to decide.
-Until then the recommendation is:
-
-- Build **intervals.icu-first**: every tool below is fully useful with an
-  intervals.icu key, and the Strava side is limited to what the server already
-  reads (activity list, laps, streams, zones, profile).
-- Don't add new Strava fan-out (per-activity best efforts, time in zone from
-  streams) and don't persist Strava-derived numbers in the training repo
-  (#10's computed profile sections) until this is settled.
-- Consider pointing Strava-only users to intervals.icu (free, syncs from
-  Strava and devices) as the recommended data source.
-
-Also note: intervals.icu's own derived values (CTL, curves) for activities it
-imported from Strava are "data derived from Strava Data". That is between the
-athlete, intervals.icu and Strava, but it's worth knowing.
+- **This server's data comes from intervals.icu only**, on both stdio and
+  hosted. Every tool below is intervals.icu-only. No new Strava reads,
+  processing, storage or caching.
+- **Strava data reaches Claude through the official Strava MCP**, which the
+  user connects alongside this server. This server never calls it, proxies
+  it or ingests its output. Tool descriptions say "from intervals.icu" so the
+  model can tell the two apart.
+- **Hosted login moves off Strava** (intervals.icu API key, later OAuth).
+  That work is a separate change, tracked in `data-source-policy.md`. Until
+  it lands, hosted users without an intervals.icu key keep today's frozen
+  Strava tools and get none of the new ones.
+- **Strava-synced activities are stubs on intervals.icu.** The tools must
+  handle stubs gracefully, and say how to fix it: sync the device directly
+  to intervals.icu, or import the Strava archive.
+- **Garmin attribution** (intervals.icu API terms §1.1, Garmin API brand
+  guidelines): output that shows Garmin-sourced activity data or data
+  derived from it names "Garmin [device model]" (from `device_name`).
 
 ## Coaching use cases
 
@@ -141,7 +135,12 @@ intervals.icu directly from a device or upload have fields. Wellness is not
 affected. The stub's shape is not documented; check that today's stdio
 `get_activities` handles stubs (it reads `start_date` unconditionally).
 
-### Strava API v3
+### Strava API v3 (reference only; not to be built)
+
+Kept as a record of what the current Strava path reads. Per
+`data-source-policy.md`, none of the Strava rows below will be built. The
+existing hosted Strava reads stay frozen until the login migration removes
+them. Strava data comes from the official Strava MCP instead.
 
 Current scopes: `activity:read_all,activity:read,profile:read_all`.
 
@@ -160,7 +159,7 @@ Current scopes: `activity:read_all,activity:read,profile:read_all`.
 Strava has **no wellness data** in its API: no sleep, HRV, resting HR or
 weight history. `DetailedAthlete.weight` is a single current value.
 
-### Strava rate limits (corrected)
+### Strava rate limits (corrected; only relevant while the frozen path exists)
 
 Limits are **per application, shared by all users** of the Fly server. From
 the rate-limit page:
@@ -186,7 +185,21 @@ streams over a block) is what breaks the budget: 12 weeks of daily runs is
 
 The earlier draft proposed up to 10 new tools. MCP clients send every tool's
 name, description and schema with each request, roughly 150–400 tokens per
-tool, and more similar tools make the model pick the wrong one. Consolidated:
+tool, and more similar tools make the model pick the wrong one. The table
+below consolidates them.
+
+All five tools are **intervals.icu-only**. Strava data is the official Strava
+MCP's job (see `data-source-policy.md`). With no intervals.icu connection:
+
+- the new tools return a short "connect intervals.icu" message;
+- `get_activities` (and `analyze_activity`/`analyze_lap`) keep today's
+  frozen Strava output, with no new fields, until the login migration removes
+  the Strava reads.
+
+This is a behaviour change for hosted users who *did* add an intervals.icu
+key. Their activity list switches from Strava to intervals.icu, so
+Strava-synced activities become stubs (see the stub handling below). This is
+intended; the output explains it.
 
 | Tool | Replaces / absorbs | Net |
 |---|---|---|
@@ -208,24 +221,30 @@ with that name, which confuses the model when both connectors are enabled.
 rolling averages, zone shares) that tools and those features call directly.
 This is what the other proposals actually depend on.
 
-### 1. `get_activities` (enriched) — S–M, both sources
+### 1. `get_activities` (enriched) — M, intervals.icu
 
-- Adds per activity: `name`, race flag (intervals.icu `race`; Strava
-  `workout_type` 1/11), load (`icu_training_load`; Strava `suffer_score` if
-  present, labelled "Relative Effort"), RPE/feel (intervals.icu only), gear
-  name, weather (`average_weather_temp`/`average_feels_like`, intervals.icu;
-  Strava `average_temp` from the device), decoupling and efficiency factor
-  (intervals.icu).
+- Adds per activity: `name`, race flag (`race`), load
+  (`icu_training_load`), RPE/feel, gear name, weather
+  (`average_weather_temp`/`average_feels_like`), decoupling and efficiency
+  factor.
+- **Stubs:** Strava-synced activities come back as stubs. Count them, leave
+  them out of totals, and say so once ("N activities synced from Strava
+  aren't available through intervals.icu; connect your device directly to
+  intervals.icu, or use the Strava connector for those"). Never try to fetch
+  them from Strava.
+- **Garmin attribution:** activities whose `device_name` is a Garmin device
+  show "Garmin <model>". Grouped totals that include Garmin data carry one
+  "Includes data from Garmin devices" line (check the exact wording against
+  Garmin's API brand guidelines).
 - New `group_by`: `activity` (default), `week` (ISO weeks, per sport: count,
   distance, time, elevation, load, longest), `month`. Ranges longer than 14
   days default to `week` with a note, which keeps context small for block
   reviews.
 - Range cap: 1 year for `week`/`month` (one or two list requests).
 
-Strava-only users get: names, race flag, distance/time/elevation, HR, power,
-Relative Effort *(undocumented)*, gear name (one extra `/athlete` call,
-cached), weekly totals. Not available: RPE/feel, weather, decoupling, EF,
-calories (detail call per activity; not worth it).
+Strava-only users: not served by this tool. The official Strava MCP
+(`list_activities`) covers their activity list, and Claude can total it in
+the conversation.
 
 Sketch (`group_by: week`, made-up numbers):
 
@@ -260,10 +279,9 @@ in the prior 30 days (+12%).
 - The three existing tools stay until this ships, then become thin wrappers,
   then are removed after a release.
 
-Strava-only users get: the honest "no wellness on Strava" message, plus the
-current weight from `/athlete` for `body`. No CTL estimate from Relative
-Effort (undocumented field, and a second fitness model would disagree with
-intervals.icu's).
+Strava-only users get the honest "no wellness data without intervals.icu"
+message. No weight from Strava's `/athlete`, and no CTL estimate from
+Relative Effort (that would be new Strava processing).
 
 Sketch (`metrics: recovery`, made-up numbers):
 
@@ -277,7 +295,7 @@ Sleep score  71      76      79 ± 7           —
 Not tracked: avgSleepingHR. Missing: HRV on 2026-01-27.
 ```
 
-### 3. `get_athlete_settings` — S, both sources
+### 3. `get_athlete_settings` — S, intervals.icu
 
 Thresholds, zones and gear in one call; `section` filter
 (`thresholds`, `zones`, `gear`), default all.
@@ -285,9 +303,8 @@ Thresholds, zones and gear in one call; `section` filter
 - intervals.icu: `sport-settings` per sport (`ftp`, `indoor_ftp`, `w_prime`,
   `lthr`, `max_hr`, `threshold_pace`, zones), current eFTP from the latest
   wellness `sportInfo`, gear with distance, retired flag and reminders.
-- Strava-only: `ftp`, current `weight`, HR/power zones (`/athlete/zones`),
-  shoes/bikes with distance and primary flag. Not available: threshold pace,
-  LTHR, retired gear.
+- Strava-only: not served. The Strava MCP has `get_athlete_zones` and
+  `get_gear`.
 
 Sketch (made-up numbers):
 
@@ -300,17 +317,16 @@ Gear  Shoe A 612 km (reminder at 700 km) · Shoe B 188 km · Bike A 4,210 km
       retired: Shoe C 845 km
 ```
 
-### 4. `get_best_efforts` — M, intervals.icu first
+### 4. `get_best_efforts` — M, intervals.icu
 
 - intervals.icu: one `pace-curves` (runs, `gap` option) or `power-curves`
   (rides) call; windows e.g. 42 days, 90 days, 1 year; standard distances
   (400 m … half marathon) or durations (5 s … 60 min), each with date and
   activity id. Whether curves include Strava-imported activities is not
-  documented; verify.
-- Strava-only: `best_efforts` from `DetailedActivity`, one request per
-  activity. If kept at all (see the policy blocker), limit to activities
-  flagged as races or the last 5 runs, cache per user, and say what was
-  scanned.
+  documented. Verify with a synthetic account, and if they do, pass them
+  through only as intervals.icu computed them (no Strava calls on our side).
+- Strava-only: not served (the Strava MCP's `get_activity_performance` is
+  the alternative).
 
 ### 5. `get_calendar` — M, intervals.icu only
 
@@ -334,6 +350,8 @@ public API). Pairs with the parked `save_training_plan` idea in
 
 ### Not recommended
 
+- Any new Strava call, including everything below (see
+  `data-source-policy.md`).
 - Strava `/athletes/{id}/stats`: public activities only, fixed windows.
 - intervals.icu `athlete-summary`: self-inclusion with an API key is
   undocumented, and wellness already has the numbers.
@@ -341,65 +359,71 @@ public API). Pairs with the parked `save_training_plan` idea in
 - Strava writes (new scopes, re-consent).
 - A Strava-side CTL/ATL estimate.
 
-## Caching and rate-limit handling — M
+## Caching — S–M, later
 
-The Fly deployment is one process on one machine that auto-stops when idle
-(`fly.toml`), serving several users.
+Less urgent now that Strava's shared per-app budget is out of the picture.
+intervals.icu publishes no rate limit, and load is per user key.
 
-- **Per-user, in-memory cache** keyed by `(user_id, endpoint, params)`. Never
-  shared across users (Strava policy §6.1: a user's data may be shown only to
-  that user). Lost on machine stop, which is fine for a cache.
-- **Don't persist API responses** in `store.db` or the training repo. Strava
-  caps retention at 7 days (§6.2) and wants deletions reflected within 48 h
-  (§6.3); an in-memory cache with short TTLs satisfies both without extra
-  bookkeeping.
+- **Per-user, in-memory cache** keyed by `(user_id, endpoint, params)`,
+  never shared across users. Lost on machine stop, which is fine for a
+  cache.
+- **Don't persist API responses** in `store.db` or the training repo.
 - **TTLs:** activity list and wellness 10 min (today's row changes);
-  `DetailedActivity`, laps, streams 24 h; `/athlete`, zones, sport settings,
-  gear, wellness-key lists 24 h. Hard cap 7 days for anything Strava. Size
-  cap ~20 MB (the VM has 256 MB).
-- **Single-flight:** concurrent identical requests share one upstream call
-  (same pattern as the per-user refresh lock).
-- **Budget awareness:** record `X-ReadRateLimit-Usage` from every Strava
-  response. Above ~80% of the 15-minute limit, skip optional fan-out and say
-  so in the output; on 429, return "Strava rate limit reached for this
-  server, resets at HH:MM" instead of a stack trace.
-- Replaces the ineffective per-instance `zones_cache`.
-- intervals.icu: same cache (politeness and latency), no budget tracking.
+  sport settings, gear and wellness-key lists 24 h. Size cap ~20 MB (the VM
+  has 256 MB).
+- **Single-flight:** concurrent identical requests share one upstream call.
+- **No Strava caching.** Don't add caching to the frozen Strava path (it
+  would be new Strava storage). The ineffective `StravaClient.zones_cache`
+  is left as it is until the Strava reads are removed.
 
 ## Rollout and dependencies
+
+The data-source migration (intervals.icu login, switching hosted data to
+intervals.icu, removing Strava reads) comes from `data-source-policy.md`. It
+is a separate change with its own owner decisions. The steps below don't wait
+for it: they are intervals.icu-only, so they work on stdio and for hosted
+users with a key from day one.
 
 | Step | Work | Effort | Unblocks |
 |---|---|---|---|
 | 0 | Honest wellness errors (both failure paths) | S | #9 step 1 (same change; do it once) |
-| 1 | `training_metrics.py` + enriched `get_activities` with `group_by` | M | #9 weekly totals, #10 current fitness, #13 C2 volume/long-run checks, #11 day-one baseline |
+| 1 | `training_metrics.py` + enriched `get_activities` with `group_by`, stub handling, Garmin attribution | M | #9 weekly totals, #10 current fitness, #13 C2 volume/long-run checks, #11 day-one baseline |
 | 2 | `get_wellness` with presets and baselines; fix HRV/RHR descriptions | S–M | #13 C3 recovery check and A3, #10 baselines, #9 wellness vs baseline |
 | 3 | `get_athlete_settings` | S | #10 thresholds/zones/gear |
-| 4 | Cache and rate-limit handling | M | anything with Strava fan-out, #11 onboarding at scale |
-| 5 | `get_best_efforts` (intervals.icu first) | M | #10 race results/best efforts |
-| 6 | `get_calendar` | M | plan vs executed |
-| 7 | Retire the three wellness tools | S | tool count |
-| 8 | Writes | M | — |
+| 4 | `get_best_efforts` | M | #10 race results/best efforts |
+| 5 | `get_calendar` | M | plan vs executed |
+| 6 | Retire the three wellness tools | S | tool count |
+| 7 | Per-user cache | S–M | latency; only if needed |
+| 8 | Writes | M | — (needs intervals.icu OAuth) |
 
-Effort changes from the draft: `get_wellness` S → S–M (baselines, presets,
-tracked-keys lookup and tests); richer `get_activities` + totals S–M → M
-(grouping, two sources, stub handling); the Strava CTL estimate is dropped;
-caching is now its own M step.
+Effort changes from the previous draft:
+- `get_wellness` S → S–M: baselines, presets, tracked-keys lookup and tests.
+- Richer `get_activities` + totals S–M → M: grouping, stub handling,
+  attribution.
+- The Strava CTL estimate and Strava fan-out are dropped.
+- Caching shrinks to S–M and moves late, because there is no Strava budget
+  to protect.
 
-Time in zone for #13 C2 is cheap with intervals.icu (`icu_zone_times`,
-`icu_hr_zone_times` in the list) but needs one stream request per activity on
-Strava. Recommend: intervals.icu only, "not available" on Strava.
+Time in zone for #13 C2 comes from intervals.icu (`icu_zone_times`,
+`icu_hr_zone_times` in the list). On Strava it is "not available from this
+server".
+
+Cross-PR effects of the policy recommendation (not edited here):
+- #10 must not persist Strava-derived numbers in the profile.
+- #11's day-one Strava backfill and Strava-first onboarding become "connect
+  intervals.icu (device synced directly), optionally add the Strava
+  connector".
+- #9's consultation context uses intervals.icu only.
 
 ## Open questions (with recommendations)
 
-1. **Strava policy (§5.16, §5.3, §5.4).** Keep extending the Strava path, freeze it at
-   today's features, or move remote users to intervals.icu as the primary
-   source? *Recommended:* freeze Strava at today's features pending the
-   owner's review; build everything here on intervals.icu.
+1. **Strava policy.** Decided by the owner in `data-source-policy.md`.
+   *Recommended there:* freeze, ask Strava, move hosted login and data to
+   intervals.icu, and use the official Strava MCP for Strava data.
 2. **Remote users with an intervals.icu key: which source for activities?**
-   *Recommended:* keep Strava as the list (stubs make intervals.icu's list
-   empty for Strava-synced accounts), but show intervals.icu load/RPE/feel
-   when the intervals.icu list has a non-stub match by `strava_id`. Revisit if
-   (1) is decided against Strava, since this combines data (§5.4).
+   *Recommended:* intervals.icu only. Joining with Strava by `strava_id`
+   would be combining Strava data (§5.4) and new Strava processing, so it is
+   dropped. Stubs are explained, not rehydrated.
 3. **Keep or retire `get_sleep_data`/`get_hrv_data`/`get_resting_heart_rate`?**
    *Recommended:* retire one release after `get_wellness` ships (−3 tools).
 4. **Baseline definition.** *Recommended:* 60-day mean ± 1 SD, excluding the
@@ -407,21 +431,24 @@ Strava. Recommend: intervals.icu only, "not available" on Strava.
    Matches #13 C3 and D2.
 5. **`group_by` default.** *Recommended:* `activity` for ≤ 14 days, `week`
    above.
-6. **Which Strava app tier is the Fly app on?** It decides whether the budget
-   is 100 or 200 non-upload requests per 15 minutes, and whether more than
-   one (or ten) athletes can connect. *Recommended:* check the API settings
-   page and write the tier in the README.
-7. **Cache location.** *Recommended:* in-memory only (above); revisit only if
+6. **Garmin attribution wording.** *Recommended:* "Garmin <device model>" per
+   activity, plus one line on aggregates. Confirm against Garmin's API brand
+   guidelines before shipping step 1.
+7. **Cache location.** *Recommended:* in-memory only; revisit only if
    cold-start refetches become a measurable problem.
 8. **Writes.** *Recommended:* none until intervals.icu OAuth with limited
    scopes is available.
+
+(The earlier "which Strava app tier" question matters only while the frozen
+Strava path runs. See `data-source-policy.md`.)
 
 ## How to verify
 
 - Unit tests for `training_metrics.py`: ISO-week bucketing across year
   boundaries, partial weeks, baselines with gaps and too few points.
-- Handler tests with recorded (synthetic) payloads for both sources,
-  including intervals.icu stubs and Strava activities without HR.
+- Handler tests with recorded (synthetic) intervals.icu payloads, including
+  Strava stubs mixed with device activities, and Garmin vs non-Garmin
+  `device_name` for attribution.
+- An integration test that no new tool triggers a Strava HTTP call
+  (`FakeStrava` records zero requests).
 - A test that the cache never returns one user's entry to another.
-- Manual: a 12-week `get_activities group_by=week` on Fly uses one Strava
-  request (check `X-ReadRateLimit-Usage` in logs).
