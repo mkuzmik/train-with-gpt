@@ -314,3 +314,30 @@ def test_sync_fact_keeps_warnings_but_not_the_update_list():
     assert _sync_fact(note, hosted=False) == "⚠️ 1 local commit(s) conflicted with newer changes."
     hosted = _sync_fact(note, hosted=True)
     assert "couldn't be fully synced" in hosted and "2002" not in hosted
+
+
+# --- a failed sync makes the facts uncertain -------------------------------------------
+
+async def test_a_failed_sync_does_not_confidently_label_the_athlete(training_repo, tmp_path):
+    from tests.support import git
+    # The remote is unreachable: the local clone may be missing goals/notes saved elsewhere.
+    git(training_repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    output = await _start()
+
+    assert "- **Saved goals:** none" in output  # still shown, from the local copy
+    assert "NEW athlete** (Path A)" not in output
+    assert "couldn't be synced" in output
+    assert "ask ONE question" in output
+
+
+async def test_a_successful_sync_with_a_warning_still_labels_the_athlete(training_repo, monkeypatch):
+    from train_with_gpt.tools import start_consultation as module
+    real = module.git_pull_and_read
+
+    def with_warning(repo_path, read):
+        _, value = real(repo_path, read)
+        return "⚠️ 1 local commit(s) conflicted with newer changes on the remote.", value
+    monkeypatch.setattr(module, "git_pull_and_read", with_warning)
+
+    assert "NEW athlete** (Path A)" in await _start()

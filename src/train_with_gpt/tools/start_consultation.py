@@ -54,6 +54,14 @@ class TrainingHistory:
     notes_count: int = 0
     latest_note: Optional[str] = None  # YYYY-MM-DD
     note: Optional[str] = None  # sync note or error detail for the model
+    synced: bool = True  # False: the facts come from a clone that couldn't be synced
+
+
+def _sync_failed(sync_note: Optional[str]) -> bool:
+    """git_pull_and_read reports a failed fetch or rebase as a "(Note: ...)"
+    and still reads the local clone. Its other notes (pulled updates, or local
+    edits set aside) come after a successful sync."""
+    return bool(sync_note) and any(part.startswith("(Note:") for part in sync_note.split("\n\n"))
 
 
 def _goals_and_note_dates(goals_file: Path, notes_dir: Path) -> tuple[bool, list[str]]:
@@ -88,6 +96,7 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
         notes_count=len(dates),
         latest_note=dates[0] if dates else None,
         note=sync_note,
+        synced=not _sync_failed(sync_note),
     )
 
 
@@ -154,6 +163,14 @@ def _choose_path_section(history: TrainingHistory) -> str:
             "**Here the server can't tell** (no notes storage), so go by the athlete's message; "
             "if it doesn't say, ask ONE question: is this their first time using this coach, or "
             "have you worked together before? Either way nothing can be saved this chat."
+        )
+    elif not history.synced:
+        hint = (
+            "**Here the notes storage couldn't be synced just now**, so the goals/notes facts come "
+            "from a possibly out-of-date copy and may miss what was saved from another device. "
+            "Don't treat them as final: if they show no history, ask ONE question (first time "
+            "with this coach, or worked together before?) before onboarding; if they show "
+            "history, it's a returning athlete (Path B)."
         )
     elif not history.has_goals and not history.notes_count:
         hint = "**Here: no goals and no notes, so this looks like a NEW athlete** (Path A)."

@@ -151,6 +151,7 @@ when it's unclear. It also states the server's reading of the facts:
 | notes, no goals | returning without goals → Path B, offer goal setting early |
 | goals, no notes | ambiguous → read goals, ask whether to pick up or hear what the coach does first; stays in Path B |
 | storage unavailable | can't tell → go by the message, or ask whether they've used the coach before |
+| sync with the remote failed (facts from the local clone) | uncertain → history shown means returning; no history means ask before onboarding |
 
 Path A is picked by the facts, not by the athlete's wording: an athlete
 with saved history who says "set me up" stays in Path B (greeted as
