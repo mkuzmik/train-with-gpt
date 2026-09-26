@@ -1,9 +1,15 @@
 """Helper functions for train-with-gpt server."""
 
+import random
 import re
 import subprocess
+import threading
+import time
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional, TypeVar
+
+T = TypeVar("T")
 
 
 def current_user_id() -> Optional[str]:
@@ -120,88 +126,252 @@ def calculate_zone_distribution(stream_data: list, zone_boundaries: list) -> dic
     return zone_time
 
 
-def git_pull(repo_path: Path) -> str:
+# --- Training repo sync ------------------------------------------------------------
+#
+# The training repo is written concurrently: several requests in one process
+# (phone and desktop hitting the same server), and other clones pushing to the
+# same remote (other server instances, the personal/stdio path on a laptop).
+#
+# - Within a process, every git operation on a working tree holds that repo's
+#   lock. The tools run git_pull/git_save_file in worker threads, so the lock
+#   is what serializes them - not the event loop.
+# - Across clones, a save is "sync, write, commit, push"; if the push is
+#   rejected because someone else pushed first, our commit is dropped and the
+#   same write is re-applied on top of the fresh remote state.
+
+GIT_SAVE_ATTEMPTS = 5
+
+_repo_locks: dict[str, threading.Lock] = {}
+_repo_locks_guard = threading.Lock()
+
+
+class GitSyncError(Exception):
+    """A save couldn't be completed; the message says what happened."""
+
+
+def _repo_lock(repo_path: Path) -> threading.Lock:
+    key = str(Path(repo_path).resolve())
+    with _repo_locks_guard:
+        return _repo_locks.setdefault(key, threading.Lock())
+
+
+def _git(repo_path: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=repo_path, capture_output=True, text=True)
+
+
+def _output(result: subprocess.CompletedProcess) -> str:
+    return result.stderr.strip() or result.stdout.strip()
+
+
+def _head(repo_path: Path) -> Optional[str]:
+    result = _git(repo_path, "rev-parse", "HEAD")
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _sync_with_remote(repo_path: Path) -> tuple[Optional[str], Optional[str]]:
     """
-    Perform git pull in the repository.
-    
-    Returns:
-        Pull status message or None if no message needed
+    Bring the clone up to date with its upstream branch.
+
+    Returns (updates, warning): a summary of the files that came in from the
+    remote, and a note about anything else the user should know. Either may be None.
+
+    This rebases rather than hard-resetting: on the personal/stdio path the
+    clone is the user's own checkout, and on the server a local commit that
+    isn't on the remote is content whose push failed earlier. So local commits
+    are replayed on top of the remote (and go out with the next push), and
+    uncommitted edits are autostashed (if they conflict with the incoming
+    changes, they are left in the stash). If replaying conflicts, the rebase is
+    aborted, the local commits are parked on a backup branch and the clone is
+    reset to the remote, so it never stays mid-rebase or diverged.
     """
-    try:
-        result = subprocess.run(
-            ["git", "pull"],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-            text=True
+    if _git(repo_path, "rev-parse", "--abbrev-ref", "@{upstream}").returncode != 0:
+        return None, None  # no remote/upstream: a local-only repo
+
+    fetch = _git(repo_path, "fetch", "--quiet")
+    if fetch.returncode != 0:
+        return None, f"(Note: git pull had issues - {_output(fetch)})"
+
+    before = _head(repo_path)
+    rebase = _git(repo_path, "rebase", "--autostash", "@{upstream}")
+    if rebase.returncode == 0:
+        warning = None
+        if _git(repo_path, "diff", "--name-only", "--diff-filter=U").stdout.strip():
+            # The rebase worked, but re-applying the autostashed uncommitted
+            # edits conflicted. Git keeps them in the stash; don't leave
+            # conflict markers in the working tree.
+            _git(repo_path, "reset", "--hard", "--quiet", "HEAD")
+            warning = (
+                "⚠️ Uncommitted edits conflicted with newer changes on the remote. "
+                "They were kept in the stash (see `git stash list`) and removed from the working tree."
+            )
+        changed = _git(repo_path, "diff", "--name-only", before, "HEAD").stdout.split() if before else []
+        if not changed:
+            return None, warning
+        shown = ", ".join(changed[:10]) + (f" and {len(changed) - 10} more" if len(changed) > 10 else "")
+        return f"Pulled updates from the remote: {shown}", warning
+
+    _git(repo_path, "rebase", "--abort")
+    error = _output(rebase)
+    unpushed = _unpushed_count(repo_path)
+    if unpushed == 0:
+        raise GitSyncError(f"Could not sync with the remote: {error}")
+
+    branch = f"unsynced-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{random.randrange(16**4):04x}"
+    _git(repo_path, "branch", branch)
+    # Uncommitted edits (restored by the aborted rebase's autostash), or an
+    # untracked file at a path the remote added, could block the reset, so
+    # set them aside too.
+    stashed = ""
+    if _git(repo_path, "status", "--porcelain").stdout.strip():
+        _git(repo_path, "stash", "push", "--include-untracked", "-m",
+             f"Uncommitted edits set aside while syncing ({branch})")
+        stashed = " Uncommitted edits were stashed, untracked files included (see `git stash list`)."
+    reset = _git(repo_path, "reset", "--keep", "@{upstream}")
+    if reset.returncode != 0:
+        raise GitSyncError(
+            f"Could not sync with the remote: local commits conflict with it ({error}), "
+            f"and resetting to the remote failed: {_output(reset)}"
         )
-        pull_output = result.stdout.strip()
-        return pull_output if pull_output and "already up to date" not in pull_output.lower() else None
-    except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.strip() if e.stderr else str(e)
-        # Handle bytes or string
-        if isinstance(error_msg, bytes):
-            error_msg = error_msg.decode('utf-8', errors='ignore')
-        # Only show error if it's not about missing remote/tracking
-        if "no tracking information" not in error_msg.lower() and "no remote" not in error_msg.lower():
-            return f"(Note: git pull had issues - {error_msg})"
-        return None
+    return None, (
+        f"⚠️ {unpushed} local commit(s) conflicted with newer changes on the remote. "
+        f"They were moved to local branch '{branch}', and this clone now matches the remote.{stashed}"
+    )
 
 
-def git_add_commit_push(repo_path: Path, file_path: str, commit_message: str) -> str:
+def git_pull_and_read(repo_path: Path, read: Callable[[], T]) -> tuple[Optional[str], T]:
     """
-    Add, commit, and push changes to git repository.
-    
+    Sync the training repo with its remote, then call `read` under the same
+    repo lock, so it never sees a concurrent save's half-written file. Syncing
+    also recovers a clone that had diverged (see _sync_with_remote).
+
+    Returns:
+        (note, read()) - the note tells the user what came in or what went
+        wrong, and is None when there's nothing to say
+    """
+    with _repo_lock(repo_path):
+        try:
+            updates, warning = _sync_with_remote(repo_path)
+            note = "\n\n".join(part for part in (warning, updates) if part) or None
+        except GitSyncError as e:
+            note = f"(Note: {e})"
+        return note, read()
+
+
+def git_pull(repo_path: Path) -> Optional[str]:
+    """Sync the training repo with its remote; returns a note for the user, or None."""
+    return git_pull_and_read(repo_path, lambda: None)[0]
+
+
+def read_note_files(notes_dir: Path) -> list[tuple[str, str]]:
+    """(filename stem, text) of every note in `notes_dir`, newest first."""
+    if not notes_dir.exists():
+        return []
+    return [(path.stem, path.read_text()) for path in sorted(notes_dir.glob("*.md"), reverse=True)]
+
+
+def read_file_if_exists(path: Path) -> Optional[str]:
+    return path.read_text() if path.exists() else None
+
+
+def _lost_push_race(error: str) -> bool:
+    """
+    Was our push refused because someone else pushed first? That's a
+    non-fast-forward rejection, or the remote's ref moving under an update in
+    flight. Other rejections (e.g. a pre-receive hook or branch policy)
+    won't go away by retrying.
+    """
+    error = error.lower()
+    return any(s in error for s in (
+        "fetch first", "non-fast-forward", "cannot lock ref", "incorrect old value",
+    ))
+
+
+def _unpushed_count(repo_path: Path) -> int:
+    result = _git(repo_path, "rev-list", "--count", "@{upstream}..HEAD")
+    return int(result.stdout.strip()) if result.returncode == 0 else 0
+
+
+def git_save_file(repo_path: Path, file_path: str, content: str, commit_message: str) -> str:
+    """
+    Write `content` to `file_path`, commit it and push it, safely under
+    concurrent writers.
+
+    Under the repo lock: sync with the remote, write, commit, push. If the push
+    is rejected because another clone pushed first, our commit is dropped and
+    the same write is re-applied on the new remote state, up to
+    GIT_SAVE_ATTEMPTS times with a short backoff. For a file that's replaced
+    wholesale (goals) that deliberately means the last writer wins; notes get
+    unique filenames, so they never overwrite each other.
+
     Args:
         repo_path: Path to git repository
         file_path: Path to file relative to repo (e.g., "goals.md" or "notes/file.md")
+        content: The file's full new content
         commit_message: Git commit message
-    
+
     Returns:
-        Status message about the operation
+        Status message to append to "saved, committed"
+
+    Raises:
+        GitSyncError: the content was NOT saved; the clone is left matching the remote.
     """
-    try:
-        # Git add
-        subprocess.run(
-            ["git", "add", file_path],
-            cwd=repo_path,
-            check=True,
-            capture_output=True
-        )
-        
-        # Git commit
-        subprocess.run(
-            ["git", "commit", "-m", commit_message],
-            cwd=repo_path,
-            check=True,
-            capture_output=True
-        )
-        
-        # Git push
-        push_status = ""
-        try:
-            subprocess.run(
-                ["git", "push"],
-                cwd=repo_path,
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            push_status = " and pushed to remote"
-        except subprocess.CalledProcessError as push_error:
-            error_msg = push_error.stderr.strip() if push_error.stderr else str(push_error)
-            if "no upstream branch" in error_msg.lower() or "no configured push destination" in error_msg.lower():
-                push_status = "\n\n⚠️ Note: Could not push (no remote configured). Changes are saved locally."
+    target = Path(repo_path) / file_path
+    warnings = []
+    last_error = ""
+
+    with _repo_lock(repo_path):
+        for attempt in range(1, GIT_SAVE_ATTEMPTS + 1):
+            _, warning = _sync_with_remote(repo_path)
+            if warning and warning not in warnings:
+                warnings.append(warning)
+            notes = "".join(f"\n\n{w}" for w in warnings)
+
+            base = _head(repo_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            add = _git(repo_path, "add", file_path)
+            if add.returncode != 0:
+                raise GitSyncError(f"Could not stage {file_path}: {_output(add)}")
+            if _git(repo_path, "diff", "--cached", "--quiet", "HEAD", "--", file_path).returncode == 0:
+                if _unpushed_count(repo_path) == 0:
+                    return f"\n\n(No changes to commit - content unchanged){notes}"
+                # Content unchanged, but an earlier commit (e.g. this same
+                # content, whose push failed) is still waiting: push it.
             else:
-                push_status = f"\n\n⚠️ Note: Could not push to remote: {error_msg}"
-        
-        return push_status
-        
-    except subprocess.CalledProcessError as e:
-        # If commit fails (e.g., no changes), check if it's because nothing to
-        # commit - git reports that on stdout, not stderr.
-        output = (e.stdout or b"") + (e.stderr or b"")
-        if "nothing to commit" in output.decode('utf-8', errors='ignore').lower():
-            return "\n\n(No changes to commit - content unchanged)"
-        else:
-            raise
+                # --only: commit just this path, never other changes that
+                # happen to be staged (e.g. in the user's own checkout).
+                commit = _git(repo_path, "commit", "--only", "-m", commit_message, "--", file_path)
+                if commit.returncode != 0:
+                    raise GitSyncError(f"Could not commit {file_path}: {_output(commit)}")
+
+            push = _git(repo_path, "push")
+            if push.returncode == 0:
+                return f" and pushed to remote{notes}"
+
+            last_error = _output(push)
+            if "no upstream branch" in last_error.lower() or "no configured push destination" in last_error.lower():
+                return f"\n\n⚠️ Note: Could not push (no remote configured). Changes are saved locally.{notes}"
+            if not _lost_push_race(last_error):
+                # e.g. the remote is unreachable: keep the commit - the next
+                # save replays it on top of the remote and tries to push it again.
+                return (
+                    f"\n\n⚠️ Note: Could not push to remote: {last_error}\n"
+                    f"The commit is kept locally; the next save will try to push it again.{notes}"
+                )
+
+            # Someone else pushed first: drop our commit, re-apply on their state.
+            if base:
+                _git(repo_path, "reset", "--keep", base)
+            if attempt < GIT_SAVE_ATTEMPTS:
+                time.sleep(random.uniform(0.05, 0.2) * attempt)
+
+        # Out of attempts: leave the clone matching the remote, and say so.
+        try:
+            _sync_with_remote(repo_path)
+        except GitSyncError:
+            pass
+        raise GitSyncError(
+            f"The remote kept changing while saving, so this was NOT saved "
+            f"(gave up after {GIT_SAVE_ATTEMPTS} attempts). Please try again. "
+            f"Last push error: {last_error}"
+        )

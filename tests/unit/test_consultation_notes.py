@@ -5,12 +5,25 @@ remote (`git_remote`); notes written "by another device" are pushed to the
 remote first, so every read also exercises the real `git pull`.
 """
 
+import asyncio
 import re
+from datetime import datetime
 
 import pytest
 
-from tests.support import push_files, remote_file, remote_files, text_of
+from tests.support import (
+    assert_clean_and_in_sync,
+    git,
+    push_files,
+    race_on_commit,
+    race_runs,
+    remote_file,
+    remote_files,
+    text_of,
+)
+from train_with_gpt import helpers
 from train_with_gpt.config import config
+from train_with_gpt.tools import save_consultation_notes as save_consultation_notes_module
 from train_with_gpt.tools import (
     list_consultation_notes_handler,
     read_consultation_notes_handler,
@@ -35,7 +48,7 @@ async def test_save_writes_commits_and_pushes(training_repo, git_remote):
     assert output.startswith("✅ Consultation notes saved, committed and pushed to remote:")
     saved = sorted((training_repo / "notes").glob("*.md"))
     assert len(saved) == 1
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md", saved[0].name)
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-[0-9a-f]{6}\.md", saved[0].name)
     content = saved[0].read_text()
     assert content.startswith("# Consultation Notes\nDate: ")
     assert notes in content
@@ -44,16 +57,83 @@ async def test_save_writes_commits_and_pushes(training_repo, git_remote):
     assert remote_file(git_remote, f"notes/{saved[0].name}") == content
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Known issue: save_* doesn't pull before committing, so if the remote moved "
-    "ahead (another device pushed) the push is rejected and the clone diverges."
-))
 async def test_save_after_remote_moved_ahead_still_pushes(training_repo, git_remote):
     push_files(git_remote, {"notes/2024-01-10-08-00-00.md": "From another device\n"})
 
     output = text_of(await save_consultation_notes_handler({"notes": "New note"}))
 
     assert "pushed to remote" in output
+    notes = [p for p in remote_files(git_remote) if p.startswith("notes/")]
+    assert len(notes) == 2
+    assert_clean_and_in_sync(training_repo)
+
+
+async def test_save_retries_when_another_device_pushes_mid_save(training_repo, git_remote):
+    race_on_commit(training_repo, git_remote, {"notes/2024-01-10-08-00-00.md": "From another device"})
+
+    output = text_of(await save_consultation_notes_handler({"notes": "New note"}))
+
+    assert "pushed to remote" in output
+    assert race_runs(training_repo) == 1
+    notes = [p for p in remote_files(git_remote) if p.startswith("notes/")]
+    assert len(notes) == 2
+    assert_clean_and_in_sync(training_repo)
+
+
+async def test_save_that_keeps_losing_the_race_says_it_was_not_saved(training_repo, git_remote, monkeypatch):
+    monkeypatch.setattr(helpers.time, "sleep", lambda seconds: None)
+    race_on_commit(training_repo, git_remote, {"notes/other.md": "Busy remote"}, times=100)
+
+    output = text_of(await save_consultation_notes_handler({"notes": "New note"}))
+
+    assert output.startswith("❌ Error: Consultation notes were not saved.")
+    assert "NOT saved" in output
+    assert_clean_and_in_sync(training_repo)
+
+
+async def test_same_second_saves_get_distinct_files(training_repo, git_remote, monkeypatch):
+    frozen = datetime(2024, 3, 1, 7, 30, 15)
+    monkeypatch.setattr(save_consultation_notes_module, "datetime", type("Frozen", (), {"now": staticmethod(lambda: frozen)}))
+
+    outputs = [text_of(await save_consultation_notes_handler({"notes": f"Note {i}"})) for i in range(3)]
+
+    assert all("pushed to remote" in output for output in outputs)
+    notes = [p for p in remote_files(git_remote) if p.startswith("notes/")]
+    assert len(notes) == 3
+    assert all(p.startswith("notes/2024-03-01-07-30-15-") for p in notes)
+    listed = text_of(await list_consultation_notes_handler({}))
+    assert "3 consultation note(s), spanning 2024-03-01 to 2024-03-01" in listed
+
+
+async def test_concurrent_saves_both_land_on_the_remote(training_repo, git_remote):
+    results = await asyncio.gather(*(
+        save_consultation_notes_handler({"notes": f"From device {i}"}) for i in range(4)
+    ))
+
+    assert all("pushed to remote" in text_of(result) for result in results)
+    contents = [remote_file(git_remote, p) for p in remote_files(git_remote) if p.startswith("notes/")]
+    assert sorted(c.split("\n\n", 1)[1] for c in contents) == [f"From device {i}\n" for i in range(4)]
+    assert_clean_and_in_sync(training_repo)
+
+
+async def test_read_recovers_a_diverged_clone(training_repo, git_remote):
+    # a note committed here whose push failed, while another device pushed
+    (training_repo / "notes").mkdir()
+    (training_repo / "notes/2024-01-10-08-00-00.md").write_text("Unpushed note\n")
+    git(training_repo, "add", "notes")
+    git(training_repo, "commit", "--quiet", "-m", "Unpushed")
+    push_files(git_remote, {"notes/2024-01-11-08-00-00.md": "From another device\n"})
+
+    output = text_of(await read_consultation_notes_handler({"all": True}))
+
+    assert "Found 2 consultation note(s)" in output
+    assert "Unpushed note" in output and "From another device" in output
+    assert "git pull had issues" not in output
+
+    # ...and the next save pushes the recovered note along with the new one
+    await save_consultation_notes_handler({"notes": "Newest"})
+    assert len([p for p in remote_files(git_remote) if p.startswith("notes/")]) == 3
+    assert_clean_and_in_sync(training_repo)
 
 
 async def test_saved_note_can_be_read_back(training_repo):
