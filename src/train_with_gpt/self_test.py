@@ -107,6 +107,9 @@ class _Context:
     run_id: str
     started: datetime
     in_server: bool
+    # Set when a git check timed out: asyncio can't stop its worker thread,
+    # which may still hold the repo lock and change the clone.
+    git_still_running: bool = False
     secret_values: set = field(default_factory=set)
     _clients: dict = field(default_factory=dict)
 
@@ -142,8 +145,9 @@ class _Context:
         values = self.secret_values | {
             config.client_secret, config.intervals_api_key, config.token_encryption_key,
         }
-        # Longest first, so a secret containing another is redacted whole.
-        return sorted((v for v in values if v and len(v) >= 6), key=len, reverse=True)
+        # Every non-empty value, however short (a garbled report beats a
+        # leaked secret); longest first, so one containing another goes whole.
+        return sorted((v for v in values if v), key=len, reverse=True)
 
 
 # --- Sanitizing ------------------------------------------------------------------
@@ -293,7 +297,7 @@ async def check_repo_read(ctx: _Context) -> tuple[str, str]:
         warns.append(f"{state['untracked']} untracked file(s)")
 
     if not state["dirty"]:
-        info.append("clean")
+        info.append("no uncommitted changes" if state["untracked"] else "clean")
     if state["upstream"] and not (state["ahead"] or state["behind"]):
         info.append(f"at {state['upstream']} ({state['head']})")
     if not state["unsynced"]:
@@ -310,6 +314,8 @@ def _verify_on_remote(repo: Path, relative: str, run_id: str) -> tuple[str, str]
         if fetch.returncode != 0:
             return FAIL, f"push reported success, but fetching to verify failed: {_output(fetch)}"
         upstream = _git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}").stdout.strip()
+        if not upstream:  # `git show :path` would read the index, not the remote
+            return FAIL, "push reported success, but the branch has no upstream to verify against"
         shown = _git(repo, "show", f"{upstream}:{relative}")
         if shown.returncode != 0 or run_id not in shown.stdout:
             return FAIL, f"push reported success, but {upstream}:{relative} does not contain run {run_id}"
@@ -318,6 +324,8 @@ def _verify_on_remote(repo: Path, relative: str, run_id: str) -> tuple[str, str]
 
 
 async def check_repo_write(ctx: _Context) -> tuple[str, str]:
+    if ctx.git_still_running:
+        return FAIL, "not run: the repo read check timed out and its git operation may still be running"
     repo = _repo_path()
     if not _SAFE_MARKER_NAME.match(ctx.marker_name):
         return FAIL, "user id is not usable as a file name"
@@ -404,12 +412,19 @@ CHECKS: list[tuple[str, str, Callable[[_Context], Awaitable[tuple[str, str]]]]] 
 
 # --- Running and reporting ------------------------------------------------------------
 
-async def _run_check(ctx: _Context, name: str, timeout: float, check) -> CheckResult:
+_GIT_CHECKS = ("repo_read", "repo_write")
+
+
+async def _run_check(ctx: _Context, name: str, key: str, check) -> CheckResult:
+    timeout = TIMEOUTS[key]
     start = time.monotonic()
     try:
         status, detail = await asyncio.wait_for(check(ctx), timeout)
     except asyncio.TimeoutError:
         status, detail = FAIL, f"timed out after {timeout:g}s"
+        if key in _GIT_CHECKS:
+            ctx.git_still_running = True
+            detail += " (the git operation may still be running in the background)"
     except Exception as e:  # one check failing must not stop the others
         status, detail = FAIL, describe_error(e, ctx.all_secrets())
     return CheckResult(name, status, time.monotonic() - start, detail)
@@ -423,7 +438,7 @@ async def run_self_test(user_id: Optional[str], in_server: bool = True) -> Repor
         started=datetime.now(timezone.utc),
         in_server=in_server,
     )
-    results = [await _run_check(ctx, name, TIMEOUTS[key], check) for name, key, check in CHECKS]
+    results = [await _run_check(ctx, name, key, check) for name, key, check in CHECKS]
     # Last line of defence: no known secret value anywhere in the output.
     secret_values = ctx.all_secrets()
     for result in results:

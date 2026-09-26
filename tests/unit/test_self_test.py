@@ -401,3 +401,42 @@ def test_cli_rejects_a_path_like_user_id(capsys):
     with pytest.raises(SystemExit) as exit_info:
         main(["--user-id", "../notes"])
     assert exit_info.value.code == 2
+
+
+async def test_a_hung_repo_read_skips_the_write(intervals_ok, training_repo, git_remote, monkeypatch):
+    """asyncio can't stop a git worker thread, so don't start another save next to it."""
+    async def hang(ctx):
+        await asyncio.sleep(10)
+
+    monkeypatch.setitem(self_test.TIMEOUTS, "repo_read", 0.05)
+    monkeypatch.setattr(self_test, "CHECKS", [(n, k, hang if k == "repo_read" else c) for n, k, c in self_test.CHECKS])
+
+    report = await run_self_test(None)
+
+    assert "may still be running" in by_name(report)["Repo read"].detail
+    assert by_name(report)["Repo write"].status == FAIL
+    assert by_name(report)["Repo write"].detail.startswith("not run:")
+    assert "selftest/local.md" not in remote_files(git_remote)
+
+
+async def test_untracked_files_are_not_reported_as_clean(intervals_ok, training_repo):
+    (training_repo / "stray.txt").write_text("synthetic\n")
+
+    report = await run_self_test(None)
+
+    read = by_name(report)["Repo read"]
+    assert read.status == WARN
+    assert "1 untracked file(s)" in read.detail and "clean" not in read.detail
+
+
+async def test_short_secrets_are_redacted_too(training_repo, monkeypatch):
+    monkeypatch.setattr(config, "intervals_api_key", "k3y")
+
+    async def echo(ctx):
+        raise RuntimeError("leaked k3y here")
+
+    monkeypatch.setattr(self_test, "CHECKS", [("Echo", "tools", echo)])
+
+    report = await run_self_test(None)
+
+    assert "k3y" not in format_report(report)
