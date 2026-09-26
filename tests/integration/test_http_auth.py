@@ -51,7 +51,7 @@ def test_mcp_rejects_expired_token(http):
 
 
 def test_mcp_accepts_token_from_oauth_login(http, strava):
-    response = McpHttpClient(http, oauth_login(http, strava, 2706822)).post(INITIALIZE)
+    response = McpHttpClient(http, oauth_login(http, strava, 424242)).post(INITIALIZE)
 
     assert response.status_code == 200
     assert "train-with-gpt" in response.text

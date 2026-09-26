@@ -47,8 +47,8 @@ if [ -f "$DEPLOY_KEY_SRC" ]; then
 
     export GIT_SSH_COMMAND="ssh -i $SSH_DIR/deploy_key -o UserKnownHostsFile=$SSH_DIR/known_hosts -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
-    # Also as app's git default, so commands run later over `fly ssh console`
-    # (e.g. su app -c 'train-with-gpt-selftest ...') can fetch/push without
+    # Also as app's git default, so commands run later in a shell inside the
+    # container (e.g. su app -c 'train-with-gpt-selftest ...') can fetch/push without
     # repeating this line.
     su app -c "git config --global core.sshCommand '$GIT_SSH_COMMAND'"
 
@@ -57,6 +57,8 @@ if [ -f "$DEPLOY_KEY_SRC" ]; then
     if [ -n "$REPO_URL" ] && [ ! -d "$REPO_DIR/.git" ]; then
         echo "[entrypoint] Cloning $REPO_URL into $REPO_DIR" >&2
         su app -c "GIT_SSH_COMMAND='$GIT_SSH_COMMAND' git clone '$REPO_URL' '$REPO_DIR'"
+    elif [ ! -d "$REPO_DIR/.git" ]; then
+        echo "[entrypoint] TRAINING_REPO_URL is not set and $REPO_DIR is not a clone - set it to your private notes repo (git@github.com:<owner>/<repo>.git)." >&2
     fi
 else
     echo "[entrypoint] No deploy key mounted at $DEPLOY_KEY_SRC - notes/goals git operations will report 'no remote configured' if TRAINING_REPO_PATH is used without a repo already cloned there." >&2

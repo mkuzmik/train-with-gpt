@@ -9,7 +9,7 @@ it can be picked up later if it becomes worth it.
   personal API key (`intervalsApiKey` / `INTERVALS_API_KEY`,
   `intervals_client.py`). This includes wellness data (sleep, HRV, resting HR)
   that intervals.icu syncs from Garmin.
-- **Remote multi-user path (Fly.io):** login with Strava OAuth
+- **Remote multi-user path (hosted HTTP):** login with Strava OAuth
   (`strava_oauth.py`, `strava_client.py`), so activities come from Strava.
   After the Strava consent, an optional page asks for the user's personal
   intervals.icu API key (`intervals_connect.py`). If given, the wellness tools
@@ -31,7 +31,7 @@ other people's keys is a gray area; they should know what they hand over.
 - `GET /athlete/0/activities?oldest=&newest=`: Strava-like field names.
 - `GET /activity/{id}?intervals=true`: HR/power zones, precomputed
   time-in-zone (`icu_hr_zone_times`, `icu_zone_times`) and per-lap
-  `icu_intervals` with min/max HR. Activity ids are strings (`"i180171555"`).
+  `icu_intervals` with min/max HR. Activity ids are strings (e.g. `"i12345678"`).
 - `GET /activity/{id}/streams?types=...`: returns a list of `{type, data}`.
 - `GET /athlete/0/wellness?oldest=&newest=`: `restingHR`, `hrv`, `sleepSecs`,
   `sleepScore`, `steps`, `weight` per day.
@@ -52,7 +52,7 @@ other people's keys is a gray area; they should know what they hand over.
 4. **Durable identity mapping in the training-context repo.** Keep
    `profiles/<user_id>.json` (internal id, display name, list of
    `{provider, external_id}` connections) in the shared repo, next to `goals/`
-   and `notes/`, so losing the Fly volume never orphans a user's notes.
+   and `notes/`, so losing the server volume never orphans a user's notes.
    - `store.db` keeps only tokens, OAuth clients and sessions (replaceable;
      users re-authenticate).
    - **Tokens must never be written to the repo**, only non-secret mapping
@@ -61,5 +61,6 @@ other people's keys is a gray area; they should know what they hand over.
      then the DB cache, else creates the user + profile (pull, write, commit,
      push), failing the link if the push fails.
    - Prerequisite: split identity from connections (`users` + `connections`
-     tables). The owner's existing id `2706822` stays, so no notes migration.
+     tables). Existing users keep their current ids (the Strava athlete id), so no notes
+     migration.
    - Only worth it once a second provider is real.

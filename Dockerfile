@@ -40,9 +40,10 @@ ENV HOME=/home/app
 RUN mkdir -p /home/app/.config/train-with-gpt && chown -R app:app /home/app/.config
 RUN su app -c 'git config --global user.email "train-with-gpt@container.local" && git config --global user.name "train-with-gpt"'
 
-# Reported by the self_test tool, so a post-deploy check shows which commit is
-# live: fly deploy --build-arg GIT_SHA=$(git rev-parse --short HEAD). Late in
-# the file so a new SHA doesn't invalidate the dependency layers.
+# Reported by the self_test tool (next to the package version), so a
+# post-deploy check shows which commit is live:
+#   docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) .
+# Late in the file so a new SHA doesn't invalidate the dependency layers.
 ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
 
