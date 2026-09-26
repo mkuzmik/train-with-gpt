@@ -6,8 +6,8 @@ shared computations. Other proposals depend on it: `athlete-profile.md` (#10)
 for its computed sections, `science-based-coaching.md` (#13) for its load and
 recovery checks, `consultation-context.md` (#9) for weekly totals and
 wellness vs baseline, and `new-user-onboarding.md` (#11) for the day-one data
-baseline. The data-source decision it rests on is analysed in
-`data-source-policy.md`.
+baseline. The Strava API Policy analysis and the hosted-login change it rests
+on are in a separate proposal, [PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17).
 
 Checked against public docs on 2026-09-25: the intervals.icu OpenAPI spec
 (`https://intervals.icu/api/v1/docs`), the Strava API reference, rate-limit
@@ -16,30 +16,30 @@ effective 2026-06-01). Claims about current code refer to `origin/main`.
 Fields the Strava reference does not list but the API returns in practice are
 marked *(undocumented)*.
 
-## Data-source policy (read first)
+## Data sources (read first)
 
-The Strava API Policy effective 2026-06-01 bars operating "any MCP Server
-... that exposes ... Strava Data" (§5.16(b)) and using Strava data with an AI
-application, including "ingestion into a context window" (§5.3). The only
-exception is Strava's own MCP (§3.5). Read literally, today's hosted Strava
-path already conflicts with this. The full analysis, with clause quotes, a
-comparison of seven options and the owner's decisions, is in
-**[`data-source-policy.md`](data-source-policy.md)**. This is not legal
-advice.
+The Strava API Policy (effective 2026-06-01) restricts using Strava data in
+MCP servers and AI apps. The analysis (quoted clauses, data-source options,
+questions for Strava) and the plan to move hosted login off Strava OAuth now
+live in their own proposal, [PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17) (`auth-without-strava.md`,
+`strava-api-policy.md`). The owner's decisions about Strava and login are made
+there. This is not legal advice.
 
-What this proposal assumes, following that doc's recommendation:
+What this proposal assumes:
 
 - **This server's data comes from intervals.icu only**, on both stdio and
   hosted. Every tool below is intervals.icu-only. No new Strava reads,
   processing, storage or caching.
-- **Strava data reaches Claude through the official Strava MCP**, which the
-  user connects alongside this server. This server never calls it, proxies
-  it or ingests its output. Tool descriptions say "from intervals.icu" so the
-  model can tell the two apart.
-- **Hosted login moves off Strava** (intervals.icu API key, later OAuth).
-  That work is a separate change, tracked in `data-source-policy.md`. Until
-  it lands, hosted users without an intervals.icu key keep today's frozen
-  Strava tools and get none of the new ones.
+- **Strava data, if the user wants it, comes from Strava's official MCP**,
+  added as a separate connector in Claude ([PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17)). This server never calls it,
+  proxies it or ingests its output. Tool descriptions say "from intervals.icu"
+  so the model can tell the two apart.
+- **Hosted login is out of scope here** ([PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17)). Until that lands, hosted
+  users without an intervals.icu key keep today's frozen Strava tools and get
+  none of the new ones.
+- **intervals.icu API terms** ([forum post](https://forum.intervals.icu/t/intervals-icu-api-terms-and-conditions/114087),
+  effective 2025-10-23) allow use "for any lawful purpose, including
+  commercial use" and have no AI clause. §1.1 requires Garmin attribution.
 - **Strava-synced activities are stubs on intervals.icu.** The tools must
   handle stubs gracefully, and say how to fix it: sync the device directly
   to intervals.icu, or import the Strava archive.
@@ -137,8 +137,8 @@ affected. The stub's shape is not documented; check that today's stdio
 
 ### Strava API v3 (reference only; not to be built)
 
-Kept as a record of what the current Strava path reads. Per
-`data-source-policy.md`, none of the Strava rows below will be built. The
+Kept as a record of what the current Strava path reads. Per the data-source
+assumptions above ([PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17)), none of the Strava rows below will be built. The
 existing hosted Strava reads stay frozen until the login migration removes
 them. Strava data comes from the official Strava MCP instead.
 
@@ -189,7 +189,7 @@ tool, and more similar tools make the model pick the wrong one. The table
 below consolidates them.
 
 All five tools are **intervals.icu-only**. Strava data is the official Strava
-MCP's job (see `data-source-policy.md`). With no intervals.icu connection:
+MCP's job ([PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17)). With no intervals.icu connection:
 
 - the new tools return a short "connect intervals.icu" message;
 - `get_activities` (and `analyze_activity`/`analyze_lap`) keep today's
@@ -350,8 +350,7 @@ public API). Pairs with the parked `save_training_plan` idea in
 
 ### Not recommended
 
-- Any new Strava call, including everything below (see
-  `data-source-policy.md`).
+- Any new Strava call, including everything below (see [PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17)).
 - Strava `/athletes/{id}/stats`: public activities only, fixed windows.
 - intervals.icu `athlete-summary`: self-inclusion with an API key is
   undocumented, and wellness already has the numbers.
@@ -379,7 +378,7 @@ intervals.icu publishes no rate limit, and load is per user key.
 ## Rollout and dependencies
 
 The data-source migration (intervals.icu login, switching hosted data to
-intervals.icu, removing Strava reads) comes from `data-source-policy.md`. It
+intervals.icu, removing Strava reads) is [PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17). It
 is a separate change with its own owner decisions. The steps below don't wait
 for it: they are intervals.icu-only, so they work on stdio and for hosted
 users with a key from day one.
@@ -408,7 +407,7 @@ Time in zone for #13 C2 comes from intervals.icu (`icu_zone_times`,
 `icu_hr_zone_times` in the list). On Strava it is "not available from this
 server".
 
-Cross-PR effects of the policy recommendation (not edited here):
+Cross-PR effects of intervals.icu-only data (not edited here):
 - #10 must not persist Strava-derived numbers in the profile.
 - #11's day-one Strava backfill and Strava-first onboarding become "connect
   intervals.icu (device synced directly), optionally add the Strava
@@ -417,9 +416,7 @@ Cross-PR effects of the policy recommendation (not edited here):
 
 ## Open questions (with recommendations)
 
-1. **Strava policy.** Decided by the owner in `data-source-policy.md`.
-   *Recommended there:* freeze, ask Strava, move hosted login and data to
-   intervals.icu, and use the official Strava MCP for Strava data.
+1. **Strava policy and hosted login.** Moved to [PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17); decided there.
 2. **Remote users with an intervals.icu key: which source for activities?**
    *Recommended:* intervals.icu only. Joining with Strava by `strava_id`
    would be combining Strava data (§5.4) and new Strava processing, so it is
@@ -440,7 +437,7 @@ Cross-PR effects of the policy recommendation (not edited here):
    scopes is available.
 
 (The earlier "which Strava app tier" question matters only while the frozen
-Strava path runs. See `data-source-policy.md`.)
+Strava path runs. See [PR #17](https://github.com/mkuzmik/train-with-gpt/pull/17).)
 
 ## How to verify
 
