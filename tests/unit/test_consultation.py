@@ -29,7 +29,7 @@ async def _registered_tool_names() -> set[str]:
     return {tool.name for tool in await list_tools()}
 
 
-async def test_start_consultation_points_at_the_context_tools():
+async def test_start_consultation_points_at_the_context_tools(training_repo):
     output = text_of(await start_consultation_handler({}, _intervals(), _intervals()))
 
     assert output.startswith("🏃 Training Consultation")
@@ -81,7 +81,7 @@ async def test_start_consultation_for_a_hosted_user_with_intervals_connected():
 
 
 @pytest.mark.parametrize("data, wellness", [STDIO, HOSTED, HOSTED_WITH_INTERVALS])
-async def test_start_consultation_only_references_registered_tools(data, wellness):
+async def test_start_consultation_only_references_registered_tools(data, wellness, training_repo):
     output = text_of(await start_consultation_handler({}, data(), wellness()))
 
     referenced = referenced_tool_names(output)
@@ -252,3 +252,53 @@ async def test_get_current_date_is_today():
 
     # (either side of the call, in case it straddled midnight)
     assert any(f"📅 Current date: {_formatted(moment)}\n" in output for moment in (before, after))
+
+
+# --- no notes storage: no goals/notes tool is suggested ------------------------------
+
+STORAGE_TOOLS = {"read_goals", "save_goals", "list_consultation_notes", "read_consultation_notes",
+                 "search_consultation_notes", "save_consultation_notes"}
+
+
+async def test_without_storage_the_guidance_never_suggests_goals_or_notes_tools():
+    stdio = await _start()
+    with as_oauth_user("1004"):
+        hosted = await _start(_strava, _strava)
+
+    for output in (stdio, hosted):
+        assert not referenced_tool_names(output) & STORAGE_TOOLS, referenced_tool_names(output) & STORAGE_TOOLS
+        assert "(no notes storage)" in output
+        assert "can't be saved in this chat" in output
+        assert "get_activities" in referenced_tool_names(output)
+
+
+async def test_with_storage_the_guidance_uses_the_goals_and_notes_tools(training_repo):
+    assert STORAGE_TOOLS <= referenced_tool_names(await _start())
+
+
+# --- the sync summary never leaks other users' files ----------------------------------
+
+async def test_hosted_facts_do_not_list_other_users_files_pulled_by_the_sync(training_repo, git_remote):
+    push_files(git_remote, {
+        "goals/2002.md": "# Training Goals\nsomeone else\n",
+        "notes/2002/2026-06-01-06-00-00.md": NOTE,
+    })
+
+    with as_oauth_user("2001"):
+        output = await _start(_strava, _strava)
+
+    assert "2002" not in output
+    assert "Pulled updates" not in output
+    assert "NEW athlete" in output
+
+
+def test_sync_fact_keeps_warnings_but_not_the_update_list():
+    from train_with_gpt.tools.start_consultation import _sync_fact
+
+    note = "⚠️ 1 local commit(s) conflicted with newer changes.\n\nPulled updates from the remote: goals/2002.md"
+
+    assert _sync_fact(None, hosted=True) is None
+    assert _sync_fact("Pulled updates from the remote: goals/2002.md", hosted=False) is None
+    assert _sync_fact(note, hosted=False) == "⚠️ 1 local commit(s) conflicted with newer changes."
+    hosted = _sync_fact(note, hosted=True)
+    assert "couldn't be fully synced" in hosted and "2002" not in hosted

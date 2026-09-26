@@ -133,7 +133,12 @@ goals or notes written from another device count. No Strava data is read,
 processed or stored. If storage isn't configured, the path no longer exists
 or the read fails, the facts say so and the rest of the guidance still comes
 back: for stdio it offers `setup_training_repo`, for OAuth users it points to
-the operator.
+the operator. In that case both paths are replaced by variants that never
+call a goals/notes tool (they'd only return the same error): goals are
+talked through and summarized in the chat instead of saved. The git sync's
+"pulled updates" file list is never shown (on the hosted server it would
+name other users' files); a sync warning is shown verbatim on stdio and as a
+generic "may be out of date" line to OAuth users.
 
 **How the path is chosen.** The guidance gives both paths and says the model
 chooses from the facts and the athlete's message, asking one short question

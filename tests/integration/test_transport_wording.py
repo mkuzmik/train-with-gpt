@@ -131,7 +131,9 @@ async def test_stdio_guidance_only_references_offered_tools(stdio_env):
         guidance = _text(await session.call_tool("start_consultation", {}))
 
     referenced = referenced_tool_names(guidance)
-    assert {"get_activities", "save_goals", "setup_training_repo"} <= referenced
+    # No training repo configured: offers setup, and no goals/notes tools.
+    assert {"get_activities", "setup_training_repo"} <= referenced
+    assert "save_goals" not in referenced
     assert referenced <= offered, referenced - offered
 
 

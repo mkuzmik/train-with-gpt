@@ -91,6 +91,25 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
     )
 
 
+_PULLED_UPDATES = "Pulled updates from the remote"
+
+
+def _sync_fact(sync_note: Optional[str], hosted: bool) -> Optional[str]:
+    """What to say about the repo sync. The "Pulled updates" summary lists every
+    changed path in the (shared) repo - other users' goal/note files on the
+    hosted server - and isn't needed for the facts, so it's dropped. Warnings
+    stay, as a generic line for hosted users (they may name other users'
+    commits or paths) and verbatim on the personal path."""
+    if not sync_note:
+        return None
+    warnings = [part for part in sync_note.split("\n\n") if part and not part.startswith(_PULLED_UPDATES)]
+    if not warnings:
+        return None
+    if hosted:
+        return "the notes storage couldn't be fully synced just now, so the goals/notes facts may be slightly out of date"
+    return " ".join(warnings)
+
+
 def _facts_section(data_client, wellness_client, history: TrainingHistory, hosted: bool) -> str:
     activities = "Strava" if isinstance(data_client, StravaClient) else "intervals.icu"
     wellness = (
@@ -110,8 +129,9 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
             )
         else:
             lines.append("- **Consultation notes:** none")
-        if history.note:
-            lines.append(f"- **Sync:** {history.note}")
+        sync = _sync_fact(history.note, hosted)
+        if sync:
+            lines.append(f"- **Sync:** {sync}")
     else:
         if history.storage == "not_configured":
             status = "not set up on this server"
@@ -295,14 +315,49 @@ You: "Great! Do you have a specific time goal in mind?"
 
 **Then** write a clear, natural-language summary - primary goal with specifics,
 current starting point (reference the activities you saw), key constraints,
-timeline and milestones, what success looks like - and save it with
-**save_goals** (it replaces any previously saved goals). For example:
+timeline and milestones, what success looks like - {save_goals}. For example:
 
 "The athlete is training for a 5km race on March 15th with a goal of breaking 17
 minutes; current best is 18:30. Recent training: consistent running, about
 40-50km/week with a couple of quality sessions. History of shin splints, so
 intensity progresses carefully. Trains 5-6 days a week, Wednesdays off for work.
 Success means hitting the time AND arriving at race day healthy."
+
+"""
+
+
+_SAVE_GOALS = "and save it with **save_goals** (it replaces any previously saved goals)"
+_SHARE_GOALS = "and share it in the chat so the athlete can keep it (it can't be saved in this chat)"
+
+
+# When notes storage isn't available, the paths skip every goals/notes tool
+# (they would only return the same configuration error).
+_PATH_A_NO_STORAGE = """## Path A: Onboarding a New Athlete (no notes storage)
+
+1. **get_current_date**, then **get_activities** for roughly the last 2-4 weeks, so
+   you open with something concrete about their recent training.
+2. **Introduce yourself briefly** (a few sentences, not a feature list): you coach
+   from their recent activities and can dig into any single workout. Say plainly
+   that goals and notes can't be kept between chats right now (see the facts
+   above). Mention recovery data only as connected or not.
+3. **Talk through their goals** with the goal-setting conversation below, one
+   question at a time.
+4. **Close:** summarize the goals and next steps in the chat.
+
+"""
+
+
+_PATH_B_NO_STORAGE = """## Path B: Consultation with a Returning Athlete (no notes storage)
+
+Their saved goals and past notes can't be read in this chat, so:
+
+1. **get_current_date** - today's date and day of week
+2. Ask ONE question to recap: what they're training for right now, and anything
+   from earlier sessions they want to carry on with
+3. **get_activities** - their recent training, patterns and volume
+
+**Then begin:** acknowledge what you learned, ask ONE open question about how
+they're doing, and let the athlete guide the conversation.
 
 """
 
@@ -356,6 +411,13 @@ _REMINDERS = """## Important Reminders (both paths)
 Ready to begin? 🎯"""
 
 
+_REMINDERS_NO_STORAGE = """## Important Reminders (both paths)
+- ONE question at a time - let them answer before moving on
+- Nothing is saved this chat: end with a clear summary in the conversation instead
+
+Ready to begin? 🎯"""
+
+
 async def start_consultation_handler(arguments: dict, data_client, wellness_client) -> list[TextContent]:
     """Handle start_consultation tool calls.
 
@@ -367,15 +429,16 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
     user_id = current_user_id()
     history = await asyncio.to_thread(read_training_history, user_id)
 
+    storage = history.storage == "ok"
     guidance = (
         "🏃 Training Consultation\n\n"
         + _facts_section(data_client, wellness_client, history, hosted=bool(user_id))
         + _choose_path_section(history)
         + _COACHING_APPROACH
         + _data_sources_section(data_client, wellness_client)
-        + _PATH_A
-        + _GOAL_SETTING
-        + _PATH_B
-        + _REMINDERS
+        + (_PATH_A if storage else _PATH_A_NO_STORAGE)
+        + _GOAL_SETTING.replace("{save_goals}", _SAVE_GOALS if storage else _SHARE_GOALS)
+        + (_PATH_B if storage else _PATH_B_NO_STORAGE)
+        + (_REMINDERS if storage else _REMINDERS_NO_STORAGE)
     )
     return [TextContent(type="text", text=guidance)]
