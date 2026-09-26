@@ -4,7 +4,9 @@ Releases are SemVer tags `vX.Y.Z` on `main`. The version in `pyproject.toml`
 is the single source of truth: the tag must be exactly `v` + that version.
 Pre-release tags (`-rc.1` and the like) aren't supported.
 
-1. **Bump the version** in a PR. Pick the next version (MAJOR for breaking
+1. **Bump the version** in a PR. Skip this step only when the current
+   `pyproject.toml` version has never been tagged, as with the first release
+   (`v0.1.0`), and tag the current `main` directly. Otherwise pick the next version (MAJOR for breaking
    changes to tools, config or deployment; MINOR for new features; PATCH for
    fixes), then:
 
