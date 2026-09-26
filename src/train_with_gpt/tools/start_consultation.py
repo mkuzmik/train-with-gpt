@@ -169,19 +169,23 @@ def _choose_path_section(history: TrainingHistory) -> str:
             "**Here: goals are saved but there are no consultation notes yet - ambiguous.** "
             "They may have set goals and never had a consultation, or be picking up an "
             "unfinished first session. Read the goals, then briefly ask the athlete whether "
-            "they want to pick up where they left off (Path B) or start with an introduction "
-            "(Path A, skipping goal questions the saved goals already answer)."
+            "they want to pick up where they left off or first hear what the coach can do; "
+            "either way stay in Path B and build on the saved goals."
         )
     return f"""## Step 1: Choose the path
 
 You decide which path fits, from the facts above and what the athlete wrote:
 
-- **Path A - New athlete (onboarding):** no saved goals and no notes, or the athlete
-  says they're new ("set me up", "first time", "what can you do?").
-- **Path B - Returning athlete (consultation):** any saved goals or notes, or the
-  athlete refers to earlier sessions.
+- **Path A - New athlete (onboarding):** only when there are no saved goals and no notes
+  (the facts decide this, not the athlete's wording). When storage is unavailable the
+  facts can't tell, so an athlete who says they're new ("set me up", "first time")
+  goes here.
+- **Path B - Returning athlete (consultation):** any saved goals or notes, even if the
+  athlete says "set me up" or "I'm new" - greet them as returning and mention what's
+  saved. If they want to know what the coach can do, explain it within Path B.
 - An athlete with saved history is never onboarded from scratch. If they ask to
-  "start over", confirm first: saving new goals replaces the old ones.
+  "start over" or set completely new goals, explicitly confirm first that saving new
+  goals replaces the old ones, and only then run the goal-setting conversation.
 - If the athlete's message clearly asks for something specific (e.g. "update my
   goals", "how was yesterday's run?"), do that within the matching path.
 - If it's genuinely unclear, ask ONE short question rather than guessing.
@@ -269,6 +273,8 @@ _COACHING_APPROACH = """## Step 2: Your Coaching Approach (both paths)
 
 _PATH_A = """## Path A: Onboarding a New Athlete
 
+Only for an athlete with no saved goals or notes (see Step 1).
+
 1. **get_current_date**, then **get_activities** for roughly the last 2-4 weeks, so
    you open with something concrete about their recent training.
 2. **Introduce yourself briefly** (a few sentences, not a feature list): you coach
@@ -333,6 +339,9 @@ _SHARE_GOALS = "and share it in the chat so the athlete can keep it (it can't be
 # When notes storage isn't available, the paths skip every goals/notes tool
 # (they would only return the same configuration error).
 _PATH_A_NO_STORAGE = """## Path A: Onboarding a New Athlete (no notes storage)
+
+Only for an athlete with no saved goals or notes (see Step 1); here the facts can't
+tell, so go by what the athlete says.
 
 1. **get_current_date**, then **get_activities** for roughly the last 2-4 weeks, so
    you open with something concrete about their recent training.

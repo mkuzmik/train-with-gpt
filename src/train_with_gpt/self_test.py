@@ -397,14 +397,30 @@ async def check_build_info(ctx: _Context) -> tuple[str, str]:
     return (WARN if sha == "unknown" else PASS), "; ".join(parts)
 
 
-async def registered_tool_names() -> list[str]:
+async def registered_tool_names(user_id: Optional[str] = None) -> list[str]:
+    """The tools `list_tools` offers; for `user_id`, as that OAuth'd user sees
+    them (the list depends on the caller, e.g. setup_training_repo is hidden
+    from OAuth users). The CLI has no request auth context, so one is set up
+    for the duration of the call when it's missing."""
+    from mcp.server.auth.middleware.auth_context import auth_context_var
+    from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+    from mcp.server.auth.provider import AccessToken
+
+    from .helpers import current_user_id
     from .server import list_tools
 
-    return [tool.name for tool in await list_tools()]
+    if not user_id or current_user_id() == user_id:
+        return [tool.name for tool in await list_tools()]
+    token = AccessToken(token="self-test", client_id="self-test", scopes=[], subject=user_id)
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        return [tool.name for tool in await list_tools()]
+    finally:
+        auth_context_var.reset(reset)
 
 
 async def check_tools(ctx: _Context) -> tuple[str, str]:
-    names = await registered_tool_names()
+    names = await registered_tool_names(ctx.user_id)
     return PASS, f"{len(names)}: {', '.join(names)}"
 
 

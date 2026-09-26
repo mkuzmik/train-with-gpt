@@ -431,6 +431,15 @@ def test_cli_for_a_user_id(strava_user, training_repo, git_remote, capsys):
     assert "selftest/4242.md" in remote_files(git_remote)
 
 
+async def test_tools_check_lists_the_tested_users_tools(strava_user, training_repo):
+    # As the CLI runs it: a user id, but no OAuth request context.
+    hosted = by_name(await run_self_test(strava_user, in_server=False))["Tools registered"].detail
+    personal = by_name(await run_self_test(None, in_server=False))["Tools registered"].detail
+
+    assert "setup_training_repo" not in hosted
+    assert "setup_training_repo" in personal
+
+
 def test_cli_rejects_a_path_like_user_id(capsys):
     with pytest.raises(SystemExit) as exit_info:
         main(["--user-id", "../notes"])

@@ -132,6 +132,18 @@ async def test_returning_athlete_sees_goals_and_note_count(training_repo, git_re
     assert "NEW athlete" not in output
 
 
+async def test_saying_new_never_onboards_an_athlete_with_saved_history(training_repo):
+    output = await _start()
+    rules = output.split("## Step 1: Choose the path")[1].split("**Here")[0]
+    path_a = output.split("## Path A")[1].split("## Goal-Setting")[0]
+
+    # Path A is chosen by the facts; the athlete's words can't override saved history.
+    assert "Path A - New athlete (onboarding):** only when there are no saved goals and no notes" in rules
+    assert "or the athlete says they're new" not in rules
+    assert "explicitly confirm" in rules
+    assert "Only for an athlete with no saved goals or notes" in path_a
+
+
 async def test_notes_without_goals_is_returning_and_offers_goal_setting(training_repo, git_remote):
     push_files(git_remote, {"notes/2026-03-01-09-00-00.md": NOTE})
 

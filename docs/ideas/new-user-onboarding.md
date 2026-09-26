@@ -149,11 +149,14 @@ when it's unclear. It also states the server's reading of the facts:
 | no goals, no notes | new athlete → Path A (onboarding) |
 | goals and notes | returning → Path B (consultation) |
 | notes, no goals | returning without goals → Path B, offer goal setting early |
-| goals, no notes | ambiguous → read goals, ask whether to pick up or start with an introduction |
+| goals, no notes | ambiguous → read goals, ask whether to pick up or hear what the coach does first; stays in Path B |
 | storage unavailable | can't tell → go by the message, or ask whether they've used the coach before |
 
-An athlete with saved history is never onboarded from scratch; "start over"
-is confirmed first, because `save_goals` replaces the old goals.
+Path A is picked by the facts, not by the athlete's wording: an athlete
+with saved history who says "set me up" stays in Path B (greeted as
+returning). Only when storage is unavailable does "I'm new" select Path A.
+"Start over" is explicitly confirmed first, because `save_goals` replaces
+the old goals.
 
 - **Path A (onboarding):** date and the last 2–4 weeks of activities, a short
   introduction of what the coach does (recovery data only as connected or not),
