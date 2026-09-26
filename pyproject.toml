@@ -28,6 +28,7 @@ build-backend = "hatchling.build"
 [project.scripts]
 train-with-gpt = "train_with_gpt.server:main"
 train-with-gpt-http = "train_with_gpt.http_server:main"
+train-with-gpt-selftest = "train_with_gpt.self_test:cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

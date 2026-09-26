@@ -211,8 +211,10 @@ through `fly secrets` or files under `~/.config/train-with-gpt/`.
    users would need to add them again.
 5. Deploy:
    ```bash
-   fly deploy --ha=false -a <app>
+   fly deploy --ha=false -a <app> --build-arg GIT_SHA=$(git rev-parse --short HEAD)
    ```
+   `GIT_SHA` is optional; the self-test reports it so you can see which commit
+   is live (it shows `unknown` and a warning without it).
 
 ### Verify
 
@@ -225,6 +227,49 @@ fly logs -a <app>
 
 Then run the real flow: `npx mcp-remote https://<app>.fly.dev/mcp` (opens a
 browser for Strava consent) and call a tool.
+
+### Post-deploy smoke test
+
+After every deploy, let the server check itself. It runs a fixed checklist
+for one user and prints a PASS/WARN/FAIL table:
+
+1. **Data source auth**: the Strava token is valid (or refreshes), or the
+   intervals.icu key authenticates.
+2. **Data reads**: number of activities in the last 7 days, and whether
+   intervals.icu wellness data came back. Counts only; nothing is stored.
+3. **Repo read**: pulls the training repo; the clone must be clean and at its
+   upstream. It warns about a missing remote and `unsynced-*` branches.
+4. **Repo write**: saves `selftest/<user_id>.md` (a timestamp, a run id and
+   `GIT_SHA`) through the same save path as notes and goals, then fetches and
+   checks the remote really has it. "Saved but not pushed" is a FAIL. The file
+   is overwritten on every run (one commit per run), and `notes/` and `goals/`
+   are never touched.
+5. **Build info**: `GIT_SHA`, uptime, Python and `mcp` versions.
+6. **Tools registered**: the tool names the server exposes.
+
+**From Claude** (claude.ai, mobile or Desktop): say *"Run the Train with GPT
+self-test"*. Claude calls the `self_test` tool and shows the table. Clients
+that support MCP prompts also offer a **self-test** prompt: it runs
+`self_test`, then calls each read-only tool once and lists the tools the
+client couldn't find. It never calls a write tool.
+
+**From a terminal**, without Claude (exits non-zero if any check fails):
+
+```bash
+fly ssh console -a <app> -C "su app -c 'train-with-gpt-selftest --user-id <strava_athlete_id>'"
+```
+
+- Run it as `app`, not root: git refuses a clone owned by another user, and
+  root-owned files would break the server. The command refuses to run as root.
+- `su app -c` keeps the environment (`TRAINING_REPO_PATH`, the Strava app
+  credentials, `TOKEN_ENCRYPTION_KEY`, `GIT_SHA`). The entrypoint sets the
+  deploy key as `app`'s git `core.sshCommand`, so fetch and push work without
+  `GIT_SSH_COMMAND`. If a check reports something "not configured", the SSH
+  session doesn't see the app's env or secrets.
+- The machine auto-stops when idle; `curl https://<app>.fly.dev/health` first
+  to wake it.
+- Leave out `--user-id` to test the personal configuration (intervals.icu key
+  and `TRAINING_REPO_PATH`), e.g. `uv run train-with-gpt-selftest` locally.
 
 ### Connecting clients
 
@@ -253,7 +298,7 @@ stored encrypted.
 
 ### Operations
 
-- **Redeploy:** `fly deploy --ha=false -a <app>`. The volume (and therefore
+- **Redeploy:** `fly deploy --ha=false -a <app> --build-arg GIT_SHA=$(git rev-parse --short HEAD)`. The volume (and therefore
   users/tokens) survives; the notes repo is re-cloned on boot (saves push
   immediately, so nothing is lost unless a push failed).
 - **Auto-stop:** the machine stops when idle and starts on the next request
