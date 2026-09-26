@@ -179,7 +179,8 @@ def _sync_with_remote(repo_path: Path) -> tuple[Optional[str], Optional[str]]:
     clone is the user's own checkout, and on the server a local commit that
     isn't on the remote is content whose push failed earlier. So local commits
     are replayed on top of the remote (and go out with the next push), and
-    uncommitted edits are autostashed. If replaying conflicts, the rebase is
+    uncommitted edits are autostashed (if they conflict with the incoming
+    changes, they are left in the stash). If replaying conflicts, the rebase is
     aborted, the local commits are parked on a backup branch and the clone is
     reset to the remote, so it never stays mid-rebase or diverged.
     """
@@ -193,11 +194,21 @@ def _sync_with_remote(repo_path: Path) -> tuple[Optional[str], Optional[str]]:
     before = _head(repo_path)
     rebase = _git(repo_path, "rebase", "--autostash", "@{upstream}")
     if rebase.returncode == 0:
+        warning = None
+        if _git(repo_path, "diff", "--name-only", "--diff-filter=U").stdout.strip():
+            # The rebase worked, but re-applying the autostashed uncommitted
+            # edits conflicted. Git keeps them in the stash; don't leave
+            # conflict markers in the working tree.
+            _git(repo_path, "reset", "--hard", "--quiet", "HEAD")
+            warning = (
+                "⚠️ Uncommitted edits conflicted with newer changes on the remote. "
+                "They were kept in the stash (see `git stash list`) and removed from the working tree."
+            )
         changed = _git(repo_path, "diff", "--name-only", before, "HEAD").stdout.split() if before else []
         if not changed:
-            return None, None
+            return None, warning
         shown = ", ".join(changed[:10]) + (f" and {len(changed) - 10} more" if len(changed) > 10 else "")
-        return f"Pulled updates from the remote: {shown}", None
+        return f"Pulled updates from the remote: {shown}", warning
 
     _git(repo_path, "rebase", "--abort")
     error = _output(rebase)
@@ -207,12 +218,14 @@ def _sync_with_remote(repo_path: Path) -> tuple[Optional[str], Optional[str]]:
 
     branch = f"unsynced-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{random.randrange(16**4):04x}"
     _git(repo_path, "branch", branch)
-    # Uncommitted edits (restored by the aborted rebase's autostash) could
-    # block the reset, so set them aside too.
+    # Uncommitted edits (restored by the aborted rebase's autostash), or an
+    # untracked file at a path the remote added, could block the reset, so
+    # set them aside too.
     stashed = ""
-    if _git(repo_path, "status", "--porcelain", "--untracked-files=no").stdout.strip():
-        _git(repo_path, "stash", "push", "-m", f"Uncommitted edits set aside while syncing ({branch})")
-        stashed = " Uncommitted edits were stashed (see `git stash list`)."
+    if _git(repo_path, "status", "--porcelain").stdout.strip():
+        _git(repo_path, "stash", "push", "--include-untracked", "-m",
+             f"Uncommitted edits set aside while syncing ({branch})")
+        stashed = " Uncommitted edits were stashed, untracked files included (see `git stash list`)."
     reset = _git(repo_path, "reset", "--keep", "@{upstream}")
     if reset.returncode != 0:
         raise GitSyncError(
@@ -319,15 +332,17 @@ def git_save_file(repo_path: Path, file_path: str, content: str, commit_message:
             add = _git(repo_path, "add", file_path)
             if add.returncode != 0:
                 raise GitSyncError(f"Could not stage {file_path}: {_output(add)}")
-            commit = _git(repo_path, "commit", "-m", commit_message)
-            if commit.returncode != 0:
-                # git reports "nothing to commit" on stdout, not stderr
-                if "nothing to commit" not in (commit.stdout + commit.stderr).lower():
-                    raise GitSyncError(f"Could not commit {file_path}: {_output(commit)}")
+            if _git(repo_path, "diff", "--cached", "--quiet", "HEAD", "--", file_path).returncode == 0:
                 if _unpushed_count(repo_path) == 0:
                     return f"\n\n(No changes to commit - content unchanged){notes}"
                 # Content unchanged, but an earlier commit (e.g. this same
                 # content, whose push failed) is still waiting: push it.
+            else:
+                # --only: commit just this path, never other changes that
+                # happen to be staged (e.g. in the user's own checkout).
+                commit = _git(repo_path, "commit", "--only", "-m", commit_message, "--", file_path)
+                if commit.returncode != 0:
+                    raise GitSyncError(f"Could not commit {file_path}: {_output(commit)}")
 
             push = _git(repo_path, "push")
             if push.returncode == 0:

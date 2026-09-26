@@ -121,6 +121,35 @@ def test_git_pull_stashes_uncommitted_edits_that_would_block_recovery(training_r
     assert_clean_and_in_sync(training_repo)
 
 
+def test_git_pull_stashes_an_untracked_file_that_would_block_recovery(training_repo, git_remote):
+    commit_locally(training_repo, "goals.md", "Local goals\n")
+    (training_repo / "plan.md").write_text("Local draft, never added\n")
+    push_files(git_remote, {"goals.md": "Remote goals\n", "plan.md": "Remote plan\n"})
+
+    output = git_pull(training_repo)
+
+    assert "moved to local branch 'unsynced-" in output
+    assert "untracked files included" in output
+    assert git(training_repo, "show", "stash@{0}^3:plan.md") == "Local draft, never added\n"
+    assert (training_repo / "plan.md").read_text() == "Remote plan\n"
+    assert_clean_and_in_sync(training_repo)
+
+
+def test_git_pull_keeps_conflicting_uncommitted_edits_in_the_stash(training_repo, git_remote):
+    push_files(git_remote, {"goals.md": "Goals v1\n"})
+    git_pull(training_repo)
+    (training_repo / "goals.md").write_text("Goals v1, edited locally\n")
+    push_files(git_remote, {"goals.md": "Goals v2\n"})
+
+    note, goals = git_pull_and_read(training_repo, lambda: (training_repo / "goals.md").read_text())
+
+    assert "Uncommitted edits conflicted" in note
+    assert goals == "Goals v2\n"  # no conflict markers
+    assert "Goals v1, edited locally" in git(training_repo, "stash", "show", "-p", "stash@{0}")
+    assert_clean_and_in_sync(training_repo)
+    assert git_save_file(training_repo, "notes/a.md", "note\n", "Add note") == " and pushed to remote"
+
+
 def test_git_pull_and_read_reads_under_the_repo_lock(training_repo):
     note, locked = git_pull_and_read(training_repo, lambda: helpers._repo_lock(training_repo).locked())
 
@@ -162,6 +191,20 @@ def test_save_only_commits_the_given_path(training_repo, git_remote):
     git_save_file(training_repo, "goals.md", "goal\n", "Update goals")
 
     assert "scratch.txt" not in remote_files(git_remote)
+
+
+@pytest.mark.parametrize("with_remote", [True, False])
+def test_save_does_not_commit_other_staged_changes(training_repo, git_remote, local_repo, with_remote):
+    repo = training_repo if with_remote else local_repo
+    (repo / "scratch.txt").write_text("staged, not for commit\n")
+    git(repo, "add", "scratch.txt")
+
+    git_save_file(repo, "goals.md", "goal\n", "Update goals")
+
+    assert git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["goals.md"]
+    assert git(repo, "diff", "--cached", "--name-only").split() == ["scratch.txt"]  # still staged
+    if with_remote:
+        assert "scratch.txt" not in remote_files(git_remote)
 
 
 def test_save_without_remote_keeps_changes_locally(local_repo):
