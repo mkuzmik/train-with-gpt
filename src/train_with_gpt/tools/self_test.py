@@ -15,8 +15,10 @@ def self_test_tool() -> Tool:
         description=(
             "Health check of this connector, run by the server itself: data source login, "
             "reading activities/wellness (counts only), syncing the training-notes repo, saving "
-            "and pushing a small marker file (selftest/<user>.md - never notes or goals), build "
-            "info and the list of registered tools. Call it when the user asks to test, "
+            "and pushing a small marker file (selftest/<user>.md; it never creates or edits notes "
+            "or goals, but the usual repo sync may pull remote changes to them and push commits "
+            "already pending in the clone), build info and the list of registered tools. Call it "
+            "when the user asks to test, "
             "health-check or verify the connector (e.g. after a deploy). Show the returned table "
             "to the user verbatim, and never claim anything works beyond what the table shows."
         ),
@@ -35,7 +37,8 @@ def self_test_prompt() -> Prompt:
         name=SELF_TEST_PROMPT_NAME,
         description=(
             "Test the connector end to end: run self_test, then call each read-only tool once "
-            "and report which tools this client couldn't find. Never calls a write tool."
+            "and report which tools this client couldn't find. Never calls a tool that changes "
+            "notes, goals or configuration (self_test itself only saves its marker file)."
         ),
     )
 

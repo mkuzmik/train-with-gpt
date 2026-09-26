@@ -242,8 +242,10 @@ for one user and prints a PASS/WARN/FAIL table:
 4. **Repo write**: saves `selftest/<user_id>.md` (a timestamp, a run id and
    `GIT_SHA`) through the same save path as notes and goals, then fetches and
    checks the remote really has it. "Saved but not pushed" is a FAIL. The file
-   is overwritten on every run (one commit per run), and `notes/` and `goals/`
-   are never touched.
+   is overwritten on every run (one commit per run). The self-test never creates
+   or edits anything under `notes/` or `goals/`, but it syncs the repo like a
+   normal save: the pull can bring in remote changes to them, and the marker
+   push also pushes any commits already pending in the clone.
 5. **Build info**: `GIT_SHA`, uptime, Python and `mcp` versions.
 6. **Tools registered**: the tool names the server exposes.
 
@@ -251,7 +253,8 @@ for one user and prints a PASS/WARN/FAIL table:
 self-test"*. Claude calls the `self_test` tool and shows the table. Clients
 that support MCP prompts also offer a **self-test** prompt: it runs
 `self_test`, then calls each read-only tool once and lists the tools the
-client couldn't find. It never calls a write tool.
+client couldn't find. It never calls a tool that changes notes, goals or
+configuration (`self_test` itself only saves its marker file).
 
 **From a terminal**, without Claude (exits non-zero if any check fails):
 

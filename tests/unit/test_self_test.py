@@ -398,6 +398,21 @@ def test_prompt_never_asks_to_call_a_write_tool():
         assert tool in text.split("3. Do NOT")[1]  # named as forbidden
 
 
+def test_descriptions_do_not_overstate_write_isolation():
+    """self_test pushes its marker (and any pending commits) and syncs notes/goals, so the
+    user-facing text must not promise it never touches them or never writes."""
+    from train_with_gpt.tools.self_test import self_test_prompt, self_test_tool
+
+    tool_description = self_test_tool().description
+    assert "never notes or goals" not in tool_description
+    assert "never creates or edits notes or goals" in tool_description
+    assert "pending" in tool_description
+
+    prompt_description = self_test_prompt().description
+    assert "Never calls a write tool" not in prompt_description
+    assert "marker file" in prompt_description
+
+
 # --- CLI -------------------------------------------------------------------------
 
 def test_cli_exits_zero_when_all_checks_pass(intervals_ok, training_repo, git_sha, capsys):
