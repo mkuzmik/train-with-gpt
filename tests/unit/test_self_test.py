@@ -440,3 +440,15 @@ async def test_short_secrets_are_redacted_too(training_repo, monkeypatch):
     report = await run_self_test(None)
 
     assert "k3y" not in format_report(report)
+
+
+async def test_a_symlinked_marker_is_refused(intervals_ok, training_repo, git_remote):
+    push_files(git_remote, {"goals.md": "root goals\n"})
+    git(training_repo, "pull", "--quiet")
+    (training_repo / "selftest").mkdir()
+    (training_repo / "selftest" / "local.md").symlink_to(training_repo / "goals.md")
+
+    report = await run_self_test(None)
+
+    assert by_name(report)["Repo write"].detail == "not saved: selftest/local.md or its folder is a symlink"
+    assert (training_repo / "goals.md").read_text() == "root goals\n"

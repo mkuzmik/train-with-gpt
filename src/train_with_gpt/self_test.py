@@ -330,6 +330,10 @@ async def check_repo_write(ctx: _Context) -> tuple[str, str]:
     if not _SAFE_MARKER_NAME.match(ctx.marker_name):
         return FAIL, "user id is not usable as a file name"
     relative = f"selftest/{ctx.marker_name}.md"
+    # write_text follows symlinks: never let a committed symlink point the
+    # marker at notes/ or goals/.
+    if any(p.is_symlink() for p in (repo / "selftest", repo / relative)):
+        return FAIL, f"not saved: {relative} or its folder is a symlink"
     content = (
         "# train-with-gpt self-test marker\n\n"
         "Overwritten by every self-test run; safe to delete.\n\n"
