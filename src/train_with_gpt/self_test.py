@@ -33,6 +33,7 @@ from typing import Awaitable, Callable, Optional
 
 import httpx
 
+from . import VERSION_ENV, app_version
 from .config import config
 from .helpers import GitSyncError, _git, _output, _repo_lock, git_pull_and_read, git_save_file
 from .intervals_client import IntervalsClient
@@ -361,14 +362,6 @@ def git_sha() -> str:
     return os.environ.get("GIT_SHA") or "unknown"
 
 
-def app_version() -> str:
-    """The installed package version (pyproject.toml's; a release tag vX.Y.Z matches it)."""
-    try:
-        return importlib.metadata.version("train-with-gpt")
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
-
-
 def _duration(seconds: float) -> str:
     seconds = int(seconds)
     days, rest = divmod(seconds, 86400)
@@ -403,7 +396,9 @@ async def check_build_info(ctx: _Context) -> tuple[str, str]:
         parts.append(f"mcp {importlib.metadata.version('mcp')}")
     except importlib.metadata.PackageNotFoundError:
         parts.append("mcp ?")
-    return (WARN if sha == "unknown" else PASS), "; ".join(parts)
+    # A deployed image should say which release and commit it is.
+    unlabelled = sha == "unknown" or not os.environ.get(VERSION_ENV, "").strip()
+    return (WARN if unlabelled else PASS), "; ".join(parts)
 
 
 async def registered_tool_names() -> list[str]:
