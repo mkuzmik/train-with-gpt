@@ -76,8 +76,9 @@ the athlete wants it kept at all.
    the biggest weeks and blocks, gaps of a week or more (often injury or illness), longest
    sessions, and activities that look like races.
 2. If recovery data is connected (see start_consultation's facts): **get_resting_heart_rate**,
-   **get_hrv_data** and **get_sleep_data** over the same period, for bands and trends
-   around races, gaps and hard blocks.
+   **get_hrv_data** and **get_sleep_data**. These accept at most 30 days per call, so
+   don't ask for the whole year: pick a few windows that matter (the last 30 days, and
+   the weeks around a race, a gap or a hard block), for bands and trends.
 3. For an athlete with history: **read_goals**, and **search_consultation_notes** per topic
    (race, PB, injury, pain, illness, availability, taper, fuelling) instead of reading
    every note.
@@ -113,8 +114,10 @@ strengths, limiters, what seems to work.
 - **Unresolved** items are left out or noted as such ("5k PB: athlete unsure, not in the
   data"), never guessed.
 
-If notes storage isn't available in this chat, do the same but share the final text in the
-chat instead of saving it, and say it can't be kept between chats yet.
+**If notes storage isn't available in this chat** (start_consultation says so), skip every
+storage tool: don't read the profile, goals or notes (phase 2 uses the activity and recovery
+tools only), don't save a note if the athlete stops, and at the end share the final text in
+the chat instead of saving it, saying it can't be kept between chats yet.
 """
 
 

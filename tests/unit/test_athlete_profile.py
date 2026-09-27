@@ -241,3 +241,19 @@ async def test_save_description_allows_health_patterns_but_not_raw_panels():
     description = save_athlete_profile_tool().description
     assert "no raw lab values" not in description
     assert "recurring patterns such as" in description and "no raw lab panels" in description
+
+
+async def test_build_guidance_respects_the_wellness_range_limit():
+    output = text_of(await build_athlete_profile_handler({}))
+
+    assert "at most 30 days per call" in output
+    assert "over the same period" not in output
+
+
+async def test_build_guidance_without_storage_skips_every_storage_tool():
+    output = text_of(await build_athlete_profile_handler({}))
+    no_storage = output.split("If notes storage isn't available in this chat")[1]
+
+    assert "don't read the profile, goals or notes" in no_storage
+    assert "don't save a note" in no_storage
+    assert "share the final text in\nthe chat" in no_storage
