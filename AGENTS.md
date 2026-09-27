@@ -45,6 +45,17 @@ rules and working conventions that the README doesn't cover.
 
 ### PR descriptions
 
+The maintainer reviews mainly the description (and Copilot checks the diff
+against it, see `.github/copilot-instructions.md`), so it must be an accurate,
+complete account of the change:
+
+- **Describe functionality, not implementation**: what changes for users,
+  operators and AI clients calling the tools; compatibility and migration risk
+  (existing users, stored data, deployed instances, stdio vs hosted); anything
+  an operator must do before deploying (new env vars/secrets). No file-by-file
+  or class-by-class changelog.
+- **Keep it in sync**: after every push, update the description so it matches
+  the code — no stale claims from earlier iterations.
 - **Every PR gets exactly one release label** when it's opened, because
   merging to `main` releases automatically (see `RELEASING.md`):
   `release:major`, `release:minor`, `release:patch` or `release:skip`
@@ -68,7 +79,8 @@ After pushing a PR that's ready for review:
 3. Evaluate **every** finding — inline comments *and* items that appear only in
    the review body (e.g. "Previously missed" / low-confidence notes):
    - valid → fix it, with a test that fails without the fix;
-   - not valid → explain why.
+   - not valid → explain why;
+   - description mismatch → update the PR description.
 4. Reply on each inline thread with the fixing commit or the reasoning;
    answer body-only items with a PR comment.
 5. Push without force, re-request the review, repeat. Stop when a round has
