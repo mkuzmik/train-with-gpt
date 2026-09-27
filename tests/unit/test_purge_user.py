@@ -80,7 +80,13 @@ def test_ids_are_canonicalised_like_the_store(db, http_mock):
     assert store.get_user("101") is None
 
 
-@pytest.mark.parametrize("user_id", ["abc", "1 OR 1=1", "../x", "-1"])
+def test_huge_id_is_a_no_op_not_a_crash(db, http_mock, capsys):
+    assert main(["9" * 5000]) == 0
+
+    assert "users: 0 row(s) deleted" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("user_id", ["abc", "1 OR 1=1", "../x", "-1", "0", "000"])
 def test_rejects_non_numeric_ids(db, user_id):
     with pytest.raises(SystemExit) as excinfo:
         main(["--", user_id])

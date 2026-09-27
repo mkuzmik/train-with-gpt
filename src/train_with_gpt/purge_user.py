@@ -21,6 +21,7 @@ import sys
 from typing import Optional
 
 from . import store
+from .allowlist import canonical_athlete_id
 from .strava_client import deauthorize
 
 ROOT_HINT = """\
@@ -46,11 +47,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="don't ask Strava to revoke this app's access before deleting",
     )
     args = parser.parse_args(argv)
-    if not args.user_id.isascii() or not args.user_id.isdigit():
-        parser.error("user_id must be a Strava athlete id (digits only)")
     # The same canonical form the store uses (str(athlete["id"])), so "0101"
     # purges user 101 instead of silently matching nothing.
-    args.user_id = str(int(args.user_id))
+    user_id = canonical_athlete_id(args.user_id)
+    if user_id is None:
+        parser.error("user_id must be a Strava athlete id (a positive integer)")
+    args.user_id = user_id
 
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         print(ROOT_HINT, file=sys.stderr)

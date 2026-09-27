@@ -40,14 +40,26 @@ def parse_allowlist(raw: Optional[str]) -> frozenset[str]:
         entry = entry.strip()
         if not entry:
             continue
-        if not entry.isascii() or not entry.isdigit() or int(entry) == 0:
+        canonical = canonical_athlete_id(entry)
+        if canonical is None:
             hint = " (there is no wildcard: list every athlete id)" if entry == "*" else ""
             raise AllowlistError(
                 f"{ENV_VAR}: entry #{position} is not a Strava athlete id "
                 f"(expected comma-separated positive integers){hint}"
             )
-        ids.add(str(int(entry)))
+        ids.add(canonical)
     return frozenset(ids)
+
+
+def canonical_athlete_id(value: str) -> Optional[str]:
+    """`value` as a canonical positive decimal id ("0101" -> "101"), or None if it isn't one.
+
+    String-based rather than int(), which raises a bare ValueError for digit
+    strings past Python's int-conversion limit.
+    """
+    if not value.isascii() or not value.isdigit():
+        return None
+    return value.lstrip("0") or None
 
 
 def load_allowlist(environ: Optional[Mapping[str, str]] = None) -> frozenset[str]:

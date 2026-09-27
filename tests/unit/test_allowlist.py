@@ -31,6 +31,17 @@ def test_invalid_entries_are_rejected(raw):
         parse_allowlist(raw)
 
 
+def test_huge_ids_are_handled_as_strings():
+    """Past Python's int-conversion limit (4300 digits), int() raises a bare
+    ValueError; the parser must neither crash that way nor reject a digit string."""
+    huge = "9" * 5000
+
+    assert parse_allowlist(f"101,{huge}") == frozenset({"101", huge})
+    assert parse_allowlist("0" * 5000 + "7") == frozenset({"7"})
+    with pytest.raises(AllowlistError, match="entry #1"):
+        parse_allowlist("0" * 5000)
+
+
 def test_error_names_the_position_but_not_the_value():
     with pytest.raises(AllowlistError) as excinfo:
         parse_allowlist("101, 20x2")
