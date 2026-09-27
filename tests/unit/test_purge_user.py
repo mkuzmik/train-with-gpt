@@ -71,6 +71,15 @@ def test_unknown_user_is_a_no_op(db, http_mock, capsys):
     assert "users: 0 row(s) deleted" in capsys.readouterr().out
 
 
+def test_ids_are_canonicalised_like_the_store(db, http_mock):
+    _seed("101")
+    http_mock.post(DEAUTHORIZE_URL).mock(return_value=Response(200, json={}))
+
+    assert main(["0101"]) == 0
+
+    assert store.get_user("101") is None
+
+
 @pytest.mark.parametrize("user_id", ["abc", "1 OR 1=1", "../x", "-1"])
 def test_rejects_non_numeric_ids(db, user_id):
     with pytest.raises(SystemExit) as excinfo:

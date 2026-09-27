@@ -7,6 +7,7 @@ and every id here is synthetic.
 """
 
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -110,6 +111,23 @@ def test_taking_an_athlete_off_the_list_rejects_their_existing_token(server_env,
     monkeypatch.setenv("ALLOWED_STRAVA_ATHLETE_IDS", f"1,3,{ALLOWED}")
     with TestClient(create_app(), base_url=PUBLIC_URL) as http:
         assert McpHttpClient(http, bearer).post(_initialize()).status_code == 200
+
+
+@pytest.mark.intervals_login_step
+def test_removal_while_on_the_intervals_page_blocks_finishing_the_login(server_env, strava, monkeypatch):
+    with TestClient(create_app(), base_url=PUBLIC_URL) as http:
+        page = _sign_in_until_callback(http, strava, ALLOWED)
+        assert page.status_code == 200 and "intervals.icu API key" in page.text
+        token = re.search(r'name="token" value="([^"]+)"', page.text).group(1)
+
+    monkeypatch.setenv("ALLOWED_STRAVA_ATHLETE_IDS", "1,3")
+    with TestClient(create_app(), base_url=PUBLIC_URL) as http:
+        response = http.post("/oauth/intervals/connect", data={"token": token, "action": "skip"},
+                             follow_redirects=False)
+
+    assert response.status_code == 403
+    assert "location" not in response.headers
+    assert _stored_rows()["auth_codes"] == 0
 
 
 @pytest.mark.parametrize("value", ["1001,abc", "*", "1001;2002"])
