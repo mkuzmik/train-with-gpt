@@ -257,3 +257,23 @@ async def test_build_guidance_without_storage_skips_every_storage_tool():
     assert "don't read the profile, goals or notes" in no_storage
     assert "don't save a note" in no_storage
     assert "share the final text in\nthe chat" in no_storage
+
+
+async def test_resaving_a_profile_that_was_read_back_keeps_one_title_and_timestamp(training_repo):
+    await _save()
+    edited = (await _read()).replace("45:05", "44:50")
+
+    await _save(edited)
+
+    content = (training_repo / "athlete-profile.md").read_text()
+    assert content.count("# Athlete profile") == 1
+    assert content.count("Saved: ") == 1
+    assert "44:50" in content
+
+
+async def test_an_interrupted_build_asks_before_keeping_what_was_said():
+    output = text_of(await build_athlete_profile_handler({}))
+
+    assert "ask whether to keep" in output
+    assert "Only with their OK" in output
+    assert "save a consultation note with the claims" not in output

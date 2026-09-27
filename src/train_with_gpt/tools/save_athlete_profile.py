@@ -33,8 +33,9 @@ PROFILE_SECTIONS = (
     "Preferences",
 )
 
-# A title the model may have included itself; the tool adds its own.
-_TITLE_RE = re.compile(r"\A\s*#\s*athlete profile\s*\n", re.IGNORECASE)
+# The title and "Saved:" line the tool adds, which the model may send back
+# when it edits a profile it read: the tool adds fresh ones.
+_TITLE_RE = re.compile(r"\A\s*#\s*athlete profile[ \t]*(\n\s*saved:[^\n]*)?(\n|\Z)", re.IGNORECASE)
 
 
 def save_athlete_profile_tool() -> Tool:

@@ -43,8 +43,10 @@ If the athlete already has a profile (it's in start_consultation's output, or us
 **read_athlete_profile**), start from it: ask what changed rather than re-asking everything.
 
 Tell the athlete up front that this takes a while (roughly 10-20 minutes of back and forth)
-and can be stopped any time; if they stop, save a consultation note with the claims and
-findings so far, and nothing to the profile.
+and can be stopped any time. If they stop, save nothing to the profile; ask whether to keep
+what was covered so far in a consultation note. Only with their OK save the claims and
+findings (health details only if they agree to those too); otherwise the note just says
+the profile build is unfinished and where it stopped.
 
 ## Phase 1: Interview (save nothing yet)
 

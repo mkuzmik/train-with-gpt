@@ -515,7 +515,8 @@ takes more users. It is tracked separately.
   - a rate limit returns a clear "evidence unavailable" message.
 - Integration: the profile is per user, and user A's read never shows user
   B's data.
-- Manual: run `build_athlete_profile` with a real athlete; check that the
+- Manual: run `build_athlete_profile` with a test account and synthetic or
+  stubbed data (never a real athlete's data during development); check that the
   evidence phase raises at least the contradictions a human coach would
   spot, and that a fresh conversation afterwards states race results and
   constraints without reading any notes.
