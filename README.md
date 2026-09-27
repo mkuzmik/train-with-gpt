@@ -12,17 +12,17 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 
 On a local install, all training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
 
-There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Deploying to Fly.io"). Hosted users get Strava activity data only; sleep/HRV/resting HR need the intervals.icu path.
+There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Self-hosting"). Hosted users get Strava activity data only; sleep/HRV/resting HR need the intervals.icu path.
 
 ## Using the hosted server
 
 If someone runs a hosted server for you, there's nothing to install. You need its connector URL, `https://<server>/mcp`.
 
 1. **Add it on claude.ai** (in a browser): Settings → Connectors → Add custom connector, and paste the URL. Custom connectors can't be added from the mobile app, but once added on claude.ai the connector syncs to Claude Desktop and mobile too. If its tools don't show up in a chat, turn the connector on from the chat's "+" / tools menu.
-2. **Sign in with Strava** and approve access. Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV and resting heart rate; you can skip it and add it later by disconnecting and reconnecting the connector.
+2. **Sign in with Strava** and approve access. The server only lets in athletes its operator has put on its allowlist; anyone else sees a "This server is private" page after the Strava consent (see [Who can sign in](#who-can-sign-in-allowlist)). Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV and resting heart rate; you can skip it and add it later by disconnecting and reconnecting the connector.
 3. **Type this first, in a new chat:** "Start a training consultation". It's the one entry point: the server tells Claude whether you're new (no goals or notes saved yet) or returning, so the first time Claude introduces itself and sets your goals with you, and after that it picks up from your goals and past notes. Start each chat the same way; say "Save notes" at the end of a useful one.
 
-Hosted users skip the local setup below; there's no training repository to configure. To run your own hosted server, see "Deploying to Fly.io".
+Hosted users skip the local setup below; there's no training repository to configure. To run your own hosted server, see "Self-hosting".
 
 ## Quick Start
 
@@ -92,6 +92,8 @@ You'll need a Strava OAuth app (instant/self-serve, unlike intervals.icu's):
    Callback Domain" to `localhost` for local/Docker testing).
 2. Save its Client ID/Secret to `~/.config/train-with-gpt/config.json` as
    `clientId`/`clientSecret`, or export `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET`.
+3. Export `ALLOWED_STRAVA_ATHLETE_IDS` with your own Strava athlete id. Without
+   it nobody can sign in (see [Who can sign in](#who-can-sign-in-allowlist)).
 
 Start the server:
 
@@ -123,8 +125,54 @@ whole OAuth dance (opens a browser, runs its own callback listener):
 }
 ```
 
-See "Deploying to Fly.io" below for the public deployment. The Docker setup
+See "Self-hosting" below for a public deployment. The Docker setup
 below simulates a remote deployment locally.
+
+### Who can sign in (allowlist)
+
+The HTTP server only lets in the Strava athletes listed in the
+`ALLOWED_STRAVA_ATHLETE_IDS` environment variable. This is a privacy (GDPR)
+stopgap: until there is a privacy policy and the Strava API policy work is
+done, the server should only process data of people who were explicitly let
+in. The personal stdio server doesn't use it.
+
+- **Format:** comma-separated numeric athlete ids, e.g. `111,222`. Spaces are
+  fine. Anything else (including `*`) stops the server at startup with an
+  error that names the variable but not the value.
+- **Fails closed:** unset or empty means nobody can sign in, and the server
+  logs a warning at startup. On a hosted deployment, set it **before**
+  deploying a version that has the allowlist, or sign-in is blocked for
+  everyone, including you. It can be a platform secret or a plain env var: the
+  ids aren't secret, but keep them out of this public repo. The log only shows
+  how many ids are allowed, never the ids.
+- **Someone not on the list** gets a "This server is private" page after the
+  Strava consent screen. Nothing about them is stored, Claude gets no code,
+  and the server asks Strava to revoke the access the athlete just granted.
+  The log records the refusal without their id or name.
+- **Taking someone off the list** locks them out on their next request, even
+  with a token they already have (the server re-reads the variable when it
+  restarts). Their stored data stays, so putting them back restores access.
+- **Finding your athlete id:** on strava.com, open your profile (avatar → My
+  Profile). The number in the URL, `strava.com/athletes/<id>`, is your id. It
+  identifies you, so put it straight into your deployment's environment and
+  keep it out of issues, commits and chats.
+
+For example, on Fly.io, either as a secret (setting it restarts the app) or
+under `[env]` in your own `fly.toml`:
+
+```bash
+fly secrets set -a <app> ALLOWED_STRAVA_ATHLETE_IDS=<your_athlete_id>
+```
+
+**Deleting a user's stored data.** Taking someone off the list doesn't delete
+anything. `train-with-gpt-purge-user <user_id>`, run next to the server's
+`store.db` (as the `app` user in the container, e.g.
+`su app -c 'train-with-gpt-purge-user <user_id>'`), removes their Strava
+tokens and name, intervals.icu key, and the server's tokens and codes for
+them. It first asks Strava to revoke the app's access (skip with
+`--no-deauthorize`). Their notes and goals in the training repo
+(`notes/<user_id>/`, `goals/<user_id>.md`) aren't touched; delete them there in
+a normal commit if needed. Git history keeps them until it's rewritten.
 
 ### Running the HTTP server in Docker
 
@@ -145,14 +193,16 @@ as a file secret, and `docker-entrypoint.sh` copies it into the container's
 config dir owned by the `app` user (the host file's `chmod 600` owner UID
 usually isn't the container's). No code changes or exports are needed, just
 that the file exists on the host (`chmod 600`, and never committed - see
-`.gitignore`). Add `"tokenEncryptionKey"` (a Fernet key, generated as in the
-Fly.io setup below) to it to turn on the optional intervals.icu login step.
+`.gitignore`). Add `"tokenEncryptionKey"` (a Fernet key, generated as in
+"Self-hosting" below) to it to turn on the optional intervals.icu login step.
 
 This maps container port 8000 to `localhost:8123` on the host and sets
 `PUBLIC_URL=http://localhost:8123` to match (override either with `HOST_PORT`/
 `PUBLIC_URL` env vars — they must stay in sync, since `PUBLIC_URL` is what
 gets baked into the OAuth redirect URIs sent to Claude and Strava). Point
-`mcp-remote` at `http://localhost:8123/mcp` as above.
+`mcp-remote` at `http://localhost:8123/mcp` as above. Compose passes
+`ALLOWED_STRAVA_ATHLETE_IDS` through from your shell, so export it first or
+nobody can sign in.
 
 The container's `~/.config/train-with-gpt` directory is a named Docker
 volume (`train-with-gpt-config`), so the SQLite store (users/tokens/OAuth
@@ -165,9 +215,9 @@ user (`notes/<user_id>/`, `goals/<user_id>.md`) in a separate, *private* git
 repo, cloned by the container on first start (`docker-entrypoint.sh`) and
 pushed to on every save. Set it up once:
 
-1. Create a private repo (e.g. `training-context-shared`) and set
-   `TRAINING_REPO_URL` (default in `docker-compose.yml`/`fly.toml`, edit it to
-   your repo).
+1. Create a private repo (e.g. `training-notes`) and set
+   `TRAINING_REPO_URL` to its SSH URL (`git@github.com:<you>/<repo>.git`),
+   e.g. in a `.env` file next to `docker-compose.yml` (never committed).
 2. Generate a dedicated deploy key and save it outside the repo:
    ```bash
    ssh-keygen -t ed25519 -f ~/.config/train-with-gpt/training-context-deploy-key -N "" -C "train-with-gpt"
@@ -183,62 +233,102 @@ hidden from (and refused for) OAuth sessions — the repo is server configuratio
 OAuth users' goals/notes tools say the server's notes storage isn't set up and
 to contact the operator.
 
-## Deploying to Fly.io (public, HTTPS)
+## Self-hosting (public, HTTPS)
 
-This is how the server runs remotely so it works from other devices (including
-the Claude mobile app). The repo's `Dockerfile` and `fly.toml` are used as-is.
-**Never commit secrets** — this repo is public; everything sensitive below goes
-through `fly secrets` or files under `~/.config/train-with-gpt/`.
+To use the server from other devices (including the Claude mobile app), run
+the HTTP entrypoint on any container host: a VM with Docker, a PaaS such as
+Fly.io, Railway or Render, or Kubernetes. The `Dockerfile` and
+`docker-entrypoint.sh` are provider-neutral and configured only through
+environment variables and secrets. **Never commit secrets** — this repo is
+public; set them in your platform's secret store.
+
+### What the host must provide
+
+- **The image.** Build it from a release tag (see [RELEASING.md](RELEASING.md))
+  so you know exactly what runs:
+  ```bash
+  git checkout v0.1.0
+  docker build --build-arg TRAIN_WITH_GPT_VERSION=v0.1.0 \
+               --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t train-with-gpt .
+  ```
+  Both build args are optional; the self-test shows them (and warns when
+  either is missing).
+- **HTTPS.** A public `https://` URL whose TLS proxy forwards to the container
+  port (`PORT`, default `8000`). OAuth clients (claude.ai, `mcp-remote`) require
+  an HTTPS issuer for anything but `localhost`. Set `PUBLIC_URL` to exactly
+  that URL (no trailing slash): it is the OAuth issuer and is baked into the
+  redirect URIs. The server trusts `X-Forwarded-*` headers, so expose the
+  container only through the proxy, never directly.
+- **A persistent volume** at `/home/app/.config/train-with-gpt`. It holds
+  `store.db` (users, OAuth clients and tokens, encrypted intervals.icu keys);
+  without it every restart logs everyone out. The notes clone
+  (`TRAINING_REPO_PATH`) may live on the same or another volume, or on
+  ephemeral disk: it is cloned on boot when missing, and every save is pushed
+  immediately.
+- **One instance.** State is a local SQLite file and a local git clone, so
+  run a single replica (scaling to zero when idle is fine).
+- **Health check:** `GET /health` returns `200 {"status":"ok"}` without
+  authentication.
+
+### Configuration
+
+| Name | Kind | Required | Purpose |
+|---|---|---|---|
+| `PUBLIC_URL` | env | yes | The public `https://` URL (OAuth issuer and redirect base). |
+| `PORT` | env | no (`8000`) | Port the server listens on inside the container. |
+| `TRAINING_REPO_URL` | env | yes | SSH URL of your private notes repo, e.g. `git@github.com:<you>/<notes-repo>.git`. Only GitHub is supported (its host key is pinned in the entrypoint). |
+| `TRAINING_REPO_PATH` | env | yes | Where the clone lives in the container, e.g. `/data/training-context`. |
+| `STRAVA_CLIENT_ID` | secret | yes | Strava OAuth app (users sign in with Strava). |
+| `ALLOWED_STRAVA_ATHLETE_IDS` | env or secret | yes | Comma-separated Strava athlete ids allowed to sign in. Unset/empty lets nobody in; malformed stops startup. See [Who can sign in](#who-can-sign-in-allowlist). |
+| `STRAVA_CLIENT_SECRET` | secret | yes | Strava OAuth app secret. |
+| `TRAINING_CONTEXT_DEPLOY_KEY` | secret | yes | Private SSH deploy key with write access to the notes repo, with its real newlines. Or mount it as a file at `/run/secrets/training_context_deploy_key`. |
+| `TOKEN_ENCRYPTION_KEY` | secret | no | Fernet key encrypting users' intervals.icu keys; turns on the optional intervals.icu step at login. Changing it makes stored keys unreadable. |
+| `TRAIN_WITH_GPT_VERSION` | build arg | no | Release tag shown by the self-test, e.g. `v0.1.0`. |
+| `GIT_SHA` | build arg | no | Commit shown by the self-test. |
+
+The Strava and encryption settings can instead come from a `config.json`
+mounted at `/run/secrets/train_with_gpt_config` (as `docker-compose.yml`
+does). `INTERVALS_API_KEY` is for the personal stdio setup only; hosted users
+bring their own key at login.
 
 ### One-time setup
 
-1. Install and log in (`fly auth login` needs a real terminal, not a `!` shell):
+1. Create the private notes repo and its deploy key as in "Notes/goals repo in
+   Docker" above.
+2. Register a Strava OAuth app at https://www.strava.com/settings/api and set
+   **Authorization Callback Domain** to your `PUBLIC_URL` host (hostname only
+   — no `https://`, no path). Strava allows one domain per app, so use a
+   second app for `localhost` testing.
+3. Generate an encryption key (optional):
    ```bash
-   brew install flyctl
-   fly auth login
+   python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
    ```
-2. Pick a globally unique app name; set it as `app` and in `PUBLIC_URL`
-   (`https://<app>.fly.dev`) in `fly.toml`, then create the app and a volume
-   (holds `store.db` — without it users are logged out on every deploy):
-   ```bash
-   fly apps create <app>
-   fly volumes create train_with_gpt_data --region fra --size 1 -a <app>
-   ```
-3. Register the Strava OAuth app at https://www.strava.com/settings/api and set
-   **Authorization Callback Domain** to `<app>.fly.dev` (hostname only — no
-   `https://`, no path). Strava allows one domain per app, so a second app is
-   needed if you also want to keep testing against `localhost`.
-4. Set secrets (encrypted, injected as env vars at runtime). The deploy key
-   must keep its real newlines, so pass it via `$(cat ...)`:
-   ```bash
-   fly secrets set -a <app> \
-     STRAVA_CLIENT_ID=... \
-     STRAVA_CLIENT_SECRET=... \
-     "TRAINING_CONTEXT_DEPLOY_KEY=$(cat ~/.config/train-with-gpt/training-context-deploy-key)" \
-     "TOKEN_ENCRYPTION_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-   ```
-   `TOKEN_ENCRYPTION_KEY` encrypts users' intervals.icu API keys in `store.db`
-   and turns on the optional intervals.icu step at login (see below). Leave it
-   out to skip that step. Changing it later makes stored keys unreadable, so
-   users would need to add them again.
-5. Deploy:
-   ```bash
-   fly deploy --ha=false -a <app> --build-arg GIT_SHA=$(git rev-parse --short HEAD)
-   ```
-   `GIT_SHA` is optional; the self-test reports it so you can see which commit
-   is live (it shows `unknown` and a warning without it).
+4. Create the volume, set the env vars and secrets above on your platform, and
+   deploy the image.
+
+**Example: Fly.io.** Create your own `fly.toml` (e.g. `fly launch
+--no-deploy`) with `internal_port = 8000`, `force_https = true`, the env vars
+above under `[env]`, and a `[mounts]` volume at
+`/home/app/.config/train-with-gpt`. Then:
+
+```bash
+fly volumes create <volume> --size 1 -a <app>
+fly secrets set -a <app> STRAVA_CLIENT_ID=... STRAVA_CLIENT_SECRET=... \
+  "TRAINING_CONTEXT_DEPLOY_KEY=$(cat ~/.config/train-with-gpt/training-context-deploy-key)" \
+  TOKEN_ENCRYPTION_KEY=...
+fly deploy --ha=false -a <app> --build-arg GIT_SHA=$(git rev-parse --short HEAD)
+```
 
 ### Verify
 
 ```bash
-curl https://<app>.fly.dev/health                                   # {"status":"ok"}
-curl -i -X POST https://<app>.fly.dev/mcp                           # 401 + WWW-Authenticate
-curl https://<app>.fly.dev/.well-known/oauth-authorization-server   # https:// URLs
-fly logs -a <app>
+curl https://<host>/health                                   # {"status":"ok"}
+curl -i -X POST https://<host>/mcp                           # 401 + WWW-Authenticate
+curl https://<host>/.well-known/oauth-authorization-server   # https:// URLs
 ```
 
-Then run the real flow: `npx mcp-remote https://<app>.fly.dev/mcp` (opens a
-browser for Strava consent) and call a tool.
+Then run the real flow: `npx mcp-remote https://<host>/mcp` (opens a browser
+for Strava consent) and call a tool.
 
 ### Post-deploy smoke test
 
@@ -251,15 +341,18 @@ for one user and prints a PASS/WARN/FAIL table:
    intervals.icu wellness data came back. Counts only; nothing is stored.
 3. **Repo read**: pulls the training repo; the clone must be clean and at its
    upstream. It warns about a missing remote and `unsynced-*` branches.
-4. **Repo write**: saves `selftest/<user_id>.md` (a timestamp, a run id and
-   `GIT_SHA`) through the same save path as notes and goals, then fetches and
-   checks the remote really has it. "Saved but not pushed" is a FAIL. The file
-   is overwritten on every run (one commit per run). The self-test never creates
-   or edits anything under `notes/` or `goals/`, but it syncs the repo like a
-   normal save: the pull can bring in remote changes to them, and the marker
-   push also pushes any commits already pending in the clone.
-5. **Build info**: `GIT_SHA`, uptime, Python and `mcp` versions.
-6. **Tools registered**: the tool names the server exposes.
+4. **Repo write**: saves `selftest/<user_id>.md` (a timestamp, a run id, the
+   version and `GIT_SHA`) through the same save path as notes and goals, then
+   fetches and checks the remote really has it. "Saved but not pushed" is a
+   FAIL. The file is overwritten on every run (one commit per run). The
+   self-test never creates or edits anything under `notes/` or `goals/`, but
+   it syncs the repo like a normal save: the pull can bring in remote changes
+   to them, and the marker push also pushes any commits already pending in the
+   clone.
+5. **Build info**: release version (`TRAIN_WITH_GPT_VERSION`), `GIT_SHA`,
+   uptime, Python and `mcp` versions.
+6. **Tools registered**: the tool names the server offers the tested user
+   (a hosted user doesn't get `setup_training_repo`).
 
 **From Claude** (claude.ai, mobile or Desktop): say *"Run the Train with GPT
 self-test"*. Claude calls the `self_test` tool and shows the table. Clients
@@ -268,10 +361,12 @@ that support MCP prompts also offer a **self-test** prompt: it runs
 client couldn't find. It never calls a tool that changes notes, goals or
 configuration (`self_test` itself only saves its marker file).
 
-**From a terminal**, without Claude (exits non-zero if any check fails):
+**From a terminal**, without Claude (exits non-zero if any check fails), in
+a shell inside the running container (`docker exec -it <container> sh`, or
+your platform's equivalent, e.g. `fly ssh console`):
 
 ```bash
-fly ssh console -a <app> -C "su app -c 'train-with-gpt-selftest --user-id <strava_athlete_id>'"
+su app -c 'train-with-gpt-selftest --user-id <strava_athlete_id>'
 ```
 
 - Run it as `app`, not root: git refuses a clone owned by another user, and
@@ -279,9 +374,9 @@ fly ssh console -a <app> -C "su app -c 'train-with-gpt-selftest --user-id <strav
 - `su app -c` keeps the environment (`TRAINING_REPO_PATH`, the Strava app
   credentials, `TOKEN_ENCRYPTION_KEY`, `GIT_SHA`). The entrypoint sets the
   deploy key as `app`'s git `core.sshCommand`, so fetch and push work without
-  `GIT_SSH_COMMAND`. If a check reports something "not configured", the SSH
-  session doesn't see the app's env or secrets.
-- The machine auto-stops when idle; `curl https://<app>.fly.dev/health` first
+  `GIT_SSH_COMMAND`. If a check reports something "not configured", the
+  shell doesn't see the app's env or secrets.
+- If the platform stops idle containers, `curl https://<host>/health` first
   to wake it.
 - Leave out `--user-id` to test the personal configuration (intervals.icu key
   and `TRAINING_REPO_PATH`), e.g. `uv run train-with-gpt-selftest` locally.
@@ -289,11 +384,12 @@ fly ssh console -a <app> -C "su app -c 'train-with-gpt-selftest --user-id <strav
 ### Connecting clients
 
 - **claude.ai, Claude Desktop and mobile:** claude.ai → Settings → Connectors →
-  Add custom connector → `https://<app>.fly.dev/mcp`, sign in with Strava. The
+  Add custom connector → `https://<host>/mcp`, sign in with Strava. The
   connector then shows up in Desktop and mobile too (it can't be added from
-  mobile). See "Using the hosted server" above for what users see.
+  mobile; custom connectors need a paid plan). See "Using the hosted server"
+  above for what users see.
 - **Clients without custom connectors:** use `mcp-remote` as in the local
-  setup, with the `https://<app>.fly.dev/mcp` URL.
+  setup, with the `https://<host>/mcp` URL.
 
 **Sleep, HRV and resting HR (optional).** Strava has no wellness data. After
 the Strava consent, the login shows one more page asking for your
@@ -314,19 +410,20 @@ stored encrypted.
 
 ### Operations
 
-- **Redeploy:** `fly deploy --ha=false -a <app> --build-arg GIT_SHA=$(git rev-parse --short HEAD)`. The volume (and therefore
-  users/tokens) survives; the notes repo is re-cloned on boot (saves push
-  immediately, so nothing is lost unless a push failed).
-- **Auto-stop:** the machine stops when idle and starts on the next request
-  (`fly.toml`), so the first request after a quiet period is slower.
-- **Backups:** Fly snapshots the volume daily (5 days). It's one copy on one
-  machine; if lost, users simply re-authenticate.
-- **Rotating secrets:** re-run `fly secrets set ...` (redeploys automatically).
-  For the Strava secret, regenerate it in Strava's settings first. For the
-  deploy key, generate a new one, swap it in GitHub, then set the secret.
+- **Upgrading:** build and deploy the next release tag. The volume (and
+  therefore users/tokens) survives; the notes repo is re-cloned on boot if it
+  isn't on a volume (saves push immediately, so nothing is lost unless a push
+  failed). To roll back, redeploy the previous tag's image.
+- **Backups:** back up the config volume (`store.db`) if your platform
+  doesn't snapshot it. If it's lost, users simply re-authenticate; notes and
+  goals live in the git repo.
+- **Rotating secrets:** update the secret on your platform and restart. For
+  the Strava secret, regenerate it in Strava's settings first. For the deploy
+  key, generate a new one, add it in GitHub, set the secret, restart, then
+  remove the old key in GitHub.
 - **Revoking access:** clients can revoke their own token via `/revoke`. To
-  cut off a user (e.g. a leaked token), open `fly ssh console -a <app>` and
-  run `su app -c 'python -c "from train_with_gpt import store; print(store.delete_user_access_tokens(\"<user_id>\"))"'`
+  cut off a user (e.g. a leaked token), open a shell in the container and run
+  `su app -c 'python -c "from train_with_gpt import store; print(store.delete_user_access_tokens(\"<user_id>\"))"'`
   (or delete `store.db` and restart to log everyone out). Each device holds
   its own token, so a new login does not invalidate the others.
 - **`mcp-remote` cache:** clients cache OAuth registrations per server URL in
@@ -384,7 +481,7 @@ This single entry point tells Claude what's saved for you (goals, how many consu
 **Analyzing Workouts**
 
 - "Analyze my most recent run"
-- "Analyze activity i180171555" (use ID from activity list)
+- "Analyze activity i12345678" (use ID from activity list)
 - Claude shows: zone distribution, interval detection, coaching insights
 
 **Reviewing Sleep & Recovery**
@@ -431,6 +528,27 @@ You: "Save notes from this consultation"
 
 Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 ```
+
+### Tools
+
+The local stdio server offers 16 tools; the hosted server offers the same
+minus `setup_training_repo` (15), because its notes storage is server
+configuration.
+
+| Tool | What it's for |
+|---|---|
+| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, number and date of consultation notes), which data sources are connected and whether notes storage works, and guides Claude through onboarding a new athlete or a consultation with a returning one. |
+| `get_current_date` | Today's date and weekday. |
+| `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
+| `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate` | Wellness data from intervals.icu (hosted users only if they connected it at login). |
+| `read_goals`, `save_goals` | The athlete's goals (saving replaces them). |
+| `save_consultation_notes`, `list_consultation_notes`, `read_consultation_notes`, `search_consultation_notes` | Consultation notes, one timestamped file per save. |
+| `setup_training_repo` | Local only: point the server at the notes repository that stores goals and notes. |
+| `self_test` | Health check of the connector (see "Post-deploy smoke test"). |
+
+There is no separate goal-setting tool (`discuss_goals` was removed): goal
+setting is part of `start_consultation`'s guidance, and "update my goals"
+works in any chat.
 
 ## Troubleshooting
 
@@ -510,6 +628,13 @@ The CI pipeline tests against Python 3.10 through 3.14, running the unit and int
 
 **⚠️ IMPORTANT: All tests must pass before merging PRs.**
 
+### Releasing
+
+Merging a PR into `main` releases it: the tests run, then the commit gets the
+next `vX.Y.Z` tag and a GitHub Release. Label the PR `release:minor` or
+`release:major` for a bigger bump than patch, or `release:skip` for none.
+Manual releases: Actions → Release → Run workflow. See [RELEASING.md](RELEASING.md).
+
 ### Writing Tests
 
 Tests come in two levels. Pick the level by what you're testing, not by what's
@@ -535,7 +660,10 @@ through its public interfaces only:
 - The HTTP server: `create_app()` behind Starlette's `TestClient` (the `http`
   fixture). Drive the OAuth endpoints (`/register`, `/authorize`,
   `/oauth/strava/callback`, `/token`, `/revoke`) and `/mcp` with real MCP
-  JSON-RPC (`McpHttpClient`). `login(athlete_id)` runs the full OAuth round
+  JSON-RPC (`McpHttpClient`). The server's allowlist is
+  `ALLOWED_ATHLETES` in `tests/integration/conftest.py` (synthetic ids; add
+  new ones there, or override with `@pytest.mark.allowed_athletes("...")`).
+  `login(athlete_id)` runs the full OAuth round
   trip and returns an initialised MCP client. It walks through the optional
   intervals.icu page, which is on when a test has
   `@pytest.mark.intervals_login_step`, by skipping it or pasting

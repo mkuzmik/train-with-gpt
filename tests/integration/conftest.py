@@ -32,8 +32,14 @@ PUBLIC_URL = "http://localhost:8123"  # the SDK only allows plain http for local
 CLAUDE_REDIRECT_URI = "http://localhost:9999/oauth/callback"
 STRAVA_AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
+STRAVA_DEAUTHORIZE_URL = "https://www.strava.com/oauth/deauthorize"
 STRAVA_API = "https://www.strava.com/api/v3"
 MCP_PROTOCOL_VERSION = "2025-06-18"
+
+# The synthetic athletes the tests sign in as; the server's allowlist
+# (ALLOWED_STRAVA_ATHLETE_IDS) admits exactly these unless a test overrides it
+# with @pytest.mark.allowed_athletes("...").
+ALLOWED_ATHLETES = (1, 3, 5, 9, 31, 32, 42, 43, 44, 77, 1001, 2002, 4242)
 
 
 class FakeStrava:
@@ -52,7 +58,10 @@ class FakeStrava:
         self.activities = {}  # athlete id -> list of activity dicts
         self.token_requests = []
 
+        self.deauthorized = []  # access tokens Strava was asked to revoke
+
         self.token_route = router.post(STRAVA_TOKEN_URL).mock(side_effect=self._token)
+        self.deauthorize_route = router.post(STRAVA_DEAUTHORIZE_URL).mock(side_effect=self._deauthorize)
         self.activities_route = router.get(f"{STRAVA_API}/athlete/activities").mock(side_effect=self._list_activities)
 
     def approve(self, athlete_id: int, firstname="Test", lastname="Athlete") -> str:
@@ -87,6 +96,23 @@ class FakeStrava:
             athlete_id = self._refresh.pop(form["refresh_token"])  # Strava rotates refresh tokens
             return Response(200, json=self._issue(athlete_id))
         return Response(400, json={"message": "Bad Request"})
+
+    def token_is_valid(self, access_token: str) -> bool:
+        """Whether Strava would still accept this access token."""
+        return access_token in self._access
+
+    def _deauthorize(self, request):
+        """Revoke the app's grant: every access/refresh token of that athlete dies."""
+        token = parse_qs(request.content.decode()).get("access_token", [""])[0]
+        athlete_id = self._access.get(token)
+        if athlete_id is None:
+            return Response(401, json={"message": "Authorization Error"})
+        self.deauthorized.append(token)
+        for tokens in (self._access, self._refresh):
+            for key, owner in list(tokens.items()):
+                if owner == athlete_id:
+                    del tokens[key]
+        return Response(200, json={"access_token": token})
 
     def _athlete_for(self, request):
         auth = request.headers.get("Authorization", "")
@@ -276,6 +302,10 @@ def pytest_configure(config):
         "markers", "intervals_login_step: run the server with TOKEN_ENCRYPTION_KEY set, "
         "which adds the optional intervals.icu page to the OAuth login",
     )
+    config.addinivalue_line(
+        "markers", "allowed_athletes(value): run the server with ALLOWED_STRAVA_ATHLETE_IDS=value "
+        "instead of the default ALLOWED_ATHLETES",
+    )
 
 
 @pytest.fixture
@@ -285,6 +315,11 @@ def server_env(request, monkeypatch, training_repo):
     monkeypatch.setenv("STRAVA_CLIENT_ID", STRAVA_CLIENT_ID)
     monkeypatch.setenv("STRAVA_CLIENT_SECRET", STRAVA_CLIENT_SECRET)
     monkeypatch.setenv("TRAINING_REPO_PATH", str(training_repo))
+    allowed = request.node.get_closest_marker("allowed_athletes")
+    monkeypatch.setenv(
+        "ALLOWED_STRAVA_ATHLETE_IDS",
+        allowed.args[0] if allowed else ",".join(str(athlete) for athlete in ALLOWED_ATHLETES),
+    )
     if request.node.get_closest_marker("intervals_login_step"):
         monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     config.load()

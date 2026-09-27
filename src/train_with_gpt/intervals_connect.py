@@ -91,7 +91,7 @@ wellness data. You can cut access at any time by regenerating the key on interva
     return HTMLResponse(page, status_code=status_code, headers=_HEADERS)
 
 
-async def handle_connect(request: Request):
+async def handle_connect(request: Request, allowed_athlete_ids: frozenset[str]):
     form = await request.form()
     token = str(form.get("token") or "")
     action = str(form.get("action") or "skip")
@@ -104,6 +104,13 @@ async def handle_connect(request: Request):
             "This sign-in link has expired. Start connecting again from Claude.", status_code=400
         )
     user_id = step["user_id"]
+    if user_id not in allowed_athlete_ids:
+        # Taken off the allowlist (and the server restarted) while this page
+        # was open: the step stays consumed, nothing is saved, no code issued.
+        print("[intervals.icu] Refused connect step: user no longer on the allowlist", file=sys.stderr)
+        return PlainTextResponse(
+            "This server is private: it isn't available for your account.", status_code=403
+        )
 
     def retry(message: str, status_code: int) -> HTMLResponse:
         store.save_pending_connect_step(token, user_id, step["pending"])
@@ -138,4 +145,10 @@ async def handle_connect(request: Request):
     return complete_authorization(step["pending"], user_id)
 
 
-intervals_connect_route = Route(CONNECT_PATH, handle_connect, methods=["POST"])
+def create_intervals_connect_route(allowed_athlete_ids: frozenset[str]) -> Route:
+    """The connect step's POST route, finishing only for `allowed_athlete_ids` (see allowlist.py)."""
+
+    async def endpoint(request: Request):
+        return await handle_connect(request, allowed_athlete_ids)
+
+    return Route(CONNECT_PATH, endpoint, methods=["POST"])

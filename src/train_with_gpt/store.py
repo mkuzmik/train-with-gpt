@@ -324,3 +324,24 @@ def claim_pending_connect_step(token: str, max_age_seconds: float) -> Optional[d
         if deleted != 1 or row["created_at"] < time.time() - max_age_seconds:
             return None
         return {"user_id": row["user_id"], "pending": json.loads(row["pending"])}
+
+
+# --- purging one user ------------------------------------------------------------
+
+def purge_user(user_id: str) -> dict[str, int]:
+    """Delete everything the store holds for one user, in one transaction.
+
+    Their Strava tokens and name (users), intervals.icu connection, our access
+    tokens and authorization codes, and any half-finished intervals.icu login
+    step. Returns rows deleted per table. Notes/goals in the training repo are
+    not touched (see the README).
+    """
+    statements = {
+        "users": "DELETE FROM users WHERE user_id = ?",
+        "intervals_connections": "DELETE FROM intervals_connections WHERE user_id = ?",
+        "access_tokens": "DELETE FROM access_tokens WHERE json_extract(data, '$.subject') = ?",
+        "auth_codes": "DELETE FROM auth_codes WHERE json_extract(data, '$.subject') = ?",
+        "pending_connect_steps": "DELETE FROM pending_connect_steps WHERE user_id = ?",
+    }
+    with _connect() as conn:
+        return {table: conn.execute(sql, (user_id,)).rowcount for table, sql in statements.items()}

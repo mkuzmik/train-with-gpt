@@ -6,6 +6,10 @@ own consent screen - it immediately redirects to Strava's OAuth
 (`strava_oauth.py`), the second leg of the nested flow. Once Strava's
 callback resolves who the user is, `exchange_authorization_code()` mints our
 own token, bound to that user id (`AuthorizationCode.subject`).
+
+Codes and tokens are only honoured while their user is on the allowlist
+(allowlist.py), so taking someone off the list locks them out on their next
+request, without waiting for a year-long token to expire.
 """
 
 import secrets
@@ -33,8 +37,12 @@ ACCESS_TOKEN_TTL_SECONDS = 365 * 24 * 3600
 class TrainWithGptOAuthProvider:
     """OAuth AS provider backing the Claude <-> this-server leg of the flow."""
 
-    def __init__(self, issuer_base_url: str):
+    def __init__(self, issuer_base_url: str, allowed_athlete_ids: frozenset[str]):
         self.issuer_base_url = issuer_base_url
+        self.allowed_athlete_ids = allowed_athlete_ids
+
+    def _is_allowed(self, user_id: str | None) -> bool:
+        return user_id is not None and user_id in self.allowed_athlete_ids
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         data = store.get_client(client_id)
@@ -65,6 +73,8 @@ class TrainWithGptOAuthProvider:
             return None
         code = AuthorizationCode.model_validate_json(data)
         if code.client_id != client.client_id or code.expires_at < time.time():
+            return None
+        if not self._is_allowed(code.subject):
             return None
         return code
 
@@ -104,6 +114,8 @@ class TrainWithGptOAuthProvider:
         access_token = AccessToken.model_validate_json(data)
         if access_token.expires_at and access_token.expires_at < time.time():
             return None
+        if not self._is_allowed(access_token.subject):
+            return None  # -> 401; the row is kept, so re-adding the user restores access
         return access_token
 
     async def revoke_token(self, token) -> None:

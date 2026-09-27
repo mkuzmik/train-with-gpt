@@ -40,11 +40,16 @@ ENV HOME=/home/app
 RUN mkdir -p /home/app/.config/train-with-gpt && chown -R app:app /home/app/.config
 RUN su app -c 'git config --global user.email "train-with-gpt@container.local" && git config --global user.name "train-with-gpt"'
 
-# Reported by the self_test tool, so a post-deploy check shows which commit is
-# live: fly deploy --build-arg GIT_SHA=$(git rev-parse --short HEAD). Late in
-# the file so a new SHA doesn't invalidate the dependency layers.
+# Reported by the self_test tool, so a post-deploy check shows which release
+# and commit are live (both optional; it warns when either is missing):
+#   docker build --build-arg TRAIN_WITH_GPT_VERSION=v0.1.0 \
+#                --build-arg GIT_SHA=$(git rev-parse --short HEAD) .
+# Release tags, not pyproject.toml, carry the version (RELEASING.md). Late in
+# the file so new values don't invalidate the dependency layers.
 ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
+ARG TRAIN_WITH_GPT_VERSION=
+ENV TRAIN_WITH_GPT_VERSION=$TRAIN_WITH_GPT_VERSION
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

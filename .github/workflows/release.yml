@@ -1,0 +1,95 @@
+name: Release
+
+# Every push to main (every merged PR) is released automatically: tests run
+# on that exact commit, then it gets the next vX.Y.Z tag and a GitHub Release
+# with generated notes. The bump comes from the merged PRs' labels
+# (release:major / release:minor, default patch; release:skip or
+# skip-release: no release). See RELEASING.md and scripts/release_version.py.
+#
+# Manual release from the GitHub UI: Actions -> Release -> Run workflow
+# (on main). Don't use "Draft a new release" on the Releases page - that skips
+# the tests.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (auto: from the merged PRs' labels, at least a patch)"
+        type: choice
+        options: [ auto, patch, minor, major ]
+        default: auto
+
+permissions: {}
+
+# One release at a time, never cancelled mid-way, so two quick merges can't
+# claim the same version. (GitHub keeps only the newest pending run; an
+# older pending one is dropped, and its changes ship in the newer release.)
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+    - name: Only main is released
+      if: github.ref != 'refs/heads/main'
+      run: |
+        echo "::error::Releases are cut from main only (got $GITHUB_REF)"
+        exit 1
+
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # all tags and history, to find the latest release
+
+    - name: Plan the version
+      id: plan
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump || 'auto' }}
+      run: |
+        # A manual run always releases: "auto" becomes "at least a patch".
+        if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$BUMP" = auto ]; then BUMP=force; fi
+        python3 scripts/release_version.py --head "$GITHUB_SHA" --bump "$BUMP"
+
+    - name: Summary
+      env:
+        RELEASE: ${{ steps.plan.outputs.release }}
+        VERSION: ${{ steps.plan.outputs.version }}
+        REASON: ${{ steps.plan.outputs.reason }}
+      run: echo "release=$RELEASE version=$VERSION - $REASON" >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test.yml
+
+  release:
+    needs: [ plan, test ]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Tag and publish the release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        VERSION: ${{ needs.plan.outputs.version }}
+      run: |
+        # A tag made by hand (e.g. "Draft a new release") on a commit that
+        # isn't in main's history would otherwise be silently reused.
+        if gh api "repos/$GH_REPO/git/ref/tags/$VERSION" >/dev/null 2>&1; then
+          echo "::error::Tag $VERSION already exists on another commit. Delete it (and its release) if it was made by hand, then re-run this workflow."
+          exit 1
+        fi
+        gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes

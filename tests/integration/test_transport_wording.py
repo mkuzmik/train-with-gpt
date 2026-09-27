@@ -23,6 +23,10 @@ from .test_personal_server import StdioServer, _text, stdio_env  # noqa: F401 (s
 
 INTERVALS = "https://intervals.icu/api/v1"
 
+# The synthetic athletes this module signs in as (5101-5110) are on the hosted
+# server's allowlist.
+pytestmark = pytest.mark.allowed_athletes(",".join(str(athlete) for athlete in range(5101, 5111)))
+
 
 async def _personal_tool_names() -> set[str]:
     async with create_connected_server_and_client_session(mcp_server) as session:
