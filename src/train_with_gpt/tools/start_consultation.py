@@ -16,7 +16,9 @@ from mcp.types import Tool, TextContent
 
 from ..config import config
 from ..helpers import (
+    HOSTED_SYNC_WARNING,
     NO_WELLNESS_DATA_MESSAGE,
+    PULLED_UPDATES_PREFIX,
     current_user_id,
     git_pull_and_read,
     user_scoped_goals_file,
@@ -100,9 +102,6 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
     )
 
 
-_PULLED_UPDATES = "Pulled updates from the remote"
-
-
 def _sync_fact(sync_note: Optional[str], hosted: bool) -> Optional[str]:
     """What to say about the repo sync. The "Pulled updates" summary lists every
     changed path in the (shared) repo - other users' goal/note files on the
@@ -111,11 +110,11 @@ def _sync_fact(sync_note: Optional[str], hosted: bool) -> Optional[str]:
     commits or paths) and verbatim on the personal path."""
     if not sync_note:
         return None
-    warnings = [part for part in sync_note.split("\n\n") if part and not part.startswith(_PULLED_UPDATES)]
+    warnings = [part for part in sync_note.split("\n\n") if part and not part.startswith(PULLED_UPDATES_PREFIX)]
     if not warnings:
         return None
     if hosted:
-        return "the notes storage couldn't be fully synced just now, so the goals/notes facts may be slightly out of date"
+        return HOSTED_SYNC_WARNING
     return " ".join(warnings)
 
 

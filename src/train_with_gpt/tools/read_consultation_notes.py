@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import current_user_id, git_pull_and_read, read_note_files, user_scoped_notes_dir, training_repo_not_configured_message
+from ..helpers import current_user_id, sync_note_for_caller,git_pull_and_read, read_note_files, user_scoped_notes_dir, training_repo_not_configured_message
 
 
 def read_consultation_notes_tool() -> Tool:
@@ -97,6 +97,7 @@ async def read_consultation_notes_handler(arguments: dict) -> list[TextContent]:
         content = "\n\n---\n\n".join(all_notes)
 
         # Add pull info if there were updates
+        pull_output = sync_note_for_caller(pull_output, current_user_id())
         if pull_output:
             content = f"_{pull_output}_\n\n{content}"
 

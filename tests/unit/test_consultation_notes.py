@@ -373,3 +373,59 @@ async def test_search_with_no_notes_yet(training_repo):
 
 async def test_search_without_repo_configured():
     assert NOT_CONFIGURED in text_of(await search_consultation_notes_handler({"query": "calf"}))
+
+
+# --- the sync summary never shows a hosted user other users' files --------------------
+
+READ_TOOLS = [param for param in REPO_TOOLS if not param.id.startswith("save_")]
+
+
+def _own_and_other_users_files() -> dict[str, str]:
+    """Goals and a note for synthetic user 2001 (the caller), and for 2002."""
+    return {
+        "goals/2001.md": "# Training Goals\nSub-50 10k\n",
+        "notes/2001/2024-01-15-08-00-00.md": "Easy run, calf felt fine.\n",
+        "goals/2002.md": "# Training Goals\nsomeone else\n",
+        "notes/2002/2024-01-16-08-00-00.md": "Someone else's calf note.\n",
+    }
+
+
+@pytest.mark.parametrize("handler, arguments", READ_TOOLS)
+async def test_hosted_read_tools_do_not_list_other_users_files_pulled_by_the_sync(
+    training_repo, git_remote, handler, arguments
+):
+    push_files(git_remote, _own_and_other_users_files())
+
+    with as_oauth_user("2001"):
+        output = text_of(await handler(arguments))
+
+    assert "2002" not in output
+    assert "Pulled updates" not in output
+    assert "calf" in output or "Sub-50" in output  # the caller's own data is still there
+
+
+@pytest.mark.parametrize("handler, arguments", READ_TOOLS)
+async def test_hosted_read_tools_keep_sync_failures_generic(training_repo, git_remote, tmp_path, handler, arguments):
+    push_files(git_remote, _own_and_other_users_files())
+    with as_oauth_user("2001"):
+        text_of(await handler(arguments))  # bring the caller's data into the clone
+    unreachable = tmp_path / "unreachable-remote.git"
+    git(training_repo, "remote", "set-url", "origin", str(unreachable))
+
+    with as_oauth_user("2001"):
+        output = text_of(await handler(arguments))
+
+    assert str(unreachable) not in output
+    assert "couldn't be fully synced" in output
+
+
+@pytest.mark.parametrize("handler, arguments", READ_TOOLS)
+async def test_personal_read_tools_still_show_the_sync_summary(training_repo, git_remote, handler, arguments):
+    push_files(git_remote, {
+        "goals.md": "# Training Goals\nSub-50 10k\n",
+        "notes/2024-01-15-08-00-00.md": "Easy run, calf felt fine.\n",
+    })
+
+    output = text_of(await handler(arguments))
+
+    assert "Pulled updates from the remote" in output
