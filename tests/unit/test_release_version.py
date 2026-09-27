@@ -81,14 +81,16 @@ def commit(repo: Path, name: str) -> str:
     return git(repo, "rev-parse", "HEAD").strip()
 
 
-def run(repo: Path, labels: dict, *args: str, output: Path = None):
+def run(repo: Path, labels: dict, *args: str, output: Path = None, releases: dict = None):
     labels_file = repo.parent / "labels.json"
     labels_file.write_text(json.dumps(labels))
+    releases_file = repo.parent / "releases.json"
+    releases_file.write_text(json.dumps(releases or {}))
     env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
     if output:
         env["GITHUB_OUTPUT"] = str(output)
     return subprocess.run(
-        [sys.executable, str(SCRIPT), "--labels-json", str(labels_file), *args],
+        [sys.executable, str(SCRIPT), "--labels-json", str(labels_file), "--releases-json", str(releases_file), *args],
         cwd=repo, env=env, capture_output=True, text=True, timeout=30,
     )
 
@@ -145,12 +147,12 @@ def test_all_skipped_changes_release_nothing(repo):
     assert "release=false" in result.stdout
 
 
-def test_already_tagged_head_is_a_no_op(repo, tmp_path):
+def test_head_released_by_this_workflow_is_a_no_op(repo, tmp_path):
     commit(repo, "a")
     git(repo, "tag", "v0.1.0")
     out = tmp_path / "gh_output"
 
-    result = run(repo, {}, output=out)
+    result = run(repo, {}, output=out, releases={"v0.1.0": "github-actions[bot]"})
 
     assert result.returncode == 0
     assert "release=false version=v0.1.0" in result.stdout
@@ -181,3 +183,38 @@ def test_tags_not_reachable_from_head_are_ignored(repo):
     result = run(repo, {head: []})
 
     assert "version=v0.1.1" in result.stdout
+
+
+@pytest.mark.parametrize("author, made_by", [(None, "with no GitHub Release"), ("someone", "published by someone")])
+def test_head_tagged_outside_the_workflow_is_an_error(repo, tmp_path, author, made_by):
+    """E.g. "Draft a new release" on main's head: never tested, so don't treat it as released."""
+    commit(repo, "a")
+    git(repo, "tag", "v0.2.0")
+    out = tmp_path / "gh_output"
+
+    result = run(repo, {}, output=out, releases={"v0.2.0": author})
+
+    assert result.returncode == 1
+    assert f"is tagged v0.2.0 {made_by}, not by this workflow" in result.stderr
+    assert "Delete the release and the tag v0.2.0" in result.stderr
+    assert not out.exists()
+
+
+def test_first_release_counts_earlier_unreleased_changes(repo):
+    """No tag yet, an unlabelled PR whose run was superseded, then a release:skip PR."""
+    earlier = commit(repo, "a")
+    head = commit(repo, "b")
+
+    result = run(repo, {earlier: [], head: ["release:skip"]})
+
+    assert result.returncode == 0, result.stderr
+    assert "release=true version=v0.1.0 (first release)" in result.stdout
+
+
+def test_first_release_skipped_when_every_change_is_skipped(repo):
+    first = commit(repo, "a")
+    head = commit(repo, "b")
+
+    result = run(repo, {first: ["skip-release"], head: ["release:skip"]})
+
+    assert "release=false" in result.stdout

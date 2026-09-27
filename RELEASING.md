@@ -27,7 +27,7 @@ Versions are SemVer tags `vX.Y.Z`. Label the PR before merging it:
 - If several PRs are merged before a release runs, the largest bump among them wins.
 - A direct push to `main` (no PR) counts as a patch.
 - The very first release is `v0.1.0`.
-- A commit that already has a tag is never released twice, so re-running the workflow is safe.
+- A commit this workflow already released is never released twice, so re-running the workflow is safe.
 - Pre-release tags (`-rc.1` and the like) aren't supported.
 
 ## Releasing by hand, from the GitHub UI
@@ -42,9 +42,10 @@ This releases `main`'s current head, after running the tests. It does
 nothing if that commit is already released.
 
 **Don't use "Draft a new release" on the Releases page.** It publishes
-without running the tests, and the tag it creates can clash with the next
-automatic release. If one was made by mistake, delete that release and its
-tag, then re-run the workflow.
+without running the tests. The workflow refuses to accept a tag it didn't
+create: it fails on the tagged commit, and on a tag that collides with the
+next version. If one was made by mistake, delete that release and its tag,
+then re-run the workflow.
 
 Never move or delete a tag that has been deployed. Deployments pin tags, so
 ship a fix as the next patch instead.
