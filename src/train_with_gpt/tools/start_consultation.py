@@ -120,6 +120,11 @@ def _sync_fact(sync_note: Optional[str], hosted: bool) -> Optional[str]:
     return " ".join(warnings)
 
 
+def _intervals_key_missing(data_client) -> bool:
+    """A local install without INTERVALS_API_KEY: every intervals.icu call would fail."""
+    return isinstance(data_client, IntervalsClient) and not data_client.api_key
+
+
 def _facts_section(data_client, wellness_client, history: TrainingHistory, hosted: bool) -> str:
     activities = "Strava" if isinstance(data_client, StravaClient) else "intervals.icu"
     wellness = (
@@ -130,8 +135,7 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
         f"- **Activities source:** {activities}",
         f"- **Recovery data (sleep, HRV, resting HR):** {wellness}",
     ]
-    if isinstance(data_client, IntervalsClient) and not data_client.api_key:
-        # A local install without a key: every intervals.icu call would fail.
+    if _intervals_key_missing(data_client):
         lines = [
             "- **Activities and recovery data (intervals.icu):** no API key is configured, so "
             "get_activities, analyze_activity and the sleep/HRV/resting-HR tools will fail. Tell "
@@ -235,6 +239,15 @@ def _data_sources_section(data_client, wellness_client) -> str:
     (server.py), so hosted users see Strava and stdio users intervals.icu, and
     wellness data is described only when a wellness source is connected.
     """
+    if _intervals_key_missing(data_client):
+        return """## Available Data Sources
+
+**None right now:** intervals.icu has no API key on this install (see the facts
+above), so skip every get_activities, analyze_activity, analyze_lap, get_sleep_data,
+get_hrv_data and get_resting_heart_rate step in the paths below. Ask the athlete
+about their recent training instead, and remind them to set INTERVALS_API_KEY.
+
+"""
     activities_source = "Strava" if isinstance(data_client, StravaClient) else "intervals.icu"
     section = f"""## Available Data Sources
 

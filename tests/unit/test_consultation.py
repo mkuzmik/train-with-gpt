@@ -250,6 +250,11 @@ async def test_stdio_without_an_intervals_key_is_not_reported_as_connected(monke
     assert "connected (intervals.icu)" not in output
     assert "INTERVALS_API_KEY" in output
     assert "no API key is configured" in output
+    # The data-sources guidance doesn't advertise the tools that would fail...
+    assert "**Recovery Metrics (intervals.icu wellness data):**" not in output
+    assert "**Training Activities (intervals.icu):**" not in output
+    # ...and tells the model to skip the paths' activity steps.
+    assert "skip every get_activities" in output
 
 
 # The intervals.icu page after the Strava login only exists when the server

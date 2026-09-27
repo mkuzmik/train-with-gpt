@@ -110,7 +110,7 @@ def test_hosted_start_consultation_with_intervals_connected(login, http_mock):
 
 
 async def test_stdio_start_consultation_names_intervals(stdio_env):
-    async with StdioServer(stdio_env) as session:
+    async with StdioServer({**stdio_env, "INTERVALS_API_KEY": "synthetic-key"}) as session:
         output = _text(await session.call_tool("start_consultation", {}))
 
     assert "**Training Activities (intervals.icu):**" in output
