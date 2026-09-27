@@ -520,4 +520,17 @@ async def test_a_failed_sync_qualifies_the_included_profile(training_repo, git_r
 
     assert "Made-up runner" in output  # still shown, from the local copy
     assert "the profile text above) come from a possibly out-of-date copy" in output
-    assert "don't save a new profile over it" in output
+    assert "Don't build or save an athlete profile in this chat" in output
+
+
+async def test_a_failed_sync_never_offers_to_build_a_profile(training_repo, git_remote, tmp_path):
+    from tests.support import git
+    push_files(git_remote, {"goals.md": "# Training Goals\nSub-50 10k\n", "notes/2026-01-05-07-00-00.md": NOTE})
+    git(training_repo, "pull", "--quiet")
+    git(training_repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    output = await _start()
+
+    assert "- **Athlete profile:** none" in output
+    assert "No athlete profile yet" not in output
+    assert "Don't build or save an athlete profile in this chat" in output

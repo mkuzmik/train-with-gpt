@@ -233,3 +233,11 @@ async def test_missing_profile_after_a_failed_sync_keeps_the_warning(training_re
 async def test_hosted_user_without_repo_is_told_the_profile_is_unavailable_too():
     with as_oauth_user("1005"):
         assert "the athlete profile" in await _read()
+
+
+async def test_save_description_allows_health_patterns_but_not_raw_panels():
+    from train_with_gpt.tools import save_athlete_profile_tool
+
+    description = save_athlete_profile_tool().description
+    assert "no raw lab values" not in description
+    assert "recurring patterns such as" in description and "no raw lab panels" in description

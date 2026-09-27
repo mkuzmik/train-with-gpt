@@ -221,7 +221,8 @@ def _choose_path_section(history: TrainingHistory) -> str:
         hint = (
             "**Here the notes storage couldn't be synced just now**, so the goals/profile/notes facts "
             "(and the profile text above) come from a possibly out-of-date copy and may miss what "
-            "was saved from another device; don't save a new profile over it in this chat. "
+            "was saved from another device. Don't build or save an athlete profile in this chat "
+            "(it could overwrite one saved elsewhere); that overrides the profile steps below. "
             "Don't treat them as final: if they show no history, ask ONE question (first time "
             "with this coach, or worked together before?) before onboarding; if they show "
             "history, it's a returning athlete (Path B)."
@@ -249,7 +250,8 @@ def _choose_path_section(history: TrainingHistory) -> str:
             "they want to pick up where they left off or first hear what the coach can do; "
             "either way stay in Path B and build on the saved goals."
         )
-    if history.storage == "ok" and not history.has_profile and (history.has_goals or history.notes_count):
+    if (history.storage == "ok" and history.synced and not history.has_profile
+            and (history.has_goals or history.notes_count)):
         hint += (
             " **No athlete profile yet:** once the athlete's first question is dealt with, "
             "offer to build one (**build_athlete_profile**). Offer, don't force it; if they "
