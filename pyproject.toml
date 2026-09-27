@@ -1,5 +1,7 @@
 [project]
 name = "train-with-gpt"
+# Placeholder, never bumped: releases are git tags vX.Y.Z (RELEASING.md), and
+# builds get theirs from the TRAIN_WITH_GPT_VERSION build arg.
 version = "0.1.0"
 description = "MCP server for training analysis and coaching suggestions (backed by intervals.icu)"
 requires-python = ">=3.10"

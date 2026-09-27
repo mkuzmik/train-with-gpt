@@ -31,7 +31,9 @@ def by_name(report):
 
 @pytest.fixture
 def git_sha(monkeypatch):
+    """A labelled build: the commit and the release tag (TRAIN_WITH_GPT_VERSION)."""
     monkeypatch.setenv("GIT_SHA", "abc1234")
+    monkeypatch.setenv("TRAIN_WITH_GPT_VERSION", "v9.8.7")
 
 
 @pytest.fixture
@@ -70,14 +72,13 @@ async def test_all_checks_pass(intervals_ok, training_repo, git_remote, git_sha)
     assert "wellness: data returned" in checks["Data reads"].detail
     assert "clean" in checks["Repo read"].detail and "at origin/main" in checks["Repo read"].detail
     assert "verified on origin/main" in checks["Repo write"].detail
-    version = importlib.metadata.version("train-with-gpt")
-    assert checks["Build info"].detail.startswith(f"train-with-gpt {version}; GIT_SHA abc1234; ")
+    assert checks["Build info"].detail.startswith("train-with-gpt v9.8.7; GIT_SHA abc1234; ")
     assert "mcp " in checks["Build info"].detail
     assert "self_test" in checks["Tools registered"].detail and "save_goals" in checks["Tools registered"].detail
 
     marker = remote_file(git_remote, "selftest/local.md")
     assert f"run_id: {report.run_id}" in marker and "git_sha: abc1234" in marker
-    assert f"version: {version}" in marker
+    assert "version: v9.8.7" in marker
 
     output = format_report(report)
     assert output.startswith("## Self-test: PASS\n")
@@ -101,6 +102,19 @@ async def test_missing_git_sha_is_a_warning(intervals_ok, training_repo, monkeyp
     assert "GIT_SHA unknown" in by_name(report)["Build info"].detail
     assert not report.failed
     assert format_report(report).startswith("## Self-test: PASS with 1 warning(s)")
+
+
+async def test_missing_release_version_is_a_warning(intervals_ok, training_repo, monkeypatch):
+    monkeypatch.setenv("GIT_SHA", "abc1234")
+    monkeypatch.delenv("TRAIN_WITH_GPT_VERSION", raising=False)
+
+    report = await run_self_test(None)
+
+    build = by_name(report)["Build info"]
+    assert build.status == WARN
+    placeholder = importlib.metadata.version("train-with-gpt")
+    assert build.detail.startswith(f"train-with-gpt {placeholder}+dev; GIT_SHA abc1234; ")
+    assert not report.failed
 
 
 # --- data source -----------------------------------------------------------------
