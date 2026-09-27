@@ -1,43 +1,10 @@
 # CLAUDE.md
 
-Guidance for Claude Code (and other coding agents) working in this repository.
-
-## What this is
-
-`train-with-gpt` is an MCP server for training analysis and coaching
-conversations. It runs in two modes:
-
-- **Local stdio** (`train-with-gpt`): single user, data from intervals.icu via a
-  personal API key; notes and goals live in a local git repo.
-- **Hosted HTTP** (`train-with-gpt-http`): multi-user. Our own OAuth
-  authorization server (`oauth_provider.py`) delegates sign-in to Strava
-  (`strava_oauth.py`); per-user notes and goals are stored in a shared git repo
-  cloned at startup (`docker-entrypoint.sh`).
-
-Tools live in `src/train_with_gpt/tools/` and are registered in
-`tools/__init__.py` and `server.py`. Git-backed notes use the helpers in
-`helpers.py` (`git_pull_and_read`, `git_save_file`, per-repo lock) — reuse
-them rather than adding new sync code. `self_test.py` is the post-deploy smoke
-test (the `self_test` tool, the `self-test` prompt, and the
-`train-with-gpt-selftest` CLI); keep its `READ_ONLY_TOOLS`/`WRITE_TOOLS`
-classification in sync when adding or removing tools.
-
-## Commands
-
-```bash
-uv sync                 # install
-uv run pytest -q        # full suite; run it twice before pushing
-uv lock --check         # CI enforces this whenever uv.lock changes
-```
-
-- `tests/unit`: minimal mocking.
-- `tests/integration`: black-box through the real stdio subprocess / HTTP app,
-  with only external services (Strava, intervals.icu, git remotes) stubbed.
-- Tool-count and tool-list assertions exist per transport (stdio vs hosted) —
-  update them when tools change.
-- CI (`.github/workflows/test.yml`) runs Python 3.10–3.14, only on pushes and
-  PRs targeting `main`. PRs stacked on other branches get no CI.
-- Releases: see `RELEASING.md`.
+**`README.md` is the source of truth** for what this project is, how it's
+structured, how to build, test, release and self-host it, and how to add
+tools. Read the relevant sections before working, and keep the README current
+when you change any of that — don't duplicate it here. This file only adds the
+rules and working conventions that the README doesn't cover.
 
 ## Hard rules
 
@@ -59,7 +26,7 @@ uv lock --check         # CI enforces this whenever uv.lock changes
 - **Strava API policy** (API Agreement effective 2026-06-01, §5.3/§5.16
   restrict Strava data in AI apps / MCP servers): do not add new processing,
   aggregation, storage or caching of Strava data. New data features go on the
-  intervals.icu path. See the open proposal on moving hosted login off Strava.
+  intervals.icu path.
 - Never merge PRs and never deploy — the maintainer does that.
 
 ## How work is organised
@@ -69,15 +36,12 @@ uv lock --check         # CI enforces this whenever uv.lock changes
   shared across worktrees: never use a bare `git stash`/`git stash pop`
   (prefer a WIP commit).
 - **Ideas and proposals** start as a *draft* PR with a design doc in
-  `docs/ideas/`. Implementation of an idea is phased; implement only the
-  phase that was asked for, and update the doc when the implementation
-  diverges.
+  `docs/ideas/`. Implement only the phase that was asked for, and update the
+  doc when the implementation diverges.
 - **Bug fixes**: write the failing test first, confirm it fails without the
   fix, then fix.
-- Keep edits to shared files (`server.py`, `tools/__init__.py`,
-  `start_consultation.py`, README) small and localised; several PRs are often
+- Keep edits to widely shared files small and localised; several PRs are often
   in flight at once.
-- Update the README wherever users are affected.
 
 ### PR descriptions
 
@@ -93,18 +57,14 @@ uv lock --check         # CI enforces this whenever uv.lock changes
 
 After pushing a PR that's ready for review:
 
-1. Request a Copilot review:
-   `gh pr edit <N> --add-reviewer @copilot`
-   (fallback: `gh api -X POST repos/{owner}/{repo}/pulls/<N>/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]'`).
+1. Request a Copilot review (`gh pr edit <N> --add-reviewer @copilot`).
 2. Poll every few minutes for a review on the latest head commit.
 3. Evaluate **every** finding — inline comments *and* items that appear only in
-   the review body (e.g. "Previously missed" / low-confidence notes). Check
-   each against the code:
+   the review body (e.g. "Previously missed" / low-confidence notes):
    - valid → fix it, with a test that fails without the fix;
    - not valid → explain why.
-4. Reply on each inline thread with the fixing commit or the reasoning
-   (`gh api repos/{owner}/{repo}/pulls/<N>/comments/<id>/replies -f body=...`);
-   answer body-only items with `gh pr comment`.
+4. Reply on each inline thread with the fixing commit or the reasoning;
+   answer body-only items with a PR comment.
 5. Push without force, re-request the review, repeat. Stop when a round has
    no new valid findings, or after 4 rounds (then list what's left in the PR).
-6. Confirm CI is green (`gh pr checks <N>`).
+6. Confirm CI is green.
