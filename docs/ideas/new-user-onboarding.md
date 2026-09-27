@@ -138,7 +138,10 @@ call a goals/notes tool (they'd only return the same error): goals are
 talked through and summarized in the chat instead of saved. The git sync's
 "pulled updates" file list is never shown (on the hosted server it would
 name other users' files); a sync warning is shown verbatim on stdio and as a
-generic "may be out of date" line to OAuth users.
+generic "may be out of date" line to OAuth users. Likewise an OAuth user's
+"storage unavailable" fact carries no error detail (server paths, git output),
+and `read_goals` and the three notes read/list/search tools follow the same
+rule for the sync note they prepend.
 
 **How the path is chosen.** The guidance gives both paths and says the model
 chooses from the facts and the athlete's message, asking one short question
