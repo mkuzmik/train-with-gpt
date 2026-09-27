@@ -186,10 +186,11 @@ public; set them in your platform's secret store.
   so you know exactly what runs:
   ```bash
   git checkout v0.1.0
-  docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t train-with-gpt .
+  docker build --build-arg TRAIN_WITH_GPT_VERSION=v0.1.0 \
+               --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t train-with-gpt .
   ```
-  `GIT_SHA` is optional; the self-test shows it next to the package version
-  (and warns when it's missing).
+  Both build args are optional; the self-test shows them (and warns when
+  either is missing).
 - **HTTPS.** A public `https://` URL whose TLS proxy forwards to the container
   port (`PORT`, default `8000`). OAuth clients (claude.ai, `mcp-remote`) require
   an HTTPS issuer for anything but `localhost`. Set `PUBLIC_URL` to exactly
@@ -219,6 +220,7 @@ public; set them in your platform's secret store.
 | `STRAVA_CLIENT_SECRET` | secret | yes | Strava OAuth app secret. |
 | `TRAINING_CONTEXT_DEPLOY_KEY` | secret | yes | Private SSH deploy key with write access to the notes repo, with its real newlines. Or mount it as a file at `/run/secrets/training_context_deploy_key`. |
 | `TOKEN_ENCRYPTION_KEY` | secret | no | Fernet key encrypting users' intervals.icu keys; turns on the optional intervals.icu step at login. Changing it makes stored keys unreadable. |
+| `TRAIN_WITH_GPT_VERSION` | build arg | no | Release tag shown by the self-test, e.g. `v0.1.0`. |
 | `GIT_SHA` | build arg | no | Commit shown by the self-test. |
 
 The Strava and encryption settings can instead come from a `config.json`
@@ -284,8 +286,8 @@ for one user and prints a PASS/WARN/FAIL table:
    it syncs the repo like a normal save: the pull can bring in remote changes
    to them, and the marker push also pushes any commits already pending in the
    clone.
-5. **Build info**: package version, `GIT_SHA`, uptime, Python and `mcp`
-   versions.
+5. **Build info**: release version (`TRAIN_WITH_GPT_VERSION`), `GIT_SHA`,
+   uptime, Python and `mcp` versions.
 6. **Tools registered**: the tool names the server exposes.
 
 **From Claude** (claude.ai, mobile or Desktop): say *"Run the Train with GPT
@@ -539,8 +541,10 @@ The CI pipeline tests against Python 3.10 through 3.14, running the unit and int
 
 ### Releasing
 
-Releases are `vX.Y.Z` tags matching the `pyproject.toml` version; pushing one
-runs the tests and publishes a GitHub Release. See [RELEASING.md](RELEASING.md).
+Merging a PR into `main` releases it: the tests run, then the commit gets the
+next `vX.Y.Z` tag and a GitHub Release. Label the PR `release:minor` or
+`release:major` for a bigger bump than patch, or `release:skip` for none.
+Manual releases: Actions → Release → Run workflow. See [RELEASING.md](RELEASING.md).
 
 ### Writing Tests
 

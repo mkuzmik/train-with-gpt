@@ -1,49 +1,69 @@
 # Releasing
 
-Releases are SemVer tags `vX.Y.Z` on `main`. The version in `pyproject.toml`
-is the single source of truth: the tag must be exactly `v` + that version.
-Pre-release tags (`-rc.1` and the like) aren't supported.
+**Merging a PR into `main` releases it.** The `Release` workflow
+(`.github/workflows/release.yml`) runs on every push to `main`:
 
-1. **Bump the version** in a PR. Skip this step only when the current
-   `pyproject.toml` version has never been tagged, as with the first release
-   (`v0.1.0`), and tag the current `main` directly. Otherwise pick the next version (MAJOR for breaking
-   changes to tools, config or deployment; MINOR for new features; PATCH for
-   fixes), then:
+1. It works out the next version from the latest `vX.Y.Z` tag and the labels
+   of the PRs merged since then (`scripts/release_version.py`).
+2. It runs the full test suite on that exact commit (the same `Tests`
+   workflow as CI).
+3. It creates the tag on that commit and a GitHub Release with generated
+   notes (the PRs merged since the previous release).
 
-   ```bash
-   # edit [project] version in pyproject.toml, e.g. 0.2.0
-   uv lock                      # uv.lock records the project version too
-   git commit -am "Release 0.2.0"
-   ```
+If the tests fail, nothing is tagged. Fix it in a new PR; the next merge
+releases everything since the last tag.
 
-   Open the PR, let CI pass (it runs `uv lock --check`), merge it.
+## Choosing the version: PR labels
 
-2. **Tag the merge commit** and push the tag:
+Versions are SemVer tags `vX.Y.Z`. Label the PR before merging it:
 
-   ```bash
-   git fetch origin
-   git tag -a v0.2.0 -m "v0.2.0" <merge commit sha on origin/main>
-   git push origin v0.2.0
-   ```
+| Label | Effect |
+|---|---|
+| *(none)* | patch: `v0.3.1` → `v0.3.2` |
+| `release:minor` | minor: `v0.3.1` → `v0.4.0` (new features) |
+| `release:major` | major: `v0.3.1` → `v1.0.0` (breaking changes to tools, config or deployment) |
+| `release:skip` or `skip-release` | no release for this PR (docs, CI tweaks). Its changes ship with the next release |
 
-3. **The `Release` workflow** (`.github/workflows/release.yml`) then:
-   - checks the tag matches `pyproject.toml` (`scripts/check_release_tag.py`)
-     and that the tagged commit is on `main`;
-   - runs the full test suite (the same `Tests` workflow as CI);
-   - creates a GitHub Release with generated notes (merged PRs since the
-     previous tag).
+- If several PRs are merged before a release runs, the largest bump among them wins.
+- A direct push to `main` (no PR) counts as a patch.
+- The very first release is `v0.1.0`.
+- A commit this workflow already released is never released twice, so re-running the workflow is safe.
+- Pre-release tags (`-rc.1` and the like) aren't supported.
 
-   If a check fails, no release is created. Delete the tag
-   (`git push --delete origin v0.2.0 && git tag -d v0.2.0`), fix the problem
-   in a new PR and tag again. Never move a tag that already has a release:
-   deployments pin tags, so cut a new PATCH version instead.
+## Releasing by hand, from the GitHub UI
 
-## Which version is running?
+Go to **Actions → Release → Run workflow**, keep the branch on `main`, and
+pick a bump:
 
-The server reports its package version and the commit it was built from in
-the self-test's **Build info** check (`train-with-gpt 0.2.0; GIT_SHA
-abc1234; ...`). Pass the commit when building the image:
+- `auto`: from the labels, but always at least a patch.
+- `patch`, `minor` or `major`.
+
+This releases `main`'s current head, after running the tests. It does
+nothing if that commit is already released.
+
+**Don't use "Draft a new release" on the Releases page.** It publishes
+without running the tests. The workflow refuses to accept a tag it didn't
+create: it fails on the tagged commit, and on a tag that collides with the
+next version. If one was made by mistake, delete that release and its tag,
+then re-run the workflow.
+
+Never move or delete a tag that has been deployed. Deployments pin tags, so
+ship a fix as the next patch instead.
+
+## Where the version lives
+
+Git tags are the only source of truth. The `version` in `pyproject.toml` is
+a fixed placeholder: it is never bumped, so releases don't touch `uv.lock`
+and need no bot commits to `main`.
+
+A build learns its version from the `TRAIN_WITH_GPT_VERSION` build arg. The
+self-test's **Build info** check shows it together with the commit
+(`train-with-gpt v0.2.0; GIT_SHA abc1234; ...`). If the build arg is
+missing, the check shows `<placeholder>+dev` and a warning. To build a
+release image:
 
 ```bash
-docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) .
+git checkout v0.2.0
+docker build --build-arg TRAIN_WITH_GPT_VERSION=v0.2.0 \
+             --build-arg GIT_SHA=$(git rev-parse --short HEAD) .
 ```
