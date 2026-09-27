@@ -155,8 +155,9 @@ def plan(head: str, bump: str, repo: Optional[str], labels_json: Optional[dict] 
 
     on_head = [t for t in _git("tag", "--points-at", head).split() if parse_tag(t)]
     if on_head:
+        for tag in sorted(on_head, key=parse_tag):
+            require_workflow_release(tag)
         tag = max(on_head, key=parse_tag)
-        require_workflow_release(tag)
         return {"release": False, "version": tag, "reason": f"{head[:7]} is already released as {tag}"}
 
     tags = [t for t in _git("tag", "--list", "v*", "--merged", head).split() if parse_tag(t)]

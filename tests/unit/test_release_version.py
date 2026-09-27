@@ -213,6 +213,18 @@ def test_first_release_counts_earlier_unreleased_changes(repo):
     assert "release=true version=v0.1.0 (first release)" in result.stdout
 
 
+def test_any_hand_made_tag_on_head_is_an_error(repo):
+    """A workflow release on the head doesn't excuse a second, hand-made tag there."""
+    commit(repo, "a")
+    git(repo, "tag", "v0.2.0")
+    git(repo, "tag", "v0.1.9")
+
+    result = run(repo, {}, releases={"v0.2.0": "github-actions[bot]", "v0.1.9": None})
+
+    assert result.returncode == 1
+    assert "is tagged v0.1.9 with no GitHub Release, not by this workflow" in result.stderr
+
+
 def test_hand_made_baseline_tag_is_an_error(repo, tmp_path):
     """A hand-made tag on an older main commit must not become the version baseline."""
     commit(repo, "a")
