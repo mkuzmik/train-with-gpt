@@ -1,4 +1,4 @@
-"""Unit tests for the goals tools (discuss_goals, save_goals, read_goals).
+"""Unit tests for the goals tools (save_goals, read_goals).
 
 save/read run against a real git clone of a local bare remote.
 """
@@ -15,17 +15,9 @@ from tests.support import (
     text_of,
 )
 from train_with_gpt.config import config
-from train_with_gpt.tools import discuss_goals_handler, read_goals_handler, save_goals_handler
+from train_with_gpt.tools import read_goals_handler, save_goals_handler
 
 GOALS = "## Marathon Goal\n- Run under 4 hours\n- Build to 60km/week"
-
-
-async def test_discuss_goals_returns_the_framework():
-    output = text_of(await discuss_goals_handler({}))
-
-    assert output.startswith("# Training Goal Setting Framework")
-    assert "ASK ONE QUESTION AT A TIME" in output
-    assert "save_goals" in output
 
 
 async def test_save_goals_writes_commits_and_pushes(training_repo, git_remote):

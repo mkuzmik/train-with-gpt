@@ -41,6 +41,28 @@ def user_scoped_goals_file(repo_path: Path, user_id: Optional[str]) -> tuple[Pat
     return repo_path / "goals.md", "goals.md"
 
 
+def training_repo_not_configured_message() -> str:
+    """
+    The "no training repository configured" error, worded for who is asking.
+
+    Personal (stdio / local-HTTP) users can fix it themselves with
+    setup_training_repo. OAuth'd users can't: the repository is server
+    configuration, and setup_training_repo is hidden from (and refuses) them.
+    """
+    if current_user_id():
+        return (
+            "❌ Error: This server's notes storage isn't set up, so goals and consultation "
+            "notes can't be read or saved yet.\n\n"
+            "It's configured by whoever runs the server, not from the chat: please contact "
+            "the server's operator. Activity data still works in the meantime."
+        )
+    return (
+        "❌ Error: Training repository not configured.\n\n"
+        "Please use **setup_training_repo** first to set the location of your training "
+        "notes repository."
+    )
+
+
 NO_WELLNESS_DATA_MESSAGE = (
     "ℹ️ Wellness data (sleep, HRV, resting heart rate) isn't available: Strava has no "
     "wellness data. To add it, connect intervals.icu: disconnect and reconnect this "
@@ -208,7 +230,7 @@ def _sync_with_remote(repo_path: Path) -> tuple[Optional[str], Optional[str]]:
         if not changed:
             return None, warning
         shown = ", ".join(changed[:10]) + (f" and {len(changed) - 10} more" if len(changed) > 10 else "")
-        return f"Pulled updates from the remote: {shown}", warning
+        return f"{PULLED_UPDATES_PREFIX}: {shown}", warning
 
     _git(repo_path, "rebase", "--abort")
     error = _output(rebase)
@@ -260,6 +282,26 @@ def git_pull_and_read(repo_path: Path, read: Callable[[], T]) -> tuple[Optional[
 def git_pull(repo_path: Path) -> Optional[str]:
     """Sync the training repo with its remote; returns a note for the user, or None."""
     return git_pull_and_read(repo_path, lambda: None)[0]
+
+
+PULLED_UPDATES_PREFIX = "Pulled updates from the remote"
+HOSTED_SYNC_WARNING = (
+    "the notes storage couldn't be fully synced just now, so goals and notes may be slightly out of date"
+)
+
+
+def sync_note_for_caller(note: Optional[str], user_id: Optional[str]) -> Optional[str]:
+    """
+    The part of a git_pull_and_read note that the caller may see. On the
+    personal (stdio) path, all of it. On the hosted server the repo is shared:
+    the "Pulled updates" list names other users' goal/note files, and sync
+    errors can carry server paths or other users' paths, so an OAuth user gets
+    no update list and only a generic line when something went wrong.
+    """
+    if not note or not user_id:
+        return note
+    warnings = [part for part in note.split("\n\n") if part and not part.startswith(PULLED_UPDATES_PREFIX)]
+    return HOSTED_SYNC_WARNING if warnings else None
 
 
 def read_note_files(notes_dir: Path) -> list[tuple[str, str]]:

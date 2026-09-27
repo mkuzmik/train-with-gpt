@@ -30,8 +30,6 @@ from .tools import (
     analyze_activity_handler,
     analyze_lap_tool,
     analyze_lap_handler,
-    discuss_goals_tool,
-    discuss_goals_handler,
     save_goals_tool,
     save_goals_handler,
     read_goals_tool,
@@ -131,7 +129,7 @@ def wellness_client_for(user_id: Optional[str]):
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available tools."""
-    return [
+    tools = [
         start_consultation_tool(),
         get_current_date_tool(),
         get_activities_tool(),
@@ -141,7 +139,6 @@ async def list_tools() -> list[Tool]:
         analyze_activity_tool(),
         analyze_lap_tool(),
         setup_training_repo_tool(),
-        discuss_goals_tool(),
         save_goals_tool(),
         read_goals_tool(),
         save_consultation_notes_tool(),
@@ -150,6 +147,12 @@ async def list_tools() -> list[Tool]:
         search_consultation_notes_tool(),
         self_test_tool(),
     ]
+    # For OAuth'd users the training repo is server configuration (the handler
+    # refuses them), so don't offer the tool. The bearer token is in context
+    # for tools/list too. Clients with a cached tool list still get the refusal.
+    if current_user_id():
+        tools = [tool for tool in tools if tool.name != "setup_training_repo"]
+    return tools
 
 
 @app.call_tool()
@@ -158,7 +161,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "setup_training_repo":
         return await setup_training_repo_handler(arguments)
     elif name == "start_consultation":
-        return await start_consultation_handler(arguments)
+        return await start_consultation_handler(arguments, _get_active_data_client(), _get_wellness_client())
     elif name == "get_current_date":
         return await get_current_date_handler(arguments)
     elif name == "get_activities":
@@ -173,8 +176,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await analyze_activity_handler(arguments, _get_active_data_client())
     elif name == "analyze_lap":
         return await analyze_lap_handler(arguments, _get_active_data_client())
-    elif name == "discuss_goals":
-        return await discuss_goals_handler(arguments)
     elif name == "save_goals":
         return await save_goals_handler(arguments)
     elif name == "read_goals":
