@@ -14,6 +14,7 @@ from typing import Optional
 
 from mcp.types import Tool, TextContent
 
+from .. import secret_box
 from ..config import config
 from ..helpers import (
     HOSTED_SYNC_WARNING,
@@ -234,10 +235,18 @@ def _data_sources_section(data_client, wellness_client) -> str:
 
 """
     if isinstance(wellness_client, StravaClient):
+        if secret_box.is_configured():
+            how_to_add = f"you can tell them how to add it: {NO_WELLNESS_DATA_MESSAGE}"
+        else:
+            # Without TOKEN_ENCRYPTION_KEY the login has no intervals.icu page.
+            how_to_add = (
+                "tell them this server doesn't offer connecting intervals.icu right now; "
+                "they can ask the server's operator about it."
+            )
         section += f"""**Recovery Metrics: not connected.** Sleep, HRV and resting heart rate aren't
 available for this athlete, so don't call get_sleep_data, get_hrv_data or
 get_resting_heart_rate. Rely on how the athlete says they feel. If recovery
-comes up, you can tell them how to add it: {NO_WELLNESS_DATA_MESSAGE}
+comes up, {how_to_add}
 
 **When Analyzing Activities:**
 - Use get_activities to see recent training patterns

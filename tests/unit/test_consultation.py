@@ -241,6 +241,29 @@ async def test_storage_error_degrades_gracefully(training_repo, monkeypatch):
     assert "the server can't tell" in output
 
 
+# The intervals.icu page after the Strava login only exists when the server
+# can encrypt the key (TOKEN_ENCRYPTION_KEY); without it, reconnecting can't help.
+async def test_hosted_without_the_intervals_step_does_not_suggest_reconnecting(monkeypatch):
+    from train_with_gpt.config import config
+    monkeypatch.setattr(config, "token_encryption_key", None)
+
+    output = await _start(_strava, _strava)
+
+    assert "**Recovery Metrics: not connected.**" in output
+    assert "reconnect" not in output
+    assert "operator" in output
+
+
+async def test_hosted_with_the_intervals_step_explains_how_to_connect(monkeypatch):
+    from cryptography.fernet import Fernet
+    from train_with_gpt.config import config
+    monkeypatch.setattr(config, "token_encryption_key", Fernet.generate_key().decode())
+
+    output = await _start(_strava, _strava)
+
+    assert "disconnect and reconnect this connector" in output
+
+
 # Hosted users share the server's notes repo: a storage error's detail (server
 # paths, git output naming other users' files) stays in the server log.
 @pytest.mark.parametrize("breakage", ["missing", "not_git", "sync_error"])
