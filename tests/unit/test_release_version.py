@@ -64,6 +64,25 @@ def test_next_version(latest, bump, expected):
     assert rv.next_version(latest, bump) == expected
 
 
+def _pr(number, merge_sha, labels, merged=True):
+    return {"number": number, "merged_at": "2026-01-01T00:00:00Z" if merged else None,
+            "merge_commit_sha": merge_sha, "labels": [{"name": l} for l in labels]}
+
+
+def test_labels_come_from_the_pr_that_merged_the_commit():
+    pulls = [_pr(7, "other", ["release:skip"]), _pr(8, "abc", ["release:minor"])]
+
+    assert rv.labels_from_pulls(pulls, "abc") == ["release:minor"]
+
+
+def test_a_commit_merely_contained_in_a_pr_is_a_direct_push():
+    """E.g. a direct push later included in another PR: don't borrow that PR's labels."""
+    pulls = [_pr(9, "later-merge", ["release:skip"]), _pr(10, "abc", ["release:major"], merged=False)]
+
+    assert rv.labels_from_pulls(pulls, "abc") is None
+    assert rv.labels_from_pulls([], "abc") is None
+
+
 # --- CLI against a real repo -------------------------------------------------------
 
 @pytest.fixture

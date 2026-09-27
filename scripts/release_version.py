@@ -107,10 +107,19 @@ def _pr_labels(repo: str, sha: str) -> Optional[list[str]]:
     out = subprocess.run(
         ["gh", "api", f"repos/{repo}/commits/{sha}/pulls"], check=True, capture_output=True, text=True
     ).stdout
-    merged = [pr for pr in json.loads(out) if pr.get("merged_at")]
-    exact = [pr for pr in merged if pr.get("merge_commit_sha") == sha]
-    chosen = (exact or merged or [None])[0]
-    return None if chosen is None else [label["name"] for label in chosen.get("labels", [])]
+    return labels_from_pulls(json.loads(out), sha)
+
+
+def labels_from_pulls(pulls: list, sha: str) -> Optional[list[str]]:
+    """Labels of the merged PR whose merge commit is `sha`; None if there is none.
+
+    `commits/{sha}/pulls` lists every PR that *contains* the commit, so a
+    direct push later included in some PR must not inherit that PR's labels.
+    """
+    for pr in pulls:
+        if pr.get("merged_at") and pr.get("merge_commit_sha") == sha:
+            return [label["name"] for label in pr.get("labels", [])]
+    return None
 
 
 class ReleaseError(Exception):
