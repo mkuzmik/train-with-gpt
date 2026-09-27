@@ -66,6 +66,15 @@ async def test_stdio_lists_all_tools(stdio_env):
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
+async def test_stdio_ignores_the_hosted_allowlist(stdio_env):
+    """ALLOWED_STRAVA_ATHLETE_IDS only gates the HTTP server: even a malformed
+    value leaves the personal stdio server working."""
+    async with StdioServer({**stdio_env, "ALLOWED_STRAVA_ATHLETE_IDS": "not,a,list"}) as session:
+        output = _text(await session.call_tool("get_current_date", {}))
+
+    assert output
+
+
 async def test_console_script_serves_stdio(stdio_env):
     """The installed `train-with-gpt` command really serves MCP (it once just
     created an un-awaited coroutine and exited)."""

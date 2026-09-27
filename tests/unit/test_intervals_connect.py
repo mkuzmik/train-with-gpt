@@ -9,6 +9,7 @@ tests/integration/test_oauth_flow.py.
 
 import base64
 import re
+import sqlite3
 
 import httpx
 import pytest
@@ -19,8 +20,8 @@ from starlette.testclient import TestClient
 
 from train_with_gpt import secret_box, store
 from train_with_gpt.config import config
-from train_with_gpt.intervals_connect import intervals_connect_route
-from train_with_gpt.strava_oauth import strava_oauth_route
+from train_with_gpt.intervals_connect import create_intervals_connect_route
+from train_with_gpt.strava_oauth import create_strava_oauth_route
 
 ATHLETE_URL = "https://intervals.icu/api/v1/athlete/0"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
@@ -33,7 +34,9 @@ def client(db, strava_app_credentials, token_encryption_key, http_mock):
         "access_token": "a", "refresh_token": "r", "expires_at": 9999999999,
         "athlete": {"id": 42, "firstname": "Jane", "lastname": "Doe"},
     }))
-    return TestClient(Starlette(routes=[strava_oauth_route, intervals_connect_route]))
+    return TestClient(Starlette(routes=[
+        create_strava_oauth_route(frozenset({"42"})), create_intervals_connect_route(frozenset({"42"})),
+    ]))
 
 
 def _seed_pending():
@@ -65,6 +68,26 @@ def _assert_redirected_to_claude(response):
     assert response.status_code == 303
     location = response.headers["location"]
     assert location.startswith(CLAUDE_REDIRECT) and "code=" in location and "state=claude-state" in location
+
+
+@pytest.mark.parametrize("action", ["connect", "skip", "disconnect"])
+def test_connect_step_refuses_a_user_taken_off_the_allowlist(client, http_mock, action):
+    token = _login_via_strava(client)  # allowed when the page was shown
+    store.save_intervals_connection("42", "i777", "Jane D", secret_box.encrypt("old-key"))
+    validate = http_mock.get(ATHLETE_URL)
+    # ...then the operator removed them and the server restarted.
+    restarted = TestClient(Starlette(routes=[create_intervals_connect_route(frozenset({"7"}))]))
+
+    response = _submit(restarted, token=token, action=action, api_key="new-key")
+
+    assert response.status_code == 403
+    assert "location" not in response.headers
+    assert not validate.called
+    assert secret_box.decrypt(store.get_intervals_connection("42")["encrypted_api_key"]) == "old-key"
+    with sqlite3.connect(store.DB_PATH) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM auth_codes").fetchone()[0] == 0
+    # The step is used up: re-adding the user doesn't revive this page.
+    assert _submit(client, token=token, action="skip").status_code == 400
 
 
 def test_skip_finishes_login_without_connection(client):

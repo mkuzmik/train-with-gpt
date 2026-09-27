@@ -17,7 +17,23 @@ from .config import config
 
 TOKEN_URL = "https://www.strava.com/oauth/token"
 AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
+DEAUTHORIZE_URL = "https://www.strava.com/oauth/deauthorize"
 SCOPES = "activity:read_all,activity:read,profile:read_all"
+
+
+async def deauthorize(access_token: str) -> bool:
+    """Revoke our app's access to an athlete's Strava account (all its tokens).
+
+    Best effort: returns whether Strava confirmed, never raises, so callers
+    can use it on a path that must finish (e.g. refusing a sign-in).
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(DEAUTHORIZE_URL, data={"access_token": access_token}, timeout=10.0)
+        return response.is_success
+    except httpx.HTTPError as exc:
+        print(f"[Strava] Deauthorize failed: {type(exc).__name__}", file=sys.stderr)
+        return False
 
 
 class StravaClient:

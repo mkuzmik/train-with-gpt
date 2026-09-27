@@ -33,6 +33,7 @@ _SCRUBBED_ENV = (
     "TOKEN_ENCRYPTION_KEY",
     "PUBLIC_URL",
     "PORT",
+    "ALLOWED_STRAVA_ATHLETE_IDS",
     "TRAIN_WITH_GPT_VERSION",
 )
 for _name in list(os.environ):
