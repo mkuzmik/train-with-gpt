@@ -25,6 +25,7 @@ from ..helpers import (
     user_scoped_goals_file,
     user_scoped_notes_dir,
 )
+from ..intervals_client import IntervalsClient
 from ..strava_client import StravaClient
 
 
@@ -129,6 +130,14 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
         f"- **Activities source:** {activities}",
         f"- **Recovery data (sleep, HRV, resting HR):** {wellness}",
     ]
+    if isinstance(data_client, IntervalsClient) and not data_client.api_key:
+        # A local install without a key: every intervals.icu call would fail.
+        lines = [
+            "- **Activities and recovery data (intervals.icu):** no API key is configured, so "
+            "get_activities, analyze_activity and the sleep/HRV/resting-HR tools will fail. Tell "
+            "the athlete to set INTERVALS_API_KEY (see the README's Quick Start) and restart; "
+            "meanwhile coach from what they tell you.",
+        ]
     if history.storage == "ok":
         lines.append("- **Notes storage:** set up")
         lines.append(f"- **Saved goals:** {'yes' if history.has_goals else 'none'}")

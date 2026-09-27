@@ -241,6 +241,17 @@ async def test_storage_error_degrades_gracefully(training_repo, monkeypatch):
     assert "the server can't tell" in output
 
 
+async def test_stdio_without_an_intervals_key_is_not_reported_as_connected(monkeypatch):
+    from train_with_gpt.config import config
+    monkeypatch.setattr(config, "intervals_api_key", None)
+
+    output = text_of(await start_consultation_handler({}, IntervalsClient(), IntervalsClient()))
+
+    assert "connected (intervals.icu)" not in output
+    assert "INTERVALS_API_KEY" in output
+    assert "no API key is configured" in output
+
+
 # The intervals.icu page after the Strava login only exists when the server
 # can encrypt the key (TOKEN_ENCRYPTION_KEY); without it, reconnecting can't help.
 async def test_hosted_without_the_intervals_step_does_not_suggest_reconnecting(monkeypatch):

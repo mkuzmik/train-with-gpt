@@ -202,7 +202,8 @@ async def test_stdio_returning_athlete(stdio_env, training_repo, git_remote):
         "notes/2026-05-01-07-00-00.md": "# Consultation Notes\nDate: synthetic\n\nTempo went well.\n",
     })
 
-    async with StdioServer({**stdio_env, "TRAINING_REPO_PATH": str(training_repo)}) as session:
+    env = {**stdio_env, "TRAINING_REPO_PATH": str(training_repo), "INTERVALS_API_KEY": "synthetic-key"}
+    async with StdioServer(env) as session:
         output = _text(await session.call_tool("start_consultation", {}))
 
     assert "- **Activities source:** intervals.icu" in output
