@@ -277,3 +277,10 @@ async def test_an_interrupted_build_asks_before_keeping_what_was_said():
     assert "ask whether to keep" in output
     assert "Only with their OK" in output
     assert "save a consultation note with the claims" not in output
+
+
+async def test_build_guidance_without_a_data_source_skips_the_data_tools():
+    output = text_of(await build_athlete_profile_handler({}))
+
+    assert "no data source is available" in output
+    assert "skip the activity and recovery tools" in output

@@ -73,6 +73,10 @@ the athlete wants it kept at all.
 
 ## Phase 2: Evidence (existing tools only)
 
+If start_consultation said no data source is available (e.g. no intervals.icu API key on a
+local install), skip the activity and recovery tools: check claims against the notes and
+goals only, and mark the rest as "not in the data".
+
 1. **get_current_date**, then **get_activities** over the last 12 months, in chunks (e.g.
    one call per quarter) to keep each response manageable. Look at volume and its range,
    the biggest weeks and blocks, gaps of a week or more (often injury or illness), longest
