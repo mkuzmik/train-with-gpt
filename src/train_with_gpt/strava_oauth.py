@@ -113,7 +113,11 @@ async def handle_strava_callback(request: Request, allowed_athlete_ids: frozense
     access_token = token_data["access_token"]
     refresh_token = token_data.get("refresh_token")
     expires_at = token_data.get("expires_at")
-    athlete = token_data.get("athlete") or {}
+    athlete = token_data.get("athlete")
+    if not isinstance(athlete, dict):
+        # Missing or malformed summary: resolve the athlete via /athlete below,
+        # which fails closed (revokes the grant) if that doesn't work either.
+        athlete = {}
 
     user_id = str(athlete["id"]) if athlete.get("id") else None
     name = f"{athlete.get('firstname', '')} {athlete.get('lastname', '')}".strip() or None

@@ -270,6 +270,42 @@ def test_callback_revokes_and_stores_nothing_when_the_athlete_cant_be_resolved(c
     assert "couldn't resolve the Strava athlete" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("athlete", [[{"id": 42}], "athlete", 42, True], ids=["list", "string", "int", "bool"])
+def test_callback_treats_a_malformed_athlete_summary_as_missing(client, http_mock, athlete):
+    """A non-object `athlete` falls back to /athlete (then the normal allowlist
+    check), instead of crashing with the fresh grant still active."""
+    _seed_pending()
+    http_mock.post(TOKEN_URL).mock(return_value=Response(200, json={
+        "access_token": "strava-access", "expires_at": 9999999999, "athlete": athlete,
+    }))
+    profile = http_mock.get("https://www.strava.com/api/v3/athlete").mock(
+        return_value=Response(200, json={"id": 666, "firstname": "Eve", "lastname": ""})
+    )
+    deauthorize = http_mock.post(DEAUTHORIZE_URL).mock(return_value=Response(200, json={}))
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=c", follow_redirects=False)
+
+    assert profile.called
+    assert response.status_code == 403
+    assert set(_stored_rows().values()) == {0}
+    assert parse_qs(deauthorize.calls.last.request.content.decode()) == {"access_token": ["strava-access"]}
+
+
+def test_callback_malformed_summary_then_failed_profile_still_revokes(client, http_mock):
+    _seed_pending()
+    http_mock.post(TOKEN_URL).mock(return_value=Response(200, json={
+        "access_token": "strava-access", "expires_at": 9999999999, "athlete": "athlete",
+    }))
+    http_mock.get("https://www.strava.com/api/v3/athlete").mock(return_value=Response(200, json=["not", "a", "dict"]))
+    deauthorize = http_mock.post(DEAUTHORIZE_URL).mock(return_value=Response(200, json={}))
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=c", follow_redirects=False)
+
+    assert response.status_code == 502
+    assert set(_stored_rows().values()) == {0}
+    assert deauthorize.called
+
+
 def test_callback_with_empty_allowlist_refuses_everyone(db, strava_app_credentials, http_mock):
     client = TestClient(Starlette(routes=[create_strava_oauth_route(frozenset())]))
     _seed_pending()
