@@ -1,8 +1,9 @@
-"""Per-user isolation of notes and goals, black box over HTTP.
+"""Per-user isolation of notes, goals and athlete profiles, black box over HTTP.
 
 Two real OAuth logins (Alice and Bob) against one server and one shared
-training repo: each must only ever see their own `notes/<user_id>/` and
-`goals/<user_id>.md`, and the personal (no-OAuth) path sees neither.
+training repo: each must only ever see their own `notes/<user_id>/`,
+`goals/<user_id>.md` and `athlete/<user_id>.md`, and the personal (no-OAuth)
+path sees none of them.
 """
 
 import pytest
@@ -42,6 +43,24 @@ def test_goals_read_does_not_fall_back_to_another_user(login):
     bob_goals = bob.call_tool("read_goals")
     assert "Alice secret goal" not in bob_goals
     assert "No goals saved yet" in bob_goals
+
+
+def test_athlete_profiles_are_isolated_per_user(login, git_remote):
+    alice, bob = login(ALICE), login(BOB)
+
+    alice.call_tool("save_athlete_profile", {"content": "## Health\n- Alice: calf tightness on hills"})
+
+    files = remote_files(git_remote)
+    assert f"athlete/{ALICE}.md" in files
+    assert f"athlete/{BOB}.md" not in files and "athlete-profile.md" not in files
+
+    assert "calf tightness" in alice.call_tool("read_athlete_profile")
+    assert "calf tightness" in alice.call_tool("start_consultation")
+
+    bob_profile = bob.call_tool("read_athlete_profile")
+    bob_start = bob.call_tool("start_consultation")
+    assert "calf tightness" not in bob_profile and "No athlete profile saved yet" in bob_profile
+    assert "calf tightness" not in bob_start and "- **Athlete profile:** none" in bob_start
 
 
 def test_notes_are_isolated_per_user(login, git_remote):

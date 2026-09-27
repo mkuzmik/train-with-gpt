@@ -14,13 +14,19 @@ def save_goals_tool() -> Tool:
     """Return the save_goals tool definition."""
     return Tool(
         name="save_goals",
-        description="Save the user's training goals in natural language format. Write a clear, comprehensive summary of goals, context, and constraints.",
+        description=(
+            "Save the athlete's training goals in natural language (replaces the saved goals). "
+            "Goals only: what they're training for, the target and date, why it matters, "
+            "milestones, the current training block, and what success looks like. Facts about "
+            "the athlete - background, PBs, current fitness, constraints, health and injury "
+            "history - belong in the athlete profile (save_athlete_profile), not here."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "goals_text": {
                     "type": "string",
-                    "description": "Natural language description of the user's training goals, current state, constraints, and context",
+                    "description": "Natural language description of the athlete's goals: target, date, why it matters, milestones, current block",
                 },
             },
             "required": ["goals_text"],

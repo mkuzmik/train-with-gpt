@@ -138,10 +138,10 @@ async def test_saying_new_never_onboards_an_athlete_with_saved_history(training_
     path_a = output.split("## Path A")[1].split("## Goal-Setting")[0]
 
     # Path A is chosen by the facts; the athlete's words can't override saved history.
-    assert "Path A - New athlete (onboarding):** only when there are no saved goals and no notes" in rules
+    assert "Path A - New athlete (onboarding):** only when there are no saved goals, no profile and\n  no notes" in rules
     assert "or the athlete says they're new" not in rules
     assert "explicitly confirm" in rules
-    assert "Only for an athlete with no saved goals or notes" in path_a
+    assert "Only for an athlete with no saved goals, profile or notes" in path_a
 
 
 async def test_notes_without_goals_is_returning_and_offers_goal_setting(training_repo, git_remote):
@@ -339,7 +339,8 @@ async def test_get_current_date_is_today():
 # --- no notes storage: no goals/notes tool is suggested ------------------------------
 
 STORAGE_TOOLS = {"read_goals", "save_goals", "list_consultation_notes", "read_consultation_notes",
-                 "search_consultation_notes", "save_consultation_notes"}
+                 "search_consultation_notes", "save_consultation_notes",
+                 "build_athlete_profile", "save_athlete_profile"}
 
 
 async def test_without_storage_the_guidance_never_suggests_goals_or_notes_tools():
@@ -348,7 +349,9 @@ async def test_without_storage_the_guidance_never_suggests_goals_or_notes_tools(
         hosted = await _start(_strava, _strava)
 
     for output in (stdio, hosted):
-        assert not referenced_tool_names(output) & STORAGE_TOOLS, referenced_tool_names(output) & STORAGE_TOOLS
+        storage_tools = STORAGE_TOOLS | {"read_athlete_profile"}
+        assert not referenced_tool_names(output) & storage_tools, referenced_tool_names(output) & storage_tools
+        assert "- **Athlete profile:**" not in output
         assert "(no notes storage)" in output
         assert "can't be saved in this chat" in output
         assert "get_activities" in referenced_tool_names(output)
@@ -411,3 +414,97 @@ async def test_a_successful_sync_with_a_warning_still_labels_the_athlete(trainin
     monkeypatch.setattr(module, "git_pull_and_read", with_warning)
 
     assert "NEW athlete** (Path A)" in await _start()
+
+
+# --- athlete profile ------------------------------------------------------------------
+
+PROFILE = "# Athlete profile\nSaved: synthetic\n\n## Background\n- Made-up runner since 2019.\n\n## Constraints\n- Rests on Wednesdays.\n"
+
+
+async def test_a_saved_profile_is_included_in_full(training_repo, git_remote):
+    push_files(git_remote, {
+        "athlete-profile.md": PROFILE,
+        "goals.md": "# Training Goals\nSub-50 10k\n",
+        "notes/2026-01-05-07-00-00.md": NOTE,
+    })
+
+    output = await _start()
+
+    assert "- **Athlete profile:** yes (full text below)" in output
+    assert "## Athlete profile (saved)" in output
+    assert PROFILE.strip() in output
+    assert "use it as the baseline" in output
+    assert "save_athlete_profile" in referenced_tool_names(output)
+    # the profile comes before the guidance, right after the facts
+    assert output.index("Made-up runner") < output.index("## Step 1: Choose the path")
+    assert "No athlete profile yet" not in output
+
+
+async def test_new_athlete_has_no_profile_and_onboarding_builds_it(training_repo):
+    output = await _start()
+    path_a = output.split("## Path A")[1].split("## Goal-Setting")[0]
+
+    assert "- **Athlete profile:** none" in output
+    assert "## Athlete profile (saved)" not in output
+    assert "NEW athlete** (Path A)" in output
+    assert "No athlete profile yet" not in output  # the build is part of onboarding
+    assert "**build_athlete_profile**" in path_a
+    assert path_a.index("build_athlete_profile") < path_a.index("save_goals")
+
+
+async def test_returning_athlete_without_a_profile_is_offered_one(training_repo, git_remote):
+    push_files(git_remote, {
+        "goals.md": "# Training Goals\nSub-50 10k\n",
+        "notes/2026-01-05-07-00-00.md": NOTE,
+    })
+
+    output = await _start()
+
+    assert "- **Athlete profile:** none" in output
+    assert "RETURNING athlete** (Path B)" in output
+    assert "**No athlete profile yet:**" in output
+    assert "offer to build one (**build_athlete_profile**). Offer, don't force it" in output
+
+
+async def test_a_profile_alone_is_an_unfinished_onboarding_not_a_new_athlete(training_repo, git_remote):
+    push_files(git_remote, {"athlete-profile.md": PROFILE})
+
+    output = await _start()
+
+    assert "- **Saved goals:** none" in output
+    assert "- **Athlete profile:** yes" in output
+    assert "NEW athlete" not in output
+    assert "onboarding was probably cut short" in output
+    assert "goal-setting conversation" in output
+
+
+async def test_the_profile_is_per_oauth_user(training_repo, git_remote):
+    push_files(git_remote, {
+        "athlete/1001.md": PROFILE,
+        "athlete-profile.md": "# Athlete profile\n\n## Background\n- Personal-path athlete.\n",
+    })
+
+    with as_oauth_user("1001"):
+        own = await _start(_strava, _strava)
+    with as_oauth_user("1002"):
+        other = await _start(_strava, _strava)
+
+    assert "Made-up runner" in own and "Personal-path athlete" not in own
+    assert "- **Athlete profile:** none" in other
+    assert "Made-up runner" not in other and "Personal-path athlete" not in other
+    assert "1001" not in other
+
+
+async def test_goal_setting_keeps_athlete_facts_out_of_the_goals(training_repo):
+    output = await _start()
+    goal_setting = output.split("## Goal-Setting Conversation")[1].split("## Path B")[0]
+
+    assert "belong in the athlete profile, not the goals" in goal_setting
+    assert "shin splints" not in goal_setting
+
+
+async def test_save_goals_description_sends_athlete_facts_to_the_profile():
+    tool = next(tool for tool in await list_tools() if tool.name == "save_goals")
+
+    assert "save_athlete_profile" in tool.description
+    assert "current state" not in tool.inputSchema["properties"]["goals_text"]["description"]

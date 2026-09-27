@@ -41,6 +41,13 @@ def user_scoped_goals_file(repo_path: Path, user_id: Optional[str]) -> tuple[Pat
     return repo_path / "goals.md", "goals.md"
 
 
+def user_scoped_profile_file(repo_path: Path, user_id: Optional[str]) -> tuple[Path, str]:
+    """Returns (profile_file, relative_path_for_git) for the athlete profile of the given user, if any."""
+    if user_id:
+        return repo_path / "athlete" / f"{user_id}.md", f"athlete/{user_id}.md"
+    return repo_path / "athlete-profile.md", "athlete-profile.md"
+
+
 def training_repo_not_configured_message() -> str:
     """
     The "no training repository configured" error, worded for who is asking.
