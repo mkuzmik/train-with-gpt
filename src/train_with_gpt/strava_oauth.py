@@ -121,9 +121,23 @@ async def handle_strava_callback(request: Request, allowed_athlete_ids: frozense
     if not user_id:
         # Strava usually embeds the athlete summary in the token response; fall
         # back to an explicit profile call if it's ever missing.
-        strava = StravaClient(access_token)
-        profile = await strava.get_athlete()
-        user_id = str(profile["id"])
+        try:
+            profile = await StravaClient(access_token).get_athlete()
+            user_id = str(profile["id"]) if profile.get("id") else None
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError, KeyError):
+            user_id = None
+        if not user_id:
+            # Can't tell who this is, so we can't check the allowlist: fail
+            # closed, holding nothing (same as a refusal, but retryable).
+            revoked = await deauthorize(access_token)
+            print(
+                "[Strava OAuth] Refused sign-in: couldn't resolve the Strava athlete "
+                f"(Strava grant {'revoked' if revoked else 'NOT revoked - deauthorize failed'})",
+                file=sys.stderr,
+            )
+            return PlainTextResponse(
+                "Couldn't verify your Strava account. Try connecting again.", status_code=502
+            )
         name = f"{profile.get('firstname', '')} {profile.get('lastname', '')}".strip() or None
 
     if user_id not in allowed_athlete_ids:

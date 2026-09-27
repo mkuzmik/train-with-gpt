@@ -242,6 +242,34 @@ def test_callback_refuses_via_the_profile_fallback_too(client, http_mock):
     assert deauthorize.called
 
 
+@pytest.mark.parametrize("profile", [
+    Response(500, json={}),
+    Response(401, json={"message": "Authorization Error"}),
+    Response(200, json={"firstname": "No", "lastname": "Id"}),
+    Response(200, text="not json"),
+    httpx.ConnectError("strava down"),
+], ids=["500", "401", "no-id", "not-json", "network-error"])
+def test_callback_revokes_and_stores_nothing_when_the_athlete_cant_be_resolved(client, http_mock, profile, capsys):
+    _seed_pending()
+    http_mock.post(TOKEN_URL).mock(
+        return_value=Response(200, json={"access_token": "strava-access", "expires_at": 9999999999})
+    )
+    route = http_mock.get("https://www.strava.com/api/v3/athlete")
+    if isinstance(profile, Exception):
+        route.mock(side_effect=profile)
+    else:
+        route.mock(return_value=profile)
+    deauthorize = http_mock.post(DEAUTHORIZE_URL).mock(return_value=Response(200, json={}))
+
+    response = client.get("/oauth/strava/callback?state=nested-state-1&code=c", follow_redirects=False)
+
+    assert response.status_code == 502
+    assert "location" not in response.headers
+    assert set(_stored_rows().values()) == {0}
+    assert parse_qs(deauthorize.calls.last.request.content.decode()) == {"access_token": ["strava-access"]}
+    assert "couldn't resolve the Strava athlete" in capsys.readouterr().err
+
+
 def test_callback_with_empty_allowlist_refuses_everyone(db, strava_app_credentials, http_mock):
     client = TestClient(Starlette(routes=[create_strava_oauth_route(frozenset())]))
     _seed_pending()
