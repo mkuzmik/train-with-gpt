@@ -45,6 +45,9 @@ Review for correctness, security and tests as usual. Also flag:
 - new processing, storage or caching of Strava data (restricted by the Strava
   API Agreement; new data features belong on the intervals.icu path);
 - deployment-specific details (app names, hosting config) — this repo is a
-  generic template.
+  generic template;
+- **scope creep**: changes unrelated to the PR's stated purpose, or a PR big
+  enough to be split. PRs should stay small and isolated; suggest moving
+  extras to a follow-up issue rather than asking for more in this PR.
 
 Skip style nitpicks that don't affect behaviour.

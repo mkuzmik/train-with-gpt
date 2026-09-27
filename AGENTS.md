@@ -38,14 +38,25 @@ rules and working conventions that the README doesn't cover.
 - **Ideas, proposals and follow-ups are GitHub issues**, not PRs. This covers
   new ideas, findings deferred from a PR review, and "not in this PR" items.
   - One issue per item, labelled `bug` or `enhancement`. A follow-up links
-    the PR (or issue) it came from. Describe the behaviour and why it matters, in functional terms
-    and with no personal data (this repo is public).
+    the PR (or issue) it came from. Describe the behaviour and why it
+    matters, in functional terms and with no personal data (this repo is
+    public).
   - A design or proposal is written in the issue itself (edit the body as it
     evolves; use comments for validation notes and discussion), not as a
     `docs/ideas/` file or a draft PR.
   - A PR starts only when the maintainer picks up an issue. It references the
     issue (`Fixes #N`), implements only the phase that was asked for, and
     updates the issue when the implementation diverges from the design.
+- **Small, isolated PRs.** A PR does one thing, small enough that the
+  maintainer can understand it from the description in a few minutes.
+  - Ship the simplest version of a feature that is useful on its own; later
+    iterations and extensions become issues.
+  - When a fix, refactor or review finding would make the PR noticeably
+    bigger or pull in unrelated areas, don't add it: open an issue and
+    mention it in the PR description. Only fix in place what the PR itself
+    broke or what blocks it from being correct and safe.
+  - If a PR is growing anyway, stop and split it (e.g. a preparatory PR,
+    then the feature).
 - **Bug fixes**: write the failing test first, confirm it fails without the
   fix, then fix.
 - Keep edits to widely shared files small and localised; several PRs are often
@@ -87,6 +98,8 @@ After pushing a PR that's ready for review:
 3. Evaluate **every** finding — inline comments *and* items that appear only in
    the review body (e.g. "Previously missed" / low-confidence notes):
    - valid → fix it, with a test that fails without the fix;
+   - valid but out of scope or would bloat the PR → open an issue and reply
+     with its link;
    - not valid → explain why;
    - description mismatch → update the PR description.
 4. Reply on each inline thread with the fixing commit or the reasoning;
