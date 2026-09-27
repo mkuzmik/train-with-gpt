@@ -1,0 +1,53 @@
+name: Release
+
+# Pushing a vX.Y.Z tag publishes a GitHub Release (see RELEASING.md). The tag
+# must equal "v" + pyproject.toml's version and point at a commit on main, and
+# the full test suite must pass on it first.
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Tag matches pyproject.toml version
+      run: python3 scripts/check_release_tag.py "$GITHUB_REF_NAME"
+
+    - name: Tagged commit is on main
+      run: |
+        git fetch --no-tags origin main
+        if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+          echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main - tag a merged commit"
+          exit 1
+        fi
+
+  test:
+    needs: verify
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test.yml
+
+  release:
+    needs: [ verify, test ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Create GitHub Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
