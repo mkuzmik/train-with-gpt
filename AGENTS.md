@@ -37,8 +37,8 @@ rules and working conventions that the README doesn't cover.
   (prefer a WIP commit).
 - **Ideas, proposals and follow-ups are GitHub issues**, not PRs. This covers
   new ideas, findings deferred from a PR review, and "not in this PR" items.
-  - One issue per item, labelled `bug` or `enhancement`, linking the PR it
-    came from. Describe the behaviour and why it matters, in functional terms
+  - One issue per item, labelled `bug` or `enhancement`. A follow-up links
+    the PR (or issue) it came from. Describe the behaviour and why it matters, in functional terms
     and with no personal data (this repo is public).
   - A design or proposal is written in the issue itself (edit the body as it
     evolves; use comments for validation notes and discussion), not as a
