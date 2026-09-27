@@ -241,6 +241,37 @@ async def test_storage_error_degrades_gracefully(training_repo, monkeypatch):
     assert "the server can't tell" in output
 
 
+# Hosted users share the server's notes repo: a storage error's detail (server
+# paths, git output naming other users' files) stays in the server log.
+@pytest.mark.parametrize("breakage", ["missing", "not_git", "sync_error"])
+async def test_hosted_storage_errors_do_not_show_server_details(training_repo, tmp_path, monkeypatch, breakage):
+    from train_with_gpt.config import config
+    from train_with_gpt.helpers import GitSyncError
+    from train_with_gpt.tools import start_consultation as module
+
+    if breakage == "missing":
+        secret = str(training_repo / "gone")
+        monkeypatch.setattr(config, "training_repo_path", secret)
+    elif breakage == "not_git":
+        secret = str(tmp_path / "plain-dir")
+        (tmp_path / "plain-dir").mkdir()
+        monkeypatch.setattr(config, "training_repo_path", secret)
+    else:
+        secret = "notes/2002/2026-06-01-06-00-00.md"
+
+        def broken(*args, **kwargs):
+            raise GitSyncError(f"rebase failed on {secret}")
+        monkeypatch.setattr(module, "git_pull_and_read", broken)
+
+    with as_oauth_user("2001"):
+        output = await _start(_strava, _strava)
+
+    assert secret not in output
+    assert "- **Notes storage:** unavailable" in output
+    assert "contact the server's operator" in output
+    assert "the server can't tell" in output
+
+
 @pytest.mark.parametrize("data, wellness, activities, recovery", [
     pytest.param(_intervals, _intervals, "intervals.icu", "connected (intervals.icu)", id="stdio"),
     pytest.param(_strava, _strava, "Strava", "not connected", id="hosted"),

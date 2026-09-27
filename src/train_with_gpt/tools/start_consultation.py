@@ -143,6 +143,11 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
     else:
         if history.storage == "not_configured":
             status = "not set up on this server"
+        elif hosted:
+            # The detail (server paths, git output that may name other users'
+            # files in the shared repo) stays in the server log.
+            print(f"[start_consultation] notes storage unavailable: {history.note}", file=sys.stderr)
+            status = "unavailable (a problem on the server's side)"
         else:
             status = f"unavailable ({history.note})"
         if hosted:
