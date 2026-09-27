@@ -35,9 +35,14 @@ rules and working conventions that the README doesn't cover.
   in, or change the state of, the maintainer's main checkout. The git stash is
   shared across worktrees: never use a bare `git stash`/`git stash pop`
   (prefer a WIP commit).
-- **Ideas and proposals** start as a *draft* PR with a design doc in
-  `docs/ideas/`. Implement only the phase that was asked for, and update the
-  doc when the implementation diverges.
+- **Ideas, proposals and follow-ups are GitHub issues**, not PRs: new ideas,
+  findings deferred from a PR review, and "not in this PR" items. Open one
+  issue per item (`bug` or `enhancement` label), describe the behaviour and
+  why it matters (no personal data, same as everywhere in this public repo),
+  and link the PR it came from. A PR starts only when the maintainer picks the
+  issue up, and it references the issue (`Fixes #N`). Existing proposal PRs
+  and `docs/ideas/` docs stay as they are; implement only the phase that was
+  asked for, and update the doc when the implementation diverges.
 - **Bug fixes**: write the failing test first, confirm it fails without the
   fix, then fix.
 - Keep edits to widely shared files small and localised; several PRs are often
