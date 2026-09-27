@@ -130,10 +130,11 @@ in. The personal stdio server doesn't use it.
   fine. Anything else (including `*`) stops the server at startup with an
   error that names the variable but not the value.
 - **Fails closed:** unset or empty means nobody can sign in, and the server
-  logs a warning at startup. On a hosted deployment, set it (as a secret, never
-  in the repo) **before** deploying a version that has the allowlist, or
-  sign-in is blocked for everyone, including you. The log only shows how many
-  ids are allowed, never the ids.
+  logs a warning at startup. On a hosted deployment, set it **before**
+  deploying a version that has the allowlist, or sign-in is blocked for
+  everyone, including you. It can be a platform secret or a plain env var: the
+  ids aren't secret, but keep them out of this public repo. The log only shows
+  how many ids are allowed, never the ids.
 - **Someone not on the list** gets a "This server is private" page after the
   Strava consent screen. Nothing about them is stored, Claude gets no code,
   and the server asks Strava to revoke the access the athlete just granted.
@@ -143,10 +144,11 @@ in. The personal stdio server doesn't use it.
   restarts). Their stored data stays, so putting them back restores access.
 - **Finding your athlete id:** on strava.com, open your profile (avatar → My
   Profile). The number in the URL, `strava.com/athletes/<id>`, is your id. It
-  identifies you, so put it straight into your environment or secret store
-  and keep it out of issues, commits and chats.
+  identifies you, so put it straight into your deployment's environment and
+  keep it out of issues, commits and chats.
 
-For example, on Fly.io (setting a secret restarts the app):
+For example, on Fly.io, either as a secret (setting it restarts the app) or
+under `[env]` in your own `fly.toml`:
 
 ```bash
 fly secrets set -a <app> ALLOWED_STRAVA_ATHLETE_IDS=<your_athlete_id>
@@ -264,7 +266,7 @@ public; set them in your platform's secret store.
 | `TRAINING_REPO_URL` | env | yes | SSH URL of your private notes repo, e.g. `git@github.com:<you>/<notes-repo>.git`. Only GitHub is supported (its host key is pinned in the entrypoint). |
 | `TRAINING_REPO_PATH` | env | yes | Where the clone lives in the container, e.g. `/data/training-context`. |
 | `STRAVA_CLIENT_ID` | secret | yes | Strava OAuth app (users sign in with Strava). |
-| `ALLOWED_STRAVA_ATHLETE_IDS` | secret | yes | Comma-separated Strava athlete ids allowed to sign in. Unset/empty lets nobody in; malformed stops startup. See [Who can sign in](#who-can-sign-in-allowlist). |
+| `ALLOWED_STRAVA_ATHLETE_IDS` | env or secret | yes | Comma-separated Strava athlete ids allowed to sign in. Unset/empty lets nobody in; malformed stops startup. See [Who can sign in](#who-can-sign-in-allowlist). |
 | `STRAVA_CLIENT_SECRET` | secret | yes | Strava OAuth app secret. |
 | `TRAINING_CONTEXT_DEPLOY_KEY` | secret | yes | Private SSH deploy key with write access to the notes repo, with its real newlines. Or mount it as a file at `/run/secrets/training_context_deploy_key`. |
 | `TOKEN_ENCRYPTION_KEY` | secret | no | Fernet key encrypting users' intervals.icu keys; turns on the optional intervals.icu step at login. Changing it makes stored keys unreadable. |
@@ -297,8 +299,7 @@ above under `[env]`, and a `[mounts]` volume at
 
 ```bash
 fly volumes create <volume> --size 1 -a <app>
-fly secrets set -a <app> ALLOWED_STRAVA_ATHLETE_IDS=<your_athlete_id> \
-  STRAVA_CLIENT_ID=... STRAVA_CLIENT_SECRET=... \
+fly secrets set -a <app> STRAVA_CLIENT_ID=... STRAVA_CLIENT_SECRET=... \
   "TRAINING_CONTEXT_DEPLOY_KEY=$(cat ~/.config/train-with-gpt/training-context-deploy-key)" \
   TOKEN_ENCRYPTION_KEY=...
 fly deploy --ha=false -a <app> --build-arg GIT_SHA=$(git rev-parse --short HEAD)
