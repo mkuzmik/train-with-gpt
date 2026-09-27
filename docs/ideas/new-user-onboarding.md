@@ -175,6 +175,13 @@ the old goals.
   (date, goals, notes index and last 60 days, activities, then one open
   question).
 
+**With the athlete profile v1** (see `athlete-profile.md`, "v1 scope"), the
+facts also say whether an athlete profile is saved, and its full text is
+included; any saved goals, profile or notes mean a returning athlete (a
+profile alone is an onboarding cut short: Path B, continue with goal setting);
+Path A builds the profile (`build_athlete_profile`) before the goal-setting
+conversation; and a returning athlete without a profile is offered one.
+
 What this does **not** do from Phase 1 yet: the landing page, the
 in-progress onboarding note with a checklist, the health screen and the
 12-week baseline. Those still need the owner's decisions below.

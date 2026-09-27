@@ -58,8 +58,8 @@ def training_repo_not_configured_message() -> str:
     """
     if current_user_id():
         return (
-            "❌ Error: This server's notes storage isn't set up, so goals and consultation "
-            "notes can't be read or saved yet.\n\n"
+            "❌ Error: This server's notes storage isn't set up, so goals, the athlete profile "
+            "and consultation notes can't be read or saved yet.\n\n"
             "It's configured by whoever runs the server, not from the chat: please contact "
             "the server's operator. Activity data still works in the meantime."
         )
@@ -293,7 +293,7 @@ def git_pull(repo_path: Path) -> Optional[str]:
 
 PULLED_UPDATES_PREFIX = "Pulled updates from the remote"
 HOSTED_SYNC_WARNING = (
-    "the notes storage couldn't be fully synced just now, so goals and notes may be slightly out of date"
+    "the notes storage couldn't be fully synced just now, so goals, profile and notes may be slightly out of date"
 )
 
 

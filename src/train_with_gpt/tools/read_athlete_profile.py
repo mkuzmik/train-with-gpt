@@ -55,10 +55,11 @@ async def read_athlete_profile_handler(arguments: dict) -> list[TextContent]:
             git_pull_and_read, repo_path, lambda: read_file_if_exists(profile_file)
         )
 
-        if content is None:
-            return [TextContent(type="text", text=NO_PROFILE_MESSAGE)]
-
+        # A failed sync can hide a profile saved from another device: keep its
+        # warning on both answers, so "none saved" isn't taken as final.
         pull_output = sync_note_for_caller(pull_output, current_user_id())
+        if content is None:
+            content = NO_PROFILE_MESSAGE
         if pull_output:
             content = f"_{pull_output}_\n\n{content}"
 

@@ -211,3 +211,25 @@ async def test_build_guidance_only_uses_existing_tools():
 
     assert {"get_activities", "search_consultation_notes", "save_athlete_profile"} <= referenced
     assert referenced <= registered, referenced - registered
+
+
+# --- a failed sync ---------------------------------------------------------------------
+
+async def test_missing_profile_after_a_failed_sync_keeps_the_warning(training_repo, tmp_path):
+    # The remote is unreachable: a profile saved from another device may be missing here.
+    git(training_repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    output = await _read()
+    with as_oauth_user("1001"):
+        hosted = await _read()
+
+    assert "No athlete profile saved yet" in output
+    assert "git pull had issues" in output
+    assert "No athlete profile saved yet" in hosted
+    assert "couldn't be fully synced" in hosted and "profile" in hosted.split("No athlete")[0]
+    assert str(tmp_path) not in hosted
+
+
+async def test_hosted_user_without_repo_is_told_the_profile_is_unavailable_too():
+    with as_oauth_user("1005"):
+        assert "the athlete profile" in await _read()

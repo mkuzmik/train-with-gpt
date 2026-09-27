@@ -219,8 +219,9 @@ def _choose_path_section(history: TrainingHistory) -> str:
         )
     elif not history.synced:
         hint = (
-            "**Here the notes storage couldn't be synced just now**, so the goals/notes facts come "
-            "from a possibly out-of-date copy and may miss what was saved from another device. "
+            "**Here the notes storage couldn't be synced just now**, so the goals/profile/notes facts "
+            "(and the profile text above) come from a possibly out-of-date copy and may miss what "
+            "was saved from another device; don't save a new profile over it in this chat. "
             "Don't treat them as final: if they show no history, ask ONE question (first time "
             "with this coach, or worked together before?) before onboarding; if they show "
             "history, it's a returning athlete (Path B)."

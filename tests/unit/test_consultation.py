@@ -508,3 +508,16 @@ async def test_save_goals_description_sends_athlete_facts_to_the_profile():
 
     assert "save_athlete_profile" in tool.description
     assert "current state" not in tool.inputSchema["properties"]["goals_text"]["description"]
+
+
+async def test_a_failed_sync_qualifies_the_included_profile(training_repo, git_remote, tmp_path):
+    from tests.support import git
+    push_files(git_remote, {"athlete-profile.md": PROFILE})
+    git(training_repo, "pull", "--quiet")
+    git(training_repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    output = await _start()
+
+    assert "Made-up runner" in output  # still shown, from the local copy
+    assert "the profile text above) come from a possibly out-of-date copy" in output
+    assert "don't save a new profile over it" in output
