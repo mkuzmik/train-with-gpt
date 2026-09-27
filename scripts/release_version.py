@@ -141,21 +141,29 @@ def _until_first_unskipped(label_sets):
 def plan(head: str, bump: str, repo: Optional[str], labels_json: Optional[dict] = None,
          releases_json: Optional[dict] = None) -> dict:
     head = _git("rev-parse", head).strip()
+
+    def require_workflow_release(tag: str) -> None:
+        """Only tags this workflow released count; e.g. "Draft a new release" skipped the tests."""
+        author = releases_json.get(tag) if releases_json is not None else _release_author(repo, tag)
+        if author != RELEASE_BOT:
+            made_by = f"published by {author}" if author else "with no GitHub Release"
+            where = _git("rev-parse", "--short", f"{tag}^{{commit}}").strip()
+            raise ReleaseError(
+                f"{where} is tagged {tag} {made_by}, not by this workflow, so it was never tested. "
+                f"Delete the release and the tag {tag}, then re-run this workflow."
+            )
+
     on_head = [t for t in _git("tag", "--points-at", head).split() if parse_tag(t)]
     if on_head:
         tag = max(on_head, key=parse_tag)
-        author = releases_json.get(tag) if releases_json is not None else _release_author(repo, tag)
-        if author != RELEASE_BOT:
-            # E.g. "Draft a new release" on main's head: published without the tests.
-            made_by = f"published by {author}" if author else "with no GitHub Release"
-            raise ReleaseError(
-                f"{head[:7]} is tagged {tag} {made_by}, not by this workflow, so it was never tested. "
-                f"Delete the release and the tag {tag}, then re-run this workflow."
-            )
+        require_workflow_release(tag)
         return {"release": False, "version": tag, "reason": f"{head[:7]} is already released as {tag}"}
 
     tags = [t for t in _git("tag", "--list", "v*", "--merged", head).split() if parse_tag(t)]
     latest = latest_version(tags)
+    if latest is not None:
+        # The baseline must be a real release too, or it would skip everything before it.
+        require_workflow_release(format_version(latest))
     since = f"{format_version(latest)}..{head}" if latest else head
     commits = _git("rev-list", "--first-parent", since).split()
 

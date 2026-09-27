@@ -84,8 +84,10 @@ def commit(repo: Path, name: str) -> str:
 def run(repo: Path, labels: dict, *args: str, output: Path = None, releases: dict = None):
     labels_file = repo.parent / "labels.json"
     labels_file.write_text(json.dumps(labels))
+    if releases is None:  # by default every tag is a release this workflow published
+        releases = {tag: "github-actions[bot]" for tag in git(repo, "tag", "--list").split()}
     releases_file = repo.parent / "releases.json"
-    releases_file.write_text(json.dumps(releases or {}))
+    releases_file.write_text(json.dumps(releases))
     env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
     if output:
         env["GITHUB_OUTPUT"] = str(output)
@@ -209,6 +211,22 @@ def test_first_release_counts_earlier_unreleased_changes(repo):
 
     assert result.returncode == 0, result.stderr
     assert "release=true version=v0.1.0 (first release)" in result.stdout
+
+
+def test_hand_made_baseline_tag_is_an_error(repo, tmp_path):
+    """A hand-made tag on an older main commit must not become the version baseline."""
+    commit(repo, "a")
+    git(repo, "tag", "v0.1.0")
+    commit(repo, "b")
+    git(repo, "tag", "v0.5.0")
+    head = commit(repo, "c")
+    out = tmp_path / "gh_output"
+
+    result = run(repo, {head: []}, output=out, releases={"v0.1.0": "github-actions[bot]", "v0.5.0": "someone"})
+
+    assert result.returncode == 1
+    assert "is tagged v0.5.0 published by someone, not by this workflow" in result.stderr
+    assert not out.exists()
 
 
 def test_first_release_skipped_when_every_change_is_skipped(repo):
