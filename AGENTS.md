@@ -45,6 +45,12 @@ rules and working conventions that the README doesn't cover.
 
 ### PR descriptions
 
+- **Every PR gets exactly one release label** when it's opened, because
+  merging to `main` releases automatically (see `RELEASING.md`):
+  `release:major`, `release:minor`, `release:patch` or `release:skip`
+  (e.g. `gh pr create --label release:minor`, or `gh pr edit <N> --add-label ...`).
+  Docs-only proposals and changes that shouldn't ship on their own use
+  `release:skip`. Revisit the label when a PR's scope changes.
 - **"Decisions for the owner"** section at the top: for every non-critical
   choice you made, say what you chose and the alternatives.
 - **Critical decisions** (any reasonable implementation would be thrown away;
