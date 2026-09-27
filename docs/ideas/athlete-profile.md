@@ -1,12 +1,12 @@
 # Idea: a living athlete profile (proposal, for review)
 
-Not implemented. This proposes an athlete profile: a short, always-current
-document about who the athlete is right now, loaded at the start of every
-consultation and kept up to date from data, interviews and results.
+Not implemented. This proposes an athlete profile: a short document with
+the coach's conclusions about who the athlete is, built from an interview
+checked against their data, loaded at the start of every consultation.
 
 Depends on: #8 (notes sync fix) for all writes. Works best with #9
 (`consultation-context.md`, assembled `start_consultation`). Shares
-computation code with #12 (`more-training-data.md`) but does not need its
+aggregation code with #12 (`more-training-data.md`) but does not need its
 tools. #11 (`new-user-onboarding.md`) builds on it.
 
 ## Problem
@@ -19,10 +19,10 @@ The server keeps two kinds of memory today:
 - **Notes** (`notes/` or `notes/<user_id>/`): one immutable, timestamped file
   per `save_consultation_notes` call, so in effect an append-only log.
 
-Neither holds the durable facts a coach needs every time: race results and
-PBs, current fitness, baselines (resting HR, HRV range, usual sleep, weight
-trend), test results, injury history, weekly availability and limits, what
-has and hasn't worked. These end up scattered across daily notes, so
+Neither holds what a coach needs to know every time: race results and PBs,
+test results, injury history and recurring health patterns, weekly
+availability and limits, strengths and limiters, what has and hasn't worked.
+These end up scattered across daily notes, so
 the coach has to rediscover them each consultation and often doesn't (see
 `consultation-context.md`).
 
@@ -35,128 +35,114 @@ profile exists, those facts move there (see "Goals vs profile" below).
 
 ## Proposed solution
 
-### Two kinds of sections
+### What the profile is, and isn't
 
-- **Stated** sections hold durable facts about the athlete: what they told
-  the coach, or what the coach found in the data and the athlete confirmed.
-  They are stored in the training repo and change only through
-  `update_athlete_profile`, with the athlete's confirmation.
-- **Computed** sections are rolling numbers the server derives from
-  intervals.icu (or, without it, from the Strava activity list), with no
-  model involved. They are **not stored in the repo**. The server computes
-  them when the profile is read and appends them to the output, with a
-  short-lived cache.
+The profile is the coach's **conclusions about the athlete**: what they said
+in interviews, checked against their data, and confirmed. It is written
+text, stored in the training repo, and changes only through
+`update_athlete_profile` with the athlete's confirmation.
 
-The line between them: a fact that stays true until something happens is
-stated; a number that moves every week is computed. Anything that changes
-with every session (gear mileage, last run, today's form) is neither: it
-belongs to the data tools, not the profile.
+It holds **no stats**. Recent volume, fitness/form (CTL/ATL), resting HR,
+HRV, sleep, zones and gear mileage change every week or every session, and
+the data tools already recompute them whenever they're needed
+(`start_consultation`, `get_activities`, the wellness tools, #12's summary
+tools). Copying them into the profile, stored or computed on read, would
+only duplicate those tools and go stale.
 
-- "10k PB 44:30, Autumn 10k, 2026-09-07" is **stated**. It is a result, it
-  stays true until the next PB, and it is stored in Race results even when it
-  was first spotted in the activity data. Strava's cache rules don't apply to
-  it: it is the athlete's own fact, confirmed by them, not a copy of API data.
-- "Last 4 weeks: 42 km/week, fitness (CTL) 48, resting HR 49" is
-  **computed**. It is out of date a few days later, so storing it would only
-  create stale copies.
+Data goes into the profile only as a conclusion drawn from it:
 
-Not storing computed numbers:
+- "10k PB 44:30, Autumn 10k, 2026-09-07": a result that stays true until
+  the next PB. It goes in Race results, even when it was first spotted in
+  the data.
+- "Handles 45–50 km weeks well; above 55 km/week calf problems return
+  (2025 and 2026)": a conclusion from 12 months of data plus the interview.
+  It goes in What works.
+- "Last 4 weeks: 42 km/week, CTL 48": a stat. It is not in the profile;
+  `start_consultation` shows it.
 
-1. **Freshness.** Computing on read means the computed part is never stale.
-   A stored copy would be out of date between refreshes.
-2. **Commit noise and write load.** Storing it would mean a commit and push
-   on every refresh, possibly on every `start_consultation`: more work on a
-   cold start, and more chances to lose a push race under #8.
-3. **Strava's API terms**, where Strava is the source: raw Strava data may
-   not stay in a cache longer than seven days and must be deleted after the
-   athlete deauthorizes. A git repo keeps every version forever.
-4. **Simpler format.** The stored file holds only stated sections, so there
-   is no "never hand-edit this block" rule to enforce.
-
-The cost is that the profile on GitHub shows only stated sections.
+Because it holds no Strava data, only the athlete's own facts and the
+coach's conclusions, the profile is also clear of Strava's 7-day cache and
+deletion rules.
 
 ### Sections
 
-Target: stated part at most about 5,000 characters (~1,300 tokens), computed
-part at most about 1,500 characters (~400 tokens). Details stay in notes.
+Target: at most about 5,500 characters (~1,400 tokens), small enough to
+load at the start of every consultation. Details stay in notes.
 
-| Section | Kind | Content | Char cap |
-|---|---|---|---|
-| Background | stated | years training, sports, history | 600 |
-| Race results | stated | table: date, event, distance, time, notes. Keep the best per distance plus the last 12 months; older rows move to notes | 1,200 |
-| Tests | stated | performance tests: lab VO2max/thresholds, field tests | 500 |
-| Health | stated | current niggles, recent illness, relevant injury history, and recurring health patterns that change coaching, e.g. "ferritin drops below 40 without supplementation" (see Privacy) | 600 |
-| Constraints | stated | available days and hours, equipment, weekly limits, life load | 600 |
-| What works | stated | responses to blocks, tapers, fueling, heat. This is also the home for the "response profile" idea (D5) in `science-based-coaching.md` | 800 |
-| Preferences | stated | training style, how they like to be coached | 400 |
-| Current fitness | computed | 4- and 12-week volume per sport, longest session, race-flagged activities, fitness/fatigue/form (intervals.icu) | - |
-| Thresholds and baselines | computed | intervals.icu only: HR zones, threshold pace, FTP, resting HR, HRV band, sleep, weight trend | - |
-| Checks | computed | stale sections, conflicts between data and stated facts, missing sections | - |
+| Section | Content | Char cap |
+|---|---|---|
+| Background | years training, sports, history | 600 |
+| Race results | table: date, event, distance, time, notes. Keep the best per distance plus the last 12 months; older rows move to notes | 1,200 |
+| Tests | performance tests: lab VO2max/thresholds, field tests | 500 |
+| Health | current niggles, recent illness, relevant injury history, and recurring health patterns that change coaching, e.g. "ferritin drops below 40 without supplementation" (see Privacy) | 600 |
+| Constraints | available days and hours, equipment, weekly limits, life load | 600 |
+| Strengths and limiters | the coach's assessment: what the athlete is good at, what holds them back, e.g. "strong aerobic base, fades in the last 5 km of a half; top-end speed is the limiter" | 600 |
+| What works | responses to volume, blocks, tapers, fueling, heat. This is also the home for the "response profile" idea (D5) in `science-based-coaching.md` | 800 |
+| Preferences | training style, how they like to be coached | 400 |
 
 "Current block" (phase, focus, key sessions) is left out. It changes weekly,
-which would make the profile the busiest file in the repo. It stays in goals
-until a plan file exists (the parked `save_training_plan` idea in
-`intervals-icu.md`, or the calendar tool in `more-training-data.md`). If a
-long-running pattern emerges from it (e.g. "responds well to 3:1 blocks"),
-that goes to What works.
+and it stays in goals until a plan file exists (the parked
+`save_training_plan` idea in `intervals-icu.md`, or the calendar tool in
+`more-training-data.md`). If a long-running pattern emerges from it (e.g.
+"responds well to 3:1 blocks"), that goes to What works.
 
-Gear is left out entirely, stored or computed. Its mileage changes with
-every session, and the profile holds nothing that changes that often. Gear
-questions go to a gear tool (#12's `get_gear`), not the profile.
+### Data for building and checking the profile
 
-### Data sources: intervals.icu first, no new Strava calls
+The profile holds no data, but building and reviewing it needs a lot of it.
+That comes from `get_profile_evidence(months=12)`, a read-only tool the build
+flow calls (see below). It returns a long view, summarized so it fits in one
+response:
 
-Owner decision: base the profile on intervals.icu as much as possible, and
-pull no Strava data beyond what the server already fetches (privacy policy
-concerns; Strava's derived metrics such as `suffer_score` are not
-meaningful enough to coach on).
+- weekly volume per sport and its range, the biggest weeks and blocks, and
+  training gaps of 7+ days (often injury or illness);
+- race-flagged activities with date, distance and time;
+- best efforts at standard distances (intervals.icu);
+- fitness (CTL) peaks and troughs around races, and resting HR/HRV/sleep
+  bands (intervals.icu);
+- mismatches with the current profile, e.g. "a race-flagged run on <date>
+  isn't in Race results" or "a 10 km best effort of 44:30 beats the stated
+  PB". These are raised with the athlete and never applied automatically.
 
-So:
+Sources (owner decision: intervals.icu first, no new Strava data):
 
 - **intervals.icu connected** (personal path, or a remote user with a key):
-  everything computed comes from intervals.icu, **including activities**.
-  This changes today's remote-path rule, where activities always come from
-  Strava and intervals.icu is used for wellness only
-  (`_get_active_data_client` / `_get_wellness_client` in `server.py`). For
-  the profile only, the server prefers intervals.icu when a key is connected.
-- **Strava only**: the computed part uses only the activity list the server
-  already fetches for `get_activities`. No `/athlete`, no gear, no
-  `best_efforts` detail fetches, no `suffer_score`. Fitness/form and
-  baselines show "connect intervals.icu to see this".
+  everything comes from intervals.icu, including activities. This differs
+  from today's remote-path rule, where activities always come from Strava
+  (`_get_active_data_client` / `_get_wellness_client` in `server.py`). The
+  evidence tool prefers intervals.icu when a key is connected.
+- **Strava only:** only the activity list the server already fetches for
+  `get_activities` (volume, longest sessions, gaps, and race flags from
+  `workout_type`: 1 = run race, 11 = ride race, community-documented). No
+  `/athlete`, gear, `best_efforts` detail fetches or `suffer_score`. The
+  evidence says what is missing, e.g. "connect intervals.icu for best
+  efforts and fitness history".
 
-| Field | Strava-only remote user | intervals.icu connected (either path) |
+| Evidence | Strava only | intervals.icu connected |
 |---|---|---|
-| Volume per sport, longest session | activity list (already fetched) | `GET /athlete/0/activities` |
-| Race-flagged activities | `workout_type` on the summaries in that list (1 = run race, 11 = ride race; community-documented) | activity type/name; `RACE_*` calendar events later |
-| Best efforts at standard distances | not available | `pace-curves` / `power-curves` (new client method, shared with #12) |
-| Fitness / fatigue / form | not available | `ctl`, `atl` from wellness |
-| HR zones, threshold pace, FTP | not available in the profile | `sport-settings` (new client method, shared with #12) |
-| Resting HR, HRV, sleep, weight | not available | wellness (`restingHR`, `hrv`, `sleepSecs`, `weight`) |
+| Volume, longest sessions, gaps | activity list (already fetched) | `GET /athlete/0/activities` |
+| Race-flagged activities | `workout_type` on those summaries | activity type/name; `RACE_*` calendar events later |
+| Best efforts | not available | `pace-curves` / `power-curves` (new client method, shared with #12) |
+| Fitness history, resting HR, HRV, sleep | not available | wellness |
+| Thresholds (to check against Tests) | not available | `sport-settings` (new client method, shared with #12) |
 
-### Request costs and caching
+Cost: Strava-only, one call is 3–5 activity-list requests for 12 months (200
+per page), with no per-activity fetches. It runs when the profile is built
+or reviewed, not on every consultation, so it doesn't matter for Strava's
+shared limits (100 reads per 15 minutes, 1,000 per day). intervals.icu uses
+per-user keys and has no published limit. No cache is needed; the result is
+not stored.
 
-- **Strava only:** one read uses 1–2 list requests for 12 weeks (200 per
-  page), and shares them with `start_consultation` (#9 already fetches 14
-  days and 4 weekly totals: fetch 12 weeks once and derive both). The build
-  flow's 12-month evidence pass is 3–5 list requests, once per athlete.
-  Strava limits are per application and shared by all users (100 reads per
-  15 minutes, 1,000 per day), so there are still no per-activity fetches.
-- **intervals.icu:** per-user keys and no published limit. A read is about
-  3–4 calls (activities, wellness, sport-settings, curves).
-- Cache computed results per user for 6 hours in `store.db`, not in the repo.
-  An explicit `refresh_athlete_profile` bypasses the cache.
-- On a rate limit or API error, return the stated sections plus "computed
-  data unavailable" in Checks instead of failing the read.
-- Clear the cache when the user disconnects.
+The aggregation code (weekly totals, gaps, bands) should be one module that
+#12's summary tools reuse.
 
 ### Tools
 
-1. **`read_athlete_profile`**: returns stated sections, then computed
-   sections, then Checks. Section metadata is shown in compact form. Each
-   section's short id (e.g. `health`) is shown so the model can pass it to
-   `update_athlete_profile`. Until #9 lands, `start_consultation`'s guidance
-   tells the model to call it first. After #9, `start_consultation` includes
-   the output directly.
+1. **`read_athlete_profile`**: returns the profile, then Checks (stale and
+   missing sections, duplicated headings). Section metadata is shown in
+   compact form. Each section's short id (e.g. `health`) is shown so the
+   model can pass it to `update_athlete_profile`. It makes no data API
+   calls. Until #9 lands, `start_consultation`'s guidance tells the model to
+   call it first. After #9, `start_consultation` includes it directly.
 2. **`update_athlete_profile(section, content, source, mode, base)`**:
    - `section`: one of the fixed ids.
    - `mode`: `replace` (the new body for that section) or `append` (add
@@ -169,58 +155,45 @@ So:
    - An `##` heading inside `content` is demoted to `###`.
    - The tool description says to call it only after the athlete confirms
      the change.
-3. **`refresh_athlete_profile(months=3)`**: recomputes the computed sections,
-   bypassing the cache, and returns *evidence* the model can check stated
-   facts against. With `months=12` (the build flow) it returns a longer view:
-   - weekly volume per sport and its range, the biggest weeks, and training
-     gaps of 7+ days (often injury or illness);
-   - race-flagged activities with date, distance and time;
-   - best efforts at standard distances (intervals.icu);
-   - fitness (CTL) peaks and troughs, and resting HR/HRV/sleep bands
-     (intervals.icu);
-   - *suggestions* for stated sections, e.g. "a race-flagged run on <date>
-     isn't in Race results; add it?". Suggestions are never applied
-     automatically. It writes nothing to the repo.
+3. **`get_profile_evidence(months=12)`**: the data view above. Read-only.
 4. **`build_athlete_profile`**: guidance only, like `discuss_goals`. It
    walks the model through the three-phase build below. #11 (onboarding) and
    the backfill for existing athletes both use it, and the athlete can ask
    for it by name ("let's rebuild my profile").
 5. **Save-time checklist**: `save_consultation_notes` ends its success output
    with a one-line checklist: "New result, health change, availability
-   change, or something that worked? Propose a profile update."
-6. **Checks** (in the read output, no separate tool): stale sections,
-   conflicts (e.g. an intervals.icu best effort faster than the stated PB for
-   that distance, or a race-flagged activity missing from Race results) and
-   missing sections. The coach mentions these, but doesn't have to act on
-   them every day.
+   change, or a new conclusion about what works? Propose a profile update."
 
 ### Building the profile
 
 The profile is only useful if it is right, so building it is a
 conversation, not a form. Three phases:
 
-1. **Interview.** The coach asks about each stated section in turn:
-   background, races and PBs, tests, health (current issues, history,
-   recurring patterns), constraints, what has and hasn't worked,
-   preferences. Open questions first, then specifics. Nothing is saved yet;
-   the coach keeps a working list of claims ("10k PB ~45:00 last autumn",
-   "usually 5 days a week", "calf issues on hills").
-2. **Evidence.** The coach calls `refresh_athlete_profile(months=12)` and,
-   for existing athletes, `search_consultation_notes` per section (race, PB,
+1. **Interview.** The coach asks about each section in turn: background,
+   races and PBs, tests, health (current issues, history, recurring
+   patterns), constraints, strengths and limiters as the athlete sees them,
+   what has and hasn't worked, preferences. Open questions first, then
+   specifics. Nothing is saved yet; the coach keeps a working list of claims
+   ("10k PB ~45:00 last autumn", "usually 5 days a week", "calf issues on
+   hills").
+2. **Evidence.** The coach calls `get_profile_evidence(months=12)` and, for
+   existing athletes, `search_consultation_notes` per section (race, PB,
    injury, pain, availability, taper, fueling) plus the current goals file,
    instead of reading every note. It then sorts each claim:
    - **confirmed**: the data agrees ("10k 45:05 on 2025-10-12");
    - **contradicted**: the data says otherwise ("you said 5 days a week;
      the last 12 months average 3.4, with a 5-week gap in March");
    - **not in the data**: tests, health, preferences.
-   It also collects what the data shows that the athlete didn't mention: a
-   faster best effort, a race not listed, a big block before a good result.
-3. **Discussion.** The coach goes through contradictions and new findings
-   one at a time and asks, rather than overrules: the athlete may know why
-   (a watch left at home, a race run as training, a deliberate break). Then
-   it proposes each section's final text, the athlete confirms or corrects,
-   and it is saved right away. Saving per section makes the build
-   resumable, which #11 needs for onboarding.
+
+   It also collects what the data shows that the athlete didn't mention (a
+   faster best effort, a race not listed, a big block before a good result)
+   and drafts its own conclusions: strengths, limiters, what seems to work.
+3. **Discussion.** The coach goes through contradictions, new findings and
+   its draft conclusions one at a time, and asks rather than overrules: the
+   athlete may know why (a watch left at home, a race run as training, a
+   deliberate break). Then it proposes each section's final text, the
+   athlete confirms or corrects, and it is saved right away. Saving per
+   section makes the build resumable, which #11 needs for onboarding.
 
 Fixed rules for conflicts:
 
@@ -231,8 +204,7 @@ Fixed rules for conflicts:
   prefer the activity data, then the athlete, then the latest note, and show
   the values to the athlete.
 - **PBs** are race results, never inferred from training efforts. A faster
-  training best effort is raised in the discussion and later as a Check, not
-  saved as a PB.
+  training best effort is raised in the discussion, not saved as a PB.
 - Anything still unresolved is left out and noted in the section ("5k PB:
   athlete unsure, not in the data").
 
@@ -243,24 +215,25 @@ Three small mechanisms, so the profile doesn't rot after the build:
 - **Staleness thresholds.** Each section has a date (`as of`). When a
   section is older than its threshold, `read_athlete_profile` lists it under
   Checks as stale, so the coach knows to ask "are you still training 5 days
-  a week?" at a natural moment. Nothing is changed automatically.
+  a week?" at a natural moment, or to re-run the evidence for its
+  conclusions. Nothing is changed automatically.
 
   | Section | Stale after |
   |---|---|
   | Constraints | 90 days |
   | Health | 30 days when it lists a current issue, otherwise 180 |
-  | What works | 180 days |
+  | Strengths and limiters, What works | 180 days |
   | Preferences, Tests | 365 days |
-  | Background | never |
-  | Race results | never; the missing-race Check covers it |
+  | Background, Race results | never |
 
 - **`base` check.** Protects against two chats editing the same section at
   once. The model passes a short fingerprint of the section as it read it;
   if the section has changed since (another session saved something), the
   update is rejected and the current text is returned so the model can
   merge instead of silently overwriting it.
-- **Save-time checklist and Checks**, above, prompt small updates during
-  normal consultations.
+- **Save-time checklist**, above, prompts small updates during normal
+  consultations. A periodic review (e.g. after each race or every few
+  months) re-runs phases 2–3 for the stale sections.
 
 ### Storage and format
 
@@ -343,37 +316,21 @@ _as of 2026-01-10 · interview_
 - 5 days/week, about 6 h. Long run on Saturday or Sunday. No training on Wednesdays.
 - Gym access twice a week; no treadmill.
 
+## Strengths and limiters
+_as of 2026-03-02 · interview_
+- Strength: aerobic durability; long runs hold pace to 2 h when fuelled.
+- Limiter: top-end speed; 5k is relatively weaker than 10k/half.
+
 ## What works
 _as of 2026-03-02 · interview_
 - Two-week taper with one short sharp session in race week.
+- Volume: handles 45–50 km/week; above 55 km/week calf problems returned (2025, 2026).
 - Long runs over 2 h need 60 g/h carbohydrate or the last 30 min fall apart.
 
 ## Preferences
 _as of 2026-01-10 · interview_
 - Wants reasons behind sessions; prefers effort (RPE) targets over pace on hills.
 ```
-
-What `read_athlete_profile` appends after the stored part (not stored), for
-a user with intervals.icu connected:
-
-```markdown
-## Current fitness (computed 2026-09-25 from intervals.icu)
-- Run: last 4 wk 42 km/wk (4.4 h), last 12 wk 38 km/wk. Longest run 24 km (2026-09-14).
-- Ride: last 4 wk 1.8 h/wk (commutes).
-- Fitness (CTL) 48, fatigue (ATL) 55, form -7.
-
-## Thresholds and baselines (computed)
-- Run: LTHR 172 bpm, threshold pace 4:25/km. Z2 128–145 bpm.
-- Resting HR 48–51 (30-day band), HRV 62–74 ms, sleep 7.1 h avg. Weight 70.2 kg, stable.
-
-## Checks
-- Stale: Constraints (as of 2026-01-10, over 90 days).
-- Conflict: race-flagged run "Autumn 10k" on 2026-09-07 is not in Race results.
-- Conflict: best effort 10 km 44:30 on 2026-09-07 beats the stated 10 km PB 45:05.
-```
-
-For a Strava-only user, Current fitness shows volume, longest session and
-race-flagged activities; the rest says "connect intervals.icu to see this".
 
 ### Goals vs profile
 
@@ -431,9 +388,9 @@ Rules:
 - **YAML front matter for per-section metadata.** One file, but the metadata
   sits away from its section and goes out of sync when a heading is edited
   by hand.
-- **Store computed sections in the repo.** Readable on GitHub, but it
-  conflicts with Strava's 7-day cache and deletion rules, adds a commit per
-  refresh, and goes stale (see above).
+- **Stats in the profile** (stored, or computed on read like an earlier
+  draft of this doc). Duplicates the data tools, goes stale if stored, and
+  mixes numbers with conclusions. Dropped by owner decision.
 - **Let the model rewrite the whole profile after every consultation.**
   Simple, but it drifts, loses details and races with concurrent sessions.
 
@@ -441,10 +398,11 @@ Rules:
 
 Owner decisions (2026-09-27):
 
-1. **Stated vs computed.** Durable facts, including PBs and race results,
-   are stored (stated), even when first found in the data. Rolling numbers
-   (recent volume, fitness/form, baselines) are computed on read with a
-   6-hour cache in `store.db` and never stored.
+1. **The profile is conclusions, not stats.** It holds the coach's
+   reasoning and conclusions about the athlete from the interview and the
+   data, plus durable facts such as PBs and race results. Weekly stats
+   (volume, fitness/form, baselines) are not part of it, stored or
+   computed; the data tools recompute them when needed.
 2. **Current block** stays in goals. Long-running patterns from it can move
    to What works.
 3. **Blood work:** recurring patterns that matter for coaching go in Health
@@ -452,25 +410,25 @@ Owner decisions (2026-09-27):
    go to notes on request.
 4. **Path:** one file per user, `athlete/<user_id>.md`
    (`athlete-profile.md` on the personal path).
-5. **Data sources:** intervals.icu first, including activities when a key is
-   connected. No new Strava data: the Strava-only profile uses only the
-   activity list already fetched. No `suffer_score`.
+5. **Data sources** for the evidence: intervals.icu first, including
+   activities when a key is connected. No new Strava data: Strava-only users
+   get only the activity list already fetched. No `suffer_score`.
 6. **No per-session data in the profile:** no gear or anything else that
    changes with every training.
 7. **Building the profile** is three phases: interview, evidence from a
    12-month data pass, then discussion of what the data confirms or
-   contradicts (`build_athlete_profile`).
+   contradicts (`build_athlete_profile`, `get_profile_evidence`).
 
 Adopted as proposed (the owner can still change them): the staleness
 thresholds and the optional `base` check (see "Keeping it current").
 
 Still open:
 
-- Using intervals.icu activities for the profile on the remote path while
-  other tools keep using Strava could show slightly different numbers in
-  the same consultation (e.g. a manual Strava entry not synced to
-  intervals.icu). Recommended: accept it for v1 and say the source in each
-  computed heading; revisit if #12 moves all remote tools to intervals.icu.
+- On the remote path, the evidence would use intervals.icu activities while
+  other tools still read Strava, so numbers could differ slightly (e.g. a
+  manual Strava entry not synced to intervals.icu). Recommended: accept it
+  and name the source in the evidence output; revisit if #12 moves remote
+  tools to intervals.icu.
 
 ## Rollout
 
@@ -482,14 +440,14 @@ Hard dependency: #8 merged. Phase 1 adds `git_update_file` on top of it.
      `update_athlete_profile`
    - a line in `start_consultation`'s guidance to call it first
    - updated `save_goals`/`discuss_goals` descriptions
-2. **Computed sections and evidence (M).**
-   - a shared aggregation module (weekly totals, longest session, gaps,
-     baseline bands) that #12 reuses
+2. **Evidence (M).**
+   - a shared aggregation module (weekly totals, longest sessions, gaps,
+     bands) that #12 reuses
    - intervals.icu: activities, wellness, and the new `sport-settings` and
      curves client methods (shared with #12, whichever lands first)
-   - Strava-only: volume and race flags from the existing activity list
-   - the 6-hour cache in `store.db`, cleared on disconnect
-   - conflict checks and `refresh_athlete_profile(months)`
+   - Strava-only: the existing activity list
+   - `get_profile_evidence(months)` with the profile mismatch list
+
 3. **Build flow and habits (S).** `build_athlete_profile` guidance, the
    save-time checklist.
 4. **After #9:** `start_consultation` includes the profile output directly.
@@ -507,17 +465,16 @@ takes more users. It is tracked separately.
   - an `##` inside content is demoted;
   - the cap is enforced;
   - `base` mismatch is rejected with the current body;
-  - the stored file never contains computed sections.
+  - the stored file and the read output contain no stats.
 - Concurrency (on #8's harness with the `post-commit` race hook):
   - updates to two different sections, where one loses the push race, both
     land;
   - two `append`s to Race results both land.
-- Computed, with stubbed clients:
-  - with an intervals.icu key, no Strava request is made for the profile;
-  - Strava-only: a read makes only activity-list requests (at most 2 for 12
-    weeks, at most 5 for `months=12`), and a second read within 6 hours
-    makes none;
-  - a rate limit still returns the stated sections.
+- Evidence, with stubbed clients:
+  - with an intervals.icu key, no Strava request is made;
+  - Strava-only: 12 months uses only activity-list requests (at most 5);
+  - `read_athlete_profile` makes no data API calls;
+  - a rate limit returns a clear "evidence unavailable" message.
 - Integration: the profile is per user, and user A's read never shows user
   B's data.
 - Manual: run `build_athlete_profile` with a real athlete; check that the
