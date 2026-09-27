@@ -69,7 +69,7 @@ class IntervalsClient:
         precomputed HR/power zone times and per-lap interval stats.
 
         Args:
-            activity_id: The intervals.icu activity ID (e.g. "i180171555")
+            activity_id: The intervals.icu activity ID (e.g. "i12345678")
             intervals: Whether to include icu_intervals / zone-time data
 
         Returns:
