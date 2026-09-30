@@ -11,6 +11,9 @@ from .analyze_activity import analyze_activity_tool, analyze_activity_handler
 from .analyze_lap import analyze_lap_tool, analyze_lap_handler
 from .save_goals import save_goals_tool, save_goals_handler
 from .read_goals import read_goals_tool, read_goals_handler
+from .save_athlete_profile import save_athlete_profile_tool, save_athlete_profile_handler
+from .read_athlete_profile import read_athlete_profile_tool, read_athlete_profile_handler
+from .build_athlete_profile import build_athlete_profile_tool, build_athlete_profile_handler
 from .save_consultation_notes import save_consultation_notes_tool, save_consultation_notes_handler
 from .read_consultation_notes import read_consultation_notes_tool, read_consultation_notes_handler
 from .list_consultation_notes import list_consultation_notes_tool, list_consultation_notes_handler
@@ -41,6 +44,12 @@ __all__ = [
     "save_goals_handler",
     "read_goals_tool",
     "read_goals_handler",
+    "save_athlete_profile_tool",
+    "save_athlete_profile_handler",
+    "read_athlete_profile_tool",
+    "read_athlete_profile_handler",
+    "build_athlete_profile_tool",
+    "build_athlete_profile_handler",
     "save_consultation_notes_tool",
     "save_consultation_notes_handler",
     "read_consultation_notes_tool",

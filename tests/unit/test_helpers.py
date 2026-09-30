@@ -14,6 +14,7 @@ from train_with_gpt.helpers import (
     training_repo_not_configured_message,
     user_scoped_goals_file,
     user_scoped_notes_dir,
+    user_scoped_profile_file,
 )
 
 
@@ -23,12 +24,14 @@ def test_user_scoped_paths_for_oauth_user():
     repo = Path("/repo")
     assert user_scoped_notes_dir(repo, "42") == (repo / "notes" / "42", "notes/42")
     assert user_scoped_goals_file(repo, "42") == (repo / "goals" / "42.md", "goals/42.md")
+    assert user_scoped_profile_file(repo, "42") == (repo / "athlete" / "42.md", "athlete/42.md")
 
 
 def test_user_scoped_paths_for_personal_path():
     repo = Path("/repo")
     assert user_scoped_notes_dir(repo, None) == (repo / "notes", "notes")
     assert user_scoped_goals_file(repo, None) == (repo / "goals.md", "goals.md")
+    assert user_scoped_profile_file(repo, None) == (repo / "athlete-profile.md", "athlete-profile.md")
 
 
 def test_current_user_id_is_none_without_an_authenticated_request():

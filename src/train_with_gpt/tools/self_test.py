@@ -53,7 +53,7 @@ def self_test_prompt_result() -> GetPromptResult:
    For each, report only OK or the error message, in one short table. Do not
    summarize, analyze or comment on the data they return.
 3. Do NOT call any other tool. In particular never call {", ".join(f"`{t}`" for t in WRITE_TOOLS if t != "self_test")}:
-   they change my real notes, goals or configuration. `{"`, `".join(READ_ONLY_TOOLS_NOT_IN_PROMPT)}` are skipped on purpose.
+   they change my real notes, goals, athlete profile or configuration. `{"`, `".join(READ_ONLY_TOOLS_NOT_IN_PROMPT)}` are skipped on purpose.
 4. Finish with the list of tools above that you could not find in this client
    (not loaded or not available), or "all tools found".
 Never claim anything works beyond what the results show."""

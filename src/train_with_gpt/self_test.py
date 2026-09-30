@@ -64,6 +64,8 @@ READ_ONLY_TOOLS = {
     "get_current_date": "{}",
     "start_consultation": "{}",
     "read_goals": "{}",
+    "read_athlete_profile": "{}",
+    "build_athlete_profile": "{}",
     "list_consultation_notes": "{}",
     "read_consultation_notes": "{}",
     "search_consultation_notes": '{"query": "test"}',
@@ -73,7 +75,7 @@ READ_ONLY_TOOLS = {
     "get_resting_heart_rate": "the last 3 days (start_date/end_date)",
 }
 READ_ONLY_TOOLS_NOT_IN_PROMPT = ("analyze_activity", "analyze_lap", "draft_issue")
-WRITE_TOOLS = ("save_goals", "save_consultation_notes", "setup_training_repo", "self_test")
+WRITE_TOOLS = ("save_goals", "save_athlete_profile", "save_consultation_notes", "setup_training_repo", "self_test")
 
 _SAFE_MARKER_NAME = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")
 

@@ -1,7 +1,8 @@
 """Start consultation tool: the single entry point for every training conversation.
 
-It returns what the server knows about the caller (saved goals, consultation
-notes, connected data sources) plus guidance for both paths - onboarding a new
+It returns what the server knows about the caller (saved goals and athlete
+profile, consultation notes, connected data sources), the full athlete profile
+when one is saved, plus guidance for both paths - onboarding a new
 athlete, or a consultation with a returning one - and leaves the choice to the
 model, which also sees the athlete's message.
 """
@@ -22,8 +23,10 @@ from ..helpers import (
     PULLED_UPDATES_PREFIX,
     current_user_id,
     git_pull_and_read,
+    read_file_if_exists,
     user_scoped_goals_file,
     user_scoped_notes_dir,
+    user_scoped_profile_file,
 )
 from ..intervals_client import IntervalsClient
 from ..strava_client import StravaClient
@@ -35,10 +38,12 @@ def start_consultation_tool() -> Tool:
         name="start_consultation",
         description=(
             "Call this first in any training conversation. It works for a brand-new athlete "
-            "(introduces the tool, sets up their goals) and for a returning one (a coaching "
-            "consultation). Returns what the server knows about this athlete - whether goals "
-            "and consultation notes are saved, which data sources are connected - and guidance "
-            "for both paths; decide which one fits from those facts and the athlete's message."
+            "(introduces the tool, builds their athlete profile, sets up their goals) and for a "
+            "returning one (a coaching consultation). Returns what the server knows about this "
+            "athlete - whether goals, an athlete profile and consultation notes are saved, which "
+            "data sources are connected - the full athlete profile when one is saved, and "
+            "guidance for both paths; decide which one fits from those facts and the athlete's "
+            "message."
         ),
         inputSchema={
             "type": "object",
@@ -55,10 +60,15 @@ class TrainingHistory:
     no activity data). `storage` is "ok", "not_configured", "missing" or "error"."""
     storage: str
     has_goals: bool = False
+    profile: Optional[str] = None  # the saved athlete profile's full text
     notes_count: int = 0
     latest_note: Optional[str] = None  # YYYY-MM-DD
     note: Optional[str] = None  # sync note or error detail for the model
     synced: bool = True  # False: the facts come from a clone that couldn't be synced
+
+    @property
+    def has_profile(self) -> bool:
+        return self.profile is not None
 
 
 def _sync_failed(sync_note: Optional[str]) -> bool:
@@ -68,15 +78,16 @@ def _sync_failed(sync_note: Optional[str]) -> bool:
     return bool(sync_note) and any(part.startswith("(Note:") for part in sync_note.split("\n\n"))
 
 
-def _goals_and_note_dates(goals_file: Path, notes_dir: Path) -> tuple[bool, list[str]]:
-    """Whether the goals file exists, and the notes' dates (newest first), from
-    file names only - no note is read."""
+def _saved_history(goals_file: Path, profile_file: Path, notes_dir: Path) -> tuple[bool, Optional[str], list[str]]:
+    """Whether the goals file exists, the athlete profile's text (None if not
+    saved), and the notes' dates (newest first), from file names only - no note
+    is read."""
     stems = sorted((p.stem for p in notes_dir.glob("*.md")), reverse=True) if notes_dir.exists() else []
-    return goals_file.exists(), [stem[:10] for stem in stems]
+    return goals_file.exists(), read_file_if_exists(profile_file), [stem[:10] for stem in stems]
 
 
 def read_training_history(user_id: Optional[str]) -> TrainingHistory:
-    """Sync the training repo and look up `user_id`'s goals and notes (blocking)."""
+    """Sync the training repo and look up `user_id`'s goals, profile and notes (blocking)."""
     if not config.training_repo_path:
         return TrainingHistory(storage="not_configured")
     repo_path = Path(config.training_repo_path)
@@ -87,9 +98,10 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
         return TrainingHistory(storage="error", note=f"Not a git repository: {repo_path}")
     try:
         goals_file, _ = user_scoped_goals_file(repo_path, user_id)
+        profile_file, _ = user_scoped_profile_file(repo_path, user_id)
         notes_dir, _ = user_scoped_notes_dir(repo_path, user_id)
-        sync_note, (has_goals, dates) = git_pull_and_read(
-            repo_path, lambda: _goals_and_note_dates(goals_file, notes_dir)
+        sync_note, (has_goals, profile, dates) = git_pull_and_read(
+            repo_path, lambda: _saved_history(goals_file, profile_file, notes_dir)
         )
     except Exception as e:  # never let a storage problem block the conversation
         print(f"Error reading training history: {e}", file=sys.stderr)
@@ -97,6 +109,7 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
     return TrainingHistory(
         storage="ok",
         has_goals=has_goals,
+        profile=profile,
         notes_count=len(dates),
         latest_note=dates[0] if dates else None,
         note=sync_note,
@@ -145,6 +158,9 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
     if history.storage == "ok":
         lines.append("- **Notes storage:** set up")
         lines.append(f"- **Saved goals:** {'yes' if history.has_goals else 'none'}")
+        lines.append(
+            f"- **Athlete profile:** {'yes (full text below)' if history.has_profile else 'none'}"
+        )
         if history.notes_count:
             lines.append(
                 f"- **Consultation notes:** {history.notes_count}, most recent {history.latest_note}"
@@ -169,10 +185,29 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
         else:
             fix = "if the athlete wants goals and notes kept between chats, offer to run **setup_training_repo**"
         lines.append(
-            f"- **Notes storage:** {status}. Saved goals and notes can't be checked, read or saved "
-            f"in this chat, so don't call the goals/notes tools; {fix}."
+            f"- **Notes storage:** {status}. Saved goals, profile and notes can't be checked, read "
+            f"or saved in this chat, so don't call the goals/profile/notes tools; {fix}."
         )
     return "## What the server knows about this athlete\n\n" + "\n".join(lines) + "\n\n"
+
+
+def _profile_section(history: TrainingHistory) -> str:
+    """The saved athlete profile, verbatim: including it here means every
+    consultation starts from it, without relying on a separate read."""
+    if history.storage != "ok" or not history.has_profile:
+        return ""
+    return f"""## Athlete profile (saved)
+
+This is the athlete's confirmed profile: use it as the baseline for this conversation.
+Don't re-ask what it already answers. If the athlete says something that changes it (a new
+race result, an injury, different availability), propose the updated text and save the
+whole profile with **save_athlete_profile** once they confirm.
+
+----- athlete profile -----
+{history.profile.strip()}
+----- end of athlete profile -----
+
+"""
 
 
 def _choose_path_section(history: TrainingHistory) -> str:
@@ -184,20 +219,28 @@ def _choose_path_section(history: TrainingHistory) -> str:
         )
     elif not history.synced:
         hint = (
-            "**Here the notes storage couldn't be synced just now**, so the goals/notes facts come "
-            "from a possibly out-of-date copy and may miss what was saved from another device. "
+            "**Here the notes storage couldn't be synced just now**, so the goals/profile/notes facts "
+            "(and the profile text above) come from a possibly out-of-date copy and may miss what "
+            "was saved from another device. Don't build or save an athlete profile in this chat "
+            "(it could overwrite one saved elsewhere); that overrides the profile steps below. "
             "Don't treat them as final: if they show no history, ask ONE question (first time "
             "with this coach, or worked together before?) before onboarding; if they show "
             "history, it's a returning athlete (Path B)."
         )
-    elif not history.has_goals and not history.notes_count:
-        hint = "**Here: no goals and no notes, so this looks like a NEW athlete** (Path A)."
+    elif not history.has_goals and not history.notes_count and not history.has_profile:
+        hint = "**Here: no goals, no profile and no notes, so this looks like a NEW athlete** (Path A)."
     elif history.notes_count and history.has_goals:
         hint = "**Here: goals and notes are saved, so this is a RETURNING athlete** (Path B)."
     elif history.notes_count:
         hint = (
             "**Here: notes exist but no goals, so this is a RETURNING athlete without goals** "
             "(Path B; offer the goal-setting conversation early on)."
+        )
+    elif not history.has_goals:
+        hint = (
+            "**Here: an athlete profile is saved but no goals or notes, so onboarding was "
+            "probably cut short.** Treat them as returning (Path B): build on the profile "
+            "above, and continue with the goal-setting conversation."
         )
     else:
         hint = (
@@ -207,15 +250,22 @@ def _choose_path_section(history: TrainingHistory) -> str:
             "they want to pick up where they left off or first hear what the coach can do; "
             "either way stay in Path B and build on the saved goals."
         )
+    if (history.storage == "ok" and history.synced and not history.has_profile
+            and (history.has_goals or history.notes_count)):
+        hint += (
+            " **No athlete profile yet:** once the athlete's first question is dealt with, "
+            "offer to build one (**build_athlete_profile**). Offer, don't force it; if they "
+            "decline, carry on."
+        )
     return f"""## Step 1: Choose the path
 
 You decide which path fits, from the facts above and what the athlete wrote:
 
-- **Path A - New athlete (onboarding):** only when there are no saved goals and no notes
-  (the facts decide this, not the athlete's wording). When storage is unavailable the
+- **Path A - New athlete (onboarding):** only when there are no saved goals, no profile and
+  no notes (the facts decide this, not the athlete's wording). When storage is unavailable the
   facts can't tell, so an athlete who says they're new ("set me up", "first time")
   goes here.
-- **Path B - Returning athlete (consultation):** any saved goals or notes, even if the
+- **Path B - Returning athlete (consultation):** any saved goals, profile or notes, even if the
   athlete says "set me up" or "I'm new" - greet them as returning and mention what's
   saved. If they want to know what the coach can do, explain it within Path B.
 - An athlete with saved history is never onboarded from scratch. If they ask to
@@ -325,23 +375,30 @@ _COACHING_APPROACH = """## Step 2: Your Coaching Approach (both paths)
 
 _PATH_A = """## Path A: Onboarding a New Athlete
 
-Only for an athlete with no saved goals or notes (see Step 1).
+Only for an athlete with no saved goals, profile or notes (see Step 1).
 
 1. **get_current_date**, then **get_activities** for roughly the last 2-4 weeks, so
    you open with something concrete about their recent training.
 2. **Introduce yourself briefly** (a few sentences, not a feature list): you coach
-   from their recent activities, you remember their goals and past consultations
-   between chats (when notes storage is set up), and you can dig into any single
-   workout. Mention recovery data only as connected or not, per the facts above.
-3. **Set their goals** with the goal-setting conversation below, one question at a
-   time, then **save_goals**.
-4. **Close the first session:** summarize, save a short note with
+   from their recent activities, you remember their profile, goals and past
+   consultations between chats (when notes storage is set up), and you can dig into
+   any single workout. Mention recovery data only as connected or not, per the facts
+   above.
+3. **Build their athlete profile first:** call **build_athlete_profile** and follow it
+   (interview, check against their data, confirm, **save_athlete_profile**). It is the
+   longest step, so say roughly how long it takes; if the athlete would rather start
+   with their goals, do step 4 first and build the profile next session.
+4. **Set their goals** with the goal-setting conversation below, one question at a
+   time, building on the profile (don't re-ask what it covers), then **save_goals**.
+5. **Close the first session:** summarize, save a short note with
    **save_consultation_notes** (what you learned, and anything still to ask), and
    explain the routine: start each chat with "start a consultation", say "save
-   notes" at the end of a useful one, and "update my goals" when things change.
+   notes" at the end of a useful one, and "update my goals" or "update my profile"
+   when things change.
 
 If the athlete stops partway, still save a note listing what's done and what's
-pending, so the next session can pick it up.
+pending (e.g. "profile: interview done, not yet saved"), so the next session can
+pick it up.
 
 """
 
@@ -355,10 +412,9 @@ their recent activities first (get_activities) so you can reference them.
 1. **Primary goal** - what they're training for (event, race, milestone, or "no
    event, general fitness" - both are fine), specific target, date, and why it
    matters to them
-2. **Current fitness** - recent benchmarks (check their activities first!),
-   current volume, training background and experience
-3. **Constraints & context** - time per week, injury history or limitations, life
-   commitments, training environment/equipment
+2. **Starting point for this goal** - how far they are from the target (check their
+   activities first!){starting_point}
+3. **Timeline** - milestones on the way, and the current training block (phase, focus)
 4. **Secondary priorities** - staying healthy, enjoying the process, balance with
    life, other fitness goals
 
@@ -371,20 +427,28 @@ You: "I can see from your recent activities that you're running consistently. Wh
 Athlete: "A 5k race in March"
 You: "Great! Do you have a specific time goal in mind?"
 
-**Then** write a clear, natural-language summary - primary goal with specifics,
-current starting point (reference the activities you saw), key constraints,
-timeline and milestones, what success looks like - {save_goals}. For example:
+**Then** write a clear, natural-language summary of the goal - primary goal with
+specifics, why it matters, timeline and milestones, the current block, what success
+looks like (the starting point shapes the plan but stays out of this summary) -
+{save_goals}. For example:
 
 "The athlete is training for a 5km race on March 15th with a goal of breaking 17
-minutes; current best is 18:30. Recent training: consistent running, about
-40-50km/week with a couple of quality sessions. History of shin splints, so
-intensity progresses carefully. Trains 5-6 days a week, Wednesdays off for work.
-Success means hitting the time AND arriving at race day healthy."
+minutes. It matters because it's a club championship. Milestone:
+sub-17:45 at a parkrun by mid-February. Current block: base building until mid-January,
+then threshold work. Success means hitting the time AND arriving at race day healthy."
 
 """
 
 
 _SAVE_GOALS = "and save it with **save_goals** (it replaces any previously saved goals)"
+_STARTING_POINT_PROFILE = (
+    ". Background, PBs, constraints and injury history belong in the athlete profile, "
+    "not the goals: take them from the profile, and if it's missing, ask only what this "
+    "goal needs and keep those facts for the profile"
+)
+_STARTING_POINT_NO_STORAGE = (
+    ", plus what shapes the plan: time per week, injuries or limitations, life commitments"
+)
 _SHARE_GOALS = "and share it in the chat so the athlete can keep it (it can't be saved in this chat)"
 
 
@@ -430,10 +494,14 @@ _PATH_B = """## Path B: Consultation with a Returning Athlete
 1. **get_current_date** - today's date and day of week, so you can reason about
    "last week", "yesterday" and training cycles
 
-2. **read_goals** - their objectives, timeline and constraints; reference them
+2. **The athlete profile** - if one is saved, it's included above in full: it's your
+   baseline for who they are (no need to read it again). If none is saved, offer to
+   build one (**build_athlete_profile**) at a natural moment, without forcing it.
+
+3. **read_goals** - their objectives, timeline and current block; reference them
    throughout. If no goals are saved, offer the goal-setting conversation above.
 
-3. **list_consultation_notes**, then **read_consultation_notes** (and **search_consultation_notes** as needed)
+4. **list_consultation_notes**, then **read_consultation_notes** (and **search_consultation_notes** as needed)
    - list_consultation_notes gives you a dated index (date + one-line headline) of every
      past consultation, without their full text
    - Read the ENTIRE index, not just the top few lines — headlines are cheap, so scan all
@@ -452,11 +520,11 @@ _PATH_B = """## Path B: Consultation with a Returning Athlete
    - Use all=true only when you genuinely need the complete history (e.g. a full-season
      review)
 
-4. **get_activities** - what they've done since the last consultation, current
+5. **get_activities** - what they've done since the last consultation, current
    patterns and volume
 
 **Then begin:**
-1. Briefly acknowledge what you learned (goals, recent notes, recent activities, today's date)
+1. Briefly acknowledge what you learned (profile, goals, recent notes, recent activities, today's date)
 2. Ask ONE open question about how they're doing or what's on their mind
 3. Let the athlete guide where the conversation goes
 
@@ -467,6 +535,9 @@ _REMINDERS = """## Important Reminders (both paths)
 - ONE question at a time - let them answer before moving on
 - Save consultation notes at the END of meaningful conversations
 - Update goals when they evolve (save_goals)
+- When a durable fact about the athlete changes (a race result, an injury, availability,
+  a new conclusion about what works), propose the updated profile and save it after they
+  confirm (save_athlete_profile)
 - Reference past consultations to show continuity
 
 Ready to begin? 🎯"""
@@ -485,7 +556,8 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
     `data_client` and `wellness_client` are the clients the activity and
     wellness tools would get for this user; only their type is used, to name
     the data sources (no activity or wellness data is read here). The training
-    repo is synced and checked for this user's goals file and note file names.
+    repo is synced and checked for this user's goals file and note file names,
+    and their athlete profile is read and included verbatim.
     """
     user_id = current_user_id()
     history = await asyncio.to_thread(read_training_history, user_id)
@@ -494,11 +566,13 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
     guidance = (
         "🏃 Training Consultation\n\n"
         + _facts_section(data_client, wellness_client, history, hosted=bool(user_id))
+        + _profile_section(history)
         + _choose_path_section(history)
         + _COACHING_APPROACH
         + _data_sources_section(data_client, wellness_client)
         + (_PATH_A if storage else _PATH_A_NO_STORAGE)
         + _GOAL_SETTING.replace("{save_goals}", _SAVE_GOALS if storage else _SHARE_GOALS)
+        .replace("{starting_point}", _STARTING_POINT_PROFILE if storage else _STARTING_POINT_NO_STORAGE)
         + (_PATH_B if storage else _PATH_B_NO_STORAGE)
         + (_REMINDERS if storage else _REMINDERS_NO_STORAGE)
     )
