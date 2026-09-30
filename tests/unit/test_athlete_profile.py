@@ -20,6 +20,7 @@ from tests.support import (
     text_of,
 )
 from train_with_gpt.config import config
+from train_with_gpt.helpers import HOSTED_SYNC_WARNING
 from train_with_gpt.server import list_tools
 from train_with_gpt.tools import (
     build_athlete_profile_handler,
@@ -284,3 +285,31 @@ async def test_build_guidance_without_a_data_source_skips_the_data_tools():
 
     assert "no data source is available" in output
     assert "skip the activity and recovery tools" in output
+
+
+async def test_resaving_a_read_that_pulled_an_update_drops_the_sync_note(training_repo, git_remote):
+    await _save()
+    push_files(git_remote, {"athlete-profile.md": "# Athlete profile\nSaved: 2026-01-01 10:00\n\n" + PROFILE})
+    read = await _read()
+    assert read.startswith("_Pulled updates")  # the case under test: the read carries a sync note
+
+    await _save(read.replace("45:05", "44:50"))
+
+    content = (training_repo / "athlete-profile.md").read_text()
+    assert content.count("# Athlete profile") == 1
+    assert content.count("Saved: ") == 1
+    assert "Pulled updates" not in content
+    assert "44:50" in content
+
+
+async def test_resaving_a_hosted_read_after_a_failed_sync_drops_the_sync_note(training_repo):
+    with as_oauth_user("1001"):
+        await _save()
+        read = f"_{HOSTED_SYNC_WARNING}_\n\n" + (training_repo / "athlete" / "1001.md").read_text()
+
+        await _save(read)
+
+    content = (training_repo / "athlete" / "1001.md").read_text()
+    assert content.count("# Athlete profile") == 1
+    assert content.count("Saved: ") == 1
+    assert "couldn't be fully synced" not in content

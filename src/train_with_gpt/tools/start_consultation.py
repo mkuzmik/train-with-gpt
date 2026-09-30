@@ -428,11 +428,12 @@ Athlete: "A 5k race in March"
 You: "Great! Do you have a specific time goal in mind?"
 
 **Then** write a clear, natural-language summary of the goal - primary goal with
-specifics, why it matters, the gap to close, timeline and milestones, the current
-block, what success looks like - {save_goals}. For example:
+specifics, why it matters, timeline and milestones, the current block, what success
+looks like (the starting point shapes the plan but stays out of this summary) -
+{save_goals}. For example:
 
 "The athlete is training for a 5km race on March 15th with a goal of breaking 17
-minutes (current best 18:30). It matters because it's a club championship. Milestone:
+minutes. It matters because it's a club championship. Milestone:
 sub-17:45 at a parkrun by mid-February. Current block: base building until mid-January,
 then threshold work. Success means hitting the time AND arriving at race day healthy."
 

@@ -311,6 +311,36 @@ def sync_note_for_caller(note: Optional[str], user_id: Optional[str]) -> Optiona
     return HOSTED_SYNC_WARNING if warnings else None
 
 
+SAVE_PUSHED = " and pushed to remote"
+SAVE_UNCHANGED = "\n\n(No changes to commit - content unchanged)"
+HOSTED_SAVE_NOT_PUSHED = (
+    "\n\n⚠️ Note: it couldn't be pushed to the notes storage just now. "
+    "It is kept on the server; the next save will try to push it again."
+)
+HOSTED_SAVE_SYNC_NOTE = "\n\n⚠️ Note: the notes storage couldn't be fully synced just now."
+HOSTED_SAVE_FAILED = "the notes storage couldn't be updated just now. Please try again in a moment."
+
+
+def save_status_for_caller(status: str, user_id: Optional[str]) -> str:
+    """
+    The git_save_file status the caller may see. On the personal (stdio) path,
+    all of it. On the hosted server a push or sync error can carry the private
+    remote URL, server paths or other users' file names, so an OAuth user gets
+    only what happened, in generic words.
+    """
+    if not user_id:
+        return status
+    for clean in (SAVE_PUSHED, SAVE_UNCHANGED):
+        if status.startswith(clean):
+            return clean + (HOSTED_SAVE_SYNC_NOTE if status != clean else "")
+    return HOSTED_SAVE_NOT_PUSHED
+
+
+def save_error_for_caller(error: str, user_id: Optional[str]) -> str:
+    """A save error's detail for the caller: generic on the hosted server (see save_status_for_caller)."""
+    return HOSTED_SAVE_FAILED if user_id else error
+
+
 def read_note_files(notes_dir: Path) -> list[tuple[str, str]]:
     """(filename stem, text) of every note in `notes_dir`, newest first."""
     if not notes_dir.exists():
@@ -383,7 +413,7 @@ def git_save_file(repo_path: Path, file_path: str, content: str, commit_message:
                 raise GitSyncError(f"Could not stage {file_path}: {_output(add)}")
             if _git(repo_path, "diff", "--cached", "--quiet", "HEAD", "--", file_path).returncode == 0:
                 if _unpushed_count(repo_path) == 0:
-                    return f"\n\n(No changes to commit - content unchanged){notes}"
+                    return f"{SAVE_UNCHANGED}{notes}"
                 # Content unchanged, but an earlier commit (e.g. this same
                 # content, whose push failed) is still waiting: push it.
             else:
@@ -395,7 +425,7 @@ def git_save_file(repo_path: Path, file_path: str, content: str, commit_message:
 
             push = _git(repo_path, "push")
             if push.returncode == 0:
-                return f" and pushed to remote{notes}"
+                return f"{SAVE_PUSHED}{notes}"
 
             last_error = _output(push)
             if "no upstream branch" in last_error.lower() or "no configured push destination" in last_error.lower():

@@ -501,6 +501,9 @@ async def test_goal_setting_keeps_athlete_facts_out_of_the_goals(training_repo):
 
     assert "belong in the athlete profile, not the goals" in goal_setting
     assert "shin splints" not in goal_setting
+    summary = goal_setting.split("**Then** write")[1]
+    assert "current best" not in summary
+    assert "gap to close" not in summary
 
 
 async def test_save_goals_description_sends_athlete_facts_to_the_profile():

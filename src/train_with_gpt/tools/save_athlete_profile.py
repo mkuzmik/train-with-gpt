@@ -12,6 +12,8 @@ from ..helpers import (
     GitSyncError,
     current_user_id,
     git_save_file,
+    save_error_for_caller,
+    save_status_for_caller,
     training_repo_not_configured_message,
     user_scoped_profile_file,
 )
@@ -34,8 +36,13 @@ PROFILE_SECTIONS = (
 )
 
 # The title and "Saved:" line the tool adds, which the model may send back
-# when it edits a profile it read: the tool adds fresh ones.
-_TITLE_RE = re.compile(r"\A\s*#\s*athlete profile[ \t]*(\n\s*saved:[^\n]*)?(\n|\Z)", re.IGNORECASE)
+# when it edits a profile it read: the tool adds fresh ones. A read can also
+# start with a sync note (e.g. "_Pulled updates from the remote: ..._"), so
+# anything before the title is dropped too, as long as it holds no section.
+_TITLE_RE = re.compile(
+    r"\A(?:(?!^[ \t]*##[ \t]).)*?^[ \t]*#[ \t]*athlete profile[ \t]*(\n[ \t]*saved:[^\n]*)?(\n|\Z)",
+    re.IGNORECASE | re.DOTALL | re.MULTILINE,
+)
 
 
 def save_athlete_profile_tool() -> Tool:
@@ -106,19 +113,22 @@ Saved: {timestamp}
         # athlete/<user_id>.md for OAuth'd users, athlete-profile.md at the
         # repo root for the personal path. Saving replaces the whole file, like
         # goals: if another device saved concurrently, the last save wins.
-        profile_file, relative_path = user_scoped_profile_file(repo_path, current_user_id())
+        user_id = current_user_id()
+        profile_file, relative_path = user_scoped_profile_file(repo_path, user_id)
 
         push_status = await asyncio.to_thread(
             git_save_file, repo_path, relative_path, content, f"Update athlete profile - {timestamp}"
         )
+        push_status = save_status_for_caller(push_status, user_id)
+        shown_path = relative_path if user_id else profile_file
 
-        return [TextContent(type="text", text=f"✅ Athlete profile saved, committed{push_status}: {profile_file}\n\nIt will be included at the start of every consultation.")]
+        return [TextContent(type="text", text=f"✅ Athlete profile saved, committed{push_status}: {shown_path}\n\nIt will be included at the start of every consultation.")]
 
     except GitSyncError as e:
-        return [TextContent(type="text", text=f"❌ Error: The athlete profile was not saved. {e}")]
+        return [TextContent(type="text", text=f"❌ Error: The athlete profile was not saved. {save_error_for_caller(str(e), current_user_id())}")]
 
     except Exception as e:
         print(f"Error saving athlete profile: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-        return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+        return [TextContent(type="text", text=f"❌ Error: {save_error_for_caller(str(e), current_user_id())}")]
