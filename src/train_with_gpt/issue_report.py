@@ -38,6 +38,8 @@ SUMMARY_MAX = 1500
 SECTION_MAX = 1000
 # Keeps the prefilled URL well under GitHub's (undocumented) length limit.
 BODY_MAX = 4000
+# The link itself, after percent-encoding (non-ASCII text grows up to 9x).
+URL_MAX = 8000
 
 # How long a tool failure counts as "recent" for the diagnostics block.
 RECENT_ERROR_SECONDS = 30 * 60
@@ -122,11 +124,12 @@ _RULES: list[tuple[str, re.Pattern]] = [
         r"|\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b"
         r"|\b\d{4}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{4}\b"
         rf"|\b(?:{_MONTHS})\.?\s+\d{{1,4}}\b"
+        rf"|\b\d{{4}}[-\s/.]+(?:{_MONTHS})\b"
         rf"|\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:{_MONTHS})\b",
         re.IGNORECASE,
     )),
     # "may" is too common a word to match case-insensitively.
-    ("a calendar date", re.compile(r"\bMay\s+\d{1,4}\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?May\b")),
+    ("a calendar date", re.compile(r"\bMay\s+\d{1,4}\b|\b\d{4}[-\s/.]+May\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?May\b")),
 ]
 
 
@@ -188,7 +191,11 @@ def validate(
         "actual": text_field("actual", SECTION_MAX),
     }
 
-    related_tool = arguments.get("related_tool") or None
+    # Only a missing, null or empty value means "no related tool"; any other
+    # non-string (0, false, []) is rejected below.
+    related_tool = arguments.get("related_tool")
+    if related_tool == "":
+        related_tool = None
     if related_tool is not None and (not isinstance(related_tool, str) or related_tool not in set(known_tools)):
         problems.append("`related_tool` must be the name of one of this server's tools")
 

@@ -12,6 +12,7 @@ from ..config import config
 from ..helpers import current_user_id
 from ..issue_report import (
     BODY_MAX,
+    URL_MAX,
     KINDS,
     ReportRejected,
     issue_repo,
@@ -46,8 +47,11 @@ def draft_issue_tool() -> Tool:
             "end of a long consultation was missing the next day\", never the note itself. Never "
             "include personal data: no names, ids, dates, places, health details, goal or note "
             "text, values from the athlete's data, error messages, links or @mentions. The "
-            "server rejects drafts containing such things and says what to rewrite; it adds "
-            "version and error diagnostics itself.\n\n"
+            "server rejects some patterns mechanically (emails, links, mentions, long numbers "
+            "and ids, dates, token-like strings) and says what to rewrite, but it can't detect "
+            "names, places or health details in prose: leaving those out is up to you, and the "
+            "user must check the text before filing it. The server adds version and error "
+            "diagnostics itself.\n\n"
             "Show the user the returned text and link verbatim, and say that they send it by "
             "opening the link; never claim the report was filed."
         ),
@@ -102,6 +106,11 @@ async def draft_issue_handler(arguments: dict) -> list[TextContent]:
         ))]
 
     url = prefilled_issue_url(issue_repo(), draft.title, body)
+    if len(url) > URL_MAX:
+        return [TextContent(type="text", text=(
+            f"❌ The report was not drafted: its link would be {len(url)} characters once "
+            f"encoded (non-English text counts several times); the limit is {URL_MAX}. Shorten it."
+        ))]
     return [TextContent(type="text", text=(
         "📝 Draft report (nothing has been sent). Show the user this text verbatim:\n\n"
         f"**Title:** {draft.title}\n\n{body}\n"

@@ -89,6 +89,10 @@ def test_a_general_report_passes():
     ("since May 2024", "a calendar date"),
     ("since 2024-01 it fails", "a calendar date"),
     ("on 15-01-2024 it failed", "a calendar date"),
+    ("on 01-15-24 it failed", "a calendar date"),
+    ("since 2024 January", "a calendar date"),
+    ("on 2024-Jan-15", "a calendar date"),
+    ("in 2024 May", "a calendar date"),
     ("since 01/2024 it fails", "a calendar date"),
 ])
 def test_personal_or_unsafe_content_is_rejected(text, reason):
@@ -136,6 +140,9 @@ def test_every_field_is_checked_and_every_problem_is_listed():
     ({"summary": 42}, "`summary` must be text"),
     ({"related_tool": "delete_everything"}, "`related_tool` must be the name of one of this server's tools"),
     ({"related_tool": ["get_activities"]}, "`related_tool` must be the name of one of this server's tools"),
+    ({"related_tool": 0}, "`related_tool` must be the name of one of this server's tools"),
+    ({"related_tool": False}, "`related_tool` must be the name of one of this server's tools"),
+    ({"related_tool": []}, "`related_tool` must be the name of one of this server's tools"),
 ])
 def test_fields_are_validated(arguments, problem):
     with pytest.raises(ReportRejected) as excinfo:
@@ -294,6 +301,24 @@ async def test_a_body_over_the_limit_is_refused():
 
     assert f"the limit is {BODY_MAX}" in output
     assert "https://" not in output
+
+
+async def test_a_link_over_the_limit_once_encoded_is_refused():
+    """Non-ASCII text is short in characters but long once percent-encoded."""
+    wide = {**REPORT, "summary": "ü" * 1400, "steps": "ü" * 900, "actual": "ü" * 900}
+
+    output = text_of(await draft_issue_handler(wide))
+
+    assert f"the limit is {issue_report.URL_MAX}" in output
+    assert "https://" not in output
+
+
+def test_the_tool_description_does_not_overstate_the_checks():
+    from train_with_gpt.tools import draft_issue_tool
+
+    description = draft_issue_tool().description
+
+    assert "can't detect" in description and "user must check the text" in description
 
 
 async def test_hosted_users_are_not_offered_the_tool_and_are_refused():
