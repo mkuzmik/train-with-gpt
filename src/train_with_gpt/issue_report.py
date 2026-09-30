@@ -109,7 +109,8 @@ _RULES: list[tuple[str, re.Pattern]] = [
     # Scheme, www., inline link, reference-link definition, protocol-relative.
     ("a link or URL", re.compile(r"\b[a-z][a-z0-9+.-]*://|\bwww\.|\]\s*[(:]|(?<![\w:/])//[^\s/]", re.IGNORECASE)),
     ("an @mention", re.compile(r"(?<![\w.+-])@[A-Za-z0-9][A-Za-z0-9-]*")),
-    ("an issue or PR reference like #123", re.compile(r"(?<![\w&])#\d+")),
+    # Also owner/repo#123 and GH-123, which GitHub links too.
+    ("an issue or PR reference like #123", re.compile(r"(?<!&)#\d+|\bGH-\d+", re.IGNORECASE)),
     ("an image", re.compile(r"!\[")),
     ("HTML", re.compile(r"<\s*[A-Za-z!/?]")),
     ("a token or key", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_|\bgithub_pat_|\bBearer\s|\bsk-[A-Za-z0-9]", re.IGNORECASE)),
@@ -118,7 +119,7 @@ _RULES: list[tuple[str, re.Pattern]] = [
     ("an intervals.icu-style id (i followed by digits)", re.compile(r"\bi\d+\b")),
     ("a calendar date", re.compile(
         r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"
-        r"|\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b"
+        r"|\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b"
         r"|\b\d{4}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{4}\b"
         rf"|\b(?:{_MONTHS})\.?\s+\d{{1,4}}\b"
         rf"|\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:{_MONTHS})\b",
@@ -220,7 +221,9 @@ def _plain(text: str) -> str:
     every pipe (tables, with or without leading pipes), and line starts that
     would make headings (ATX or setext underlines), quotes, rules or code
     fences (an unclosed fence would swallow the diagnostics)."""
-    text = text.replace("|", "\\|")
+    # Any backslashes already before a pipe collapse into one, so the escape
+    # can't be cancelled out (e.g. "\\|" would become an escaped backslash).
+    text = re.sub(r"\\*\|", r"\\|", text)
     return "\n".join(_BLOCK_START.sub(r"\1\\\2", line) for line in text.splitlines())
 
 

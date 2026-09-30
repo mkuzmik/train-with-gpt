@@ -71,6 +71,8 @@ def test_a_general_report_passes():
     ("see //example.com/private-path", "a link or URL"),
     ("ping @someone about it", "an @mention"),
     ("same as #12", "an issue or PR reference"),
+    ("same as owner/repo#12", "an issue or PR reference"),
+    ("same as GH-12", "an issue or PR reference"),
     ("![chart](x)", "an image"),
     ("<img src=x>", "HTML"),
     ("</details>", "HTML"),
@@ -86,6 +88,7 @@ def test_a_general_report_passes():
     ("on 3rd of march it failed", "a calendar date"),
     ("since May 2024", "a calendar date"),
     ("since 2024-01 it fails", "a calendar date"),
+    ("on 15-01-2024 it failed", "a calendar date"),
     ("since 01/2024 it fails", "a calendar date"),
 ])
 def test_personal_or_unsafe_content_is_rejected(text, reason):
@@ -161,6 +164,12 @@ def test_model_text_cannot_fake_headings_tables_or_rules():
     assert "\n\\- - -\n" in body
     assert "\nHeading\n\\=" in body
     assert "| Version | real |" in body
+
+
+def test_already_escaped_pipes_stay_escaped():
+    body = render_body(Draft(kind="bug", title="t", summary="Version \\| fake \\\\| x\n--- | ---"), {"Version": "real"})
+
+    assert "Version \\| fake \\| x\n--- \\| ---" in body
 
 
 def test_an_unclosed_code_fence_cannot_swallow_the_diagnostics():
