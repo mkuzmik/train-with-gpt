@@ -7,20 +7,34 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import GitSyncError, current_user_id, git_save_file, user_scoped_goals_file, training_repo_not_configured_message
+from ..helpers import (
+    GitSyncError,
+    current_user_id,
+    git_save_file,
+    save_error_for_caller,
+    save_status_for_caller,
+    training_repo_not_configured_message,
+    user_scoped_goals_file,
+)
 
 
 def save_goals_tool() -> Tool:
     """Return the save_goals tool definition."""
     return Tool(
         name="save_goals",
-        description="Save the user's training goals in natural language format. Write a clear, comprehensive summary of goals, context, and constraints.",
+        description=(
+            "Save the athlete's training goals in natural language (replaces the saved goals). "
+            "Goals only: what they're training for, the target and date, why it matters, "
+            "milestones, the current training block, and what success looks like. Facts about "
+            "the athlete - background, PBs, current fitness, constraints, health and injury "
+            "history - belong in the athlete profile (save_athlete_profile), not here."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "goals_text": {
                     "type": "string",
-                    "description": "Natural language description of the user's training goals, current state, constraints, and context",
+                    "description": "Natural language description of the athlete's goals: target, date, why it matters, milestones, current block",
                 },
             },
             "required": ["goals_text"],
@@ -54,21 +68,24 @@ Saved: {timestamp}
         # Goals file is user-scoped for OAuth'd multi-user sessions, goals.md
         # at the repo root for the personal path. Saving replaces it wholesale:
         # if another device saved goals concurrently, the last save wins.
-        goals_file, goals_relative_path = user_scoped_goals_file(repo_path, current_user_id())
+        user_id = current_user_id()
+        goals_file, goals_relative_path = user_scoped_goals_file(repo_path, user_id)
 
         # Sync, write, commit and push (in a worker thread; git_save_file
         # serializes access to the repo)
         push_status = await asyncio.to_thread(
             git_save_file, repo_path, goals_relative_path, content, f"Update training goals - {timestamp}"
         )
+        push_status = save_status_for_caller(push_status, user_id)
+        shown_path = goals_relative_path if user_id else goals_file
 
-        return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
+        return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {shown_path}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
 
     except GitSyncError as e:
-        return [TextContent(type="text", text=f"❌ Error: Goals were not saved. {e}")]
+        return [TextContent(type="text", text=f"❌ Error: Goals were not saved. {save_error_for_caller(str(e), current_user_id())}")]
 
     except Exception as e:
         print(f"Error saving goals: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-        return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+        return [TextContent(type="text", text=f"❌ Error: {save_error_for_caller(str(e), current_user_id())}")]

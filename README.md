@@ -7,6 +7,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 - **Training Analysis**: View and analyze your activities with detailed metrics and zone distribution
 - **Sleep & Health Tracking**: Access wellness data - sleep duration/quality, HRV, resting heart rate
 - **Goal Tracking**: Set training goals and have them persist across conversations
+- **Athlete Profile**: Claude builds a short profile of you with you (background, race results, health patterns, constraints, what works), checks it against your data, and starts every consultation from it
 - **Consultation History**: Claude remembers past conversations and provides continuity
 - **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
 
@@ -20,7 +21,7 @@ If someone runs a hosted server for you, there's nothing to install. You need it
 
 1. **Add it on claude.ai** (in a browser): Settings → Connectors → Add custom connector, and paste the URL. Custom connectors can't be added from the mobile app, but once added on claude.ai the connector syncs to Claude Desktop and mobile too. If its tools don't show up in a chat, turn the connector on from the chat's "+" / tools menu.
 2. **Sign in with Strava** and approve access. The server only lets in athletes its operator has put on its allowlist; anyone else sees a "This server is private" page after the Strava consent (see [Who can sign in](#who-can-sign-in-allowlist)). Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV and resting heart rate; you can skip it and add it later by disconnecting and reconnecting the connector.
-3. **Type this first, in a new chat:** "Start a training consultation". It's the one entry point: the server tells Claude whether you're new (no goals or notes saved yet) or returning, so the first time Claude introduces itself and sets your goals with you, and after that it picks up from your goals and past notes. Start each chat the same way; say "Save notes" at the end of a useful one.
+3. **Type this first, in a new chat:** "Start a training consultation". It's the one entry point: the server tells Claude whether you're new (no goals, profile or notes saved yet) or returning, so the first time Claude introduces itself, builds your athlete profile and sets your goals with you, and after that it picks up from your profile, goals and past notes. Start each chat the same way; say "Save notes" at the end of a useful one.
 
 Hosted users skip the local setup below; there's no training repository to configure. To run your own hosted server, see "Self-hosting".
 
@@ -170,9 +171,9 @@ anything. `train-with-gpt-purge-user <user_id>`, run next to the server's
 `su app -c 'train-with-gpt-purge-user <user_id>'`), removes their Strava
 tokens and name, intervals.icu key, and the server's tokens and codes for
 them. It first asks Strava to revoke the app's access (skip with
-`--no-deauthorize`). Their notes and goals in the training repo
-(`notes/<user_id>/`, `goals/<user_id>.md`) aren't touched; delete them there in
-a normal commit if needed. Git history keeps them until it's rewritten.
+`--no-deauthorize`). Their notes, goals and athlete profile in the training repo
+(`notes/<user_id>/`, `goals/<user_id>.md`, `athlete/<user_id>.md`) aren't
+touched; delete them there in a normal commit if needed. Git history keeps them until it's rewritten.
 
 ### Running the HTTP server in Docker
 
@@ -210,8 +211,9 @@ clients, kept at mode `600`) survives `docker compose restart`/rebuilds;
 `config.json` is re-copied from the host file on every start.
 `docker compose down -v` clears the store (not the host file).
 
-**Notes/goals repo in Docker.** OAuth'd users' notes and goals are stored per
-user (`notes/<user_id>/`, `goals/<user_id>.md`) in a separate, *private* git
+**Notes/goals repo in Docker.** OAuth'd users' notes, goals and athlete
+profiles are stored per user (`notes/<user_id>/`, `goals/<user_id>.md`,
+`athlete/<user_id>.md`) in a separate, *private* git
 repo, cloned by the container on first start (`docker-entrypoint.sh`) and
 pushed to on every save. Set it up once:
 
@@ -454,9 +456,9 @@ This enables goal tracking and consultation history across sessions.
 **Step 2: Start Your First Consultation**
 
 Say: **"Start a training consultation"**
-- With no goals or notes saved yet, Claude treats you as a new athlete: it looks at your recent activities and guides you through setting clear goals
-- Your goals are saved and referenced in future conversations
-- Later, say **"Update my goals"** whenever they change
+- With no goals, profile or notes saved yet, Claude treats you as a new athlete: it looks at your recent activities, builds your athlete profile with you (an interview, checked against your last 12 months of data, saved only once you confirm it), and guides you through setting clear goals
+- Your profile and goals are saved and referenced in future conversations (the profile is stored as `athlete-profile.md` in your training repository)
+- Later, say **"Update my goals"** or **"Update my profile"** whenever they change
 
 ---
 
@@ -466,11 +468,12 @@ Say: **"Start a training consultation"**
 
 Best practice: **"Start a consultation"**
 
-This single entry point tells Claude what's saved for you (goals, how many consultation notes) and which data sources are connected; Claude decides from that and your message whether to onboard you or run a consultation. For a returning athlete it will:
+This single entry point tells Claude what's saved for you (goals, athlete profile, how many consultation notes) and which data sources are connected, and includes your full athlete profile when you have one; Claude decides from that and your message whether to onboard you or run a consultation. For a returning athlete it will:
 1. Check today's date
-2. Review your goals
-3. Read recent consultation notes
-4. Act as a thoughtful coach (asking ONE question at a time)
+2. Start from your athlete profile (or offer to build one if you don't have it yet)
+3. Review your goals
+4. Read recent consultation notes
+5. Act as a thoughtful coach (asking ONE question at a time)
 
 **Reviewing Your Training**
 
@@ -531,19 +534,20 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Tools
 
-The local stdio server offers 16 tools; the hosted server offers the same
-minus `setup_training_repo` (15), because its notes storage is server
+The local stdio server offers 19 tools; the hosted server offers the same
+minus `setup_training_repo` (18), because its notes storage is server
 configuration.
 
 | Tool | What it's for |
 |---|---|
-| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, number and date of consultation notes), which data sources are connected and whether notes storage works, and guides Claude through onboarding a new athlete or a consultation with a returning one. |
+| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one, and guides Claude through onboarding a new athlete or a consultation with a returning one. |
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate` | Wellness data from intervals.icu (hosted users only if they connected it at login). |
-| `read_goals`, `save_goals` | The athlete's goals (saving replaces them). |
+| `read_goals`, `save_goals` | The athlete's goals: target, date, milestones, current block (saving replaces them). |
+| `build_athlete_profile`, `read_athlete_profile`, `save_athlete_profile` | The athlete profile: the coach's confirmed conclusions about the athlete (background, race results and PBs, tests, health patterns, constraints, strengths and limiters, what works, preferences), no weekly stats. `build_athlete_profile` is guidance for building it (interview, check against 12 months of data with the existing tools, discussion); saving replaces the whole profile (`athlete-profile.md`, or `athlete/<user_id>.md` on a hosted server) and is refused over 8,000 characters. |
 | `save_consultation_notes`, `list_consultation_notes`, `read_consultation_notes`, `search_consultation_notes` | Consultation notes, one timestamped file per save. |
-| `setup_training_repo` | Local only: point the server at the notes repository that stores goals and notes. |
+| `setup_training_repo` | Local only: point the server at the notes repository that stores goals, the athlete profile and notes. |
 | `self_test` | Health check of the connector (see "Post-deploy smoke test"). |
 
 There is no separate goal-setting tool (`discuss_goals` was removed): goal
@@ -733,7 +737,7 @@ uv run pytest --pdb     # drop into the debugger on failure
   intervals.icu login step and `secret_box`) and one file per tool.
 - `tests/integration/`: `test_oauth_flow.py` (full OAuth round trip, then
   MCP tool calls), `test_http_auth.py` (the /mcp auth boundary),
-  `test_user_isolation.py` (per-user notes and goals) and
+  `test_user_isolation.py` (per-user notes, goals and athlete profiles) and
   `test_personal_server.py` (the stdio server).
 
 ## Extending

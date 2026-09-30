@@ -62,7 +62,7 @@ async def test_stdio_lists_all_tools(stdio_env):
     async with StdioServer(stdio_env) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 16
+    assert len(tools) == 19
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -83,7 +83,7 @@ async def test_console_script_serves_stdio(stdio_env):
     async with StdioServer(stdio_env, command=[CONSOLE_SCRIPT]) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 16
+    assert len(tools) == 19
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -97,6 +97,9 @@ async def test_stdio_notes_and_goals_round_trip_through_the_remote(stdio_env, tr
         read = _text(await session.call_tool("read_consultation_notes", {"all": True}))
         await session.call_tool("save_goals", {"goals_text": "Sub-40 10k"})
         goals = _text(await session.call_tool("read_goals", {}))
+        await session.call_tool("save_athlete_profile", {"content": "## Background\n- Synthetic club runner"})
+        profile = _text(await session.call_tool("read_athlete_profile", {}))
+        started = _text(await session.call_tool("start_consultation", {}))
 
     assert "saved, committed and pushed to remote" in saved
     # Personal path: notes live at the repo root, not under a user id.
@@ -107,6 +110,9 @@ async def test_stdio_notes_and_goals_round_trip_through_the_remote(stdio_env, tr
     assert "1 consultation note(s)" in listed and "Earlier note from another device" in listed
     assert "Sub-40 10k" in goals
     assert "Sub-40 10k" in remote_file(git_remote, "goals.md")
+    assert "Synthetic club runner" in profile
+    assert "Synthetic club runner" in remote_file(git_remote, "athlete-profile.md")
+    assert "- **Athlete profile:** yes" in started and "Synthetic club runner" in started
 
 
 async def test_stdio_setup_training_repo_persists_across_restarts(stdio_env, tmp_path, hermetic):

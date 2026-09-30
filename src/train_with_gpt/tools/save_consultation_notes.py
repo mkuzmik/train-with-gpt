@@ -8,7 +8,15 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
-from ..helpers import GitSyncError, current_user_id, git_save_file, user_scoped_notes_dir, training_repo_not_configured_message
+from ..helpers import (
+    GitSyncError,
+    current_user_id,
+    git_save_file,
+    save_error_for_caller,
+    save_status_for_caller,
+    training_repo_not_configured_message,
+    user_scoped_notes_dir,
+)
 
 
 def save_consultation_notes_tool() -> Tool:
@@ -46,7 +54,8 @@ async def save_consultation_notes_handler(arguments: dict) -> list[TextContent]:
         
         # User-scoped subdir for OAuth'd multi-user sessions, repo root for
         # the personal path
-        notes_dir, notes_prefix = user_scoped_notes_dir(repo_path, current_user_id())
+        user_id = current_user_id()
+        notes_dir, notes_prefix = user_scoped_notes_dir(repo_path, user_id)
 
         # Timestamped filename, plus a short random suffix so two devices
         # saving in the same second never collide. Tools read the date from
@@ -70,14 +79,16 @@ Date: {timestamp_display}
         push_status = await asyncio.to_thread(
             git_save_file, repo_path, relative_path, content, f"Add consultation notes - {timestamp_display}"
         )
+        push_status = save_status_for_caller(push_status, user_id)
+        shown_path = relative_path if user_id else notes_file
 
-        return [TextContent(type="text", text=f"✅ Consultation notes saved, committed{push_status}: {notes_file}\n\nThese notes are now part of your training history and can be referenced in future consultations.")]
+        return [TextContent(type="text", text=f"✅ Consultation notes saved, committed{push_status}: {shown_path}\n\nThese notes are now part of your training history and can be referenced in future consultations.")]
 
     except GitSyncError as e:
-        return [TextContent(type="text", text=f"❌ Error: Consultation notes were not saved. {e}")]
+        return [TextContent(type="text", text=f"❌ Error: Consultation notes were not saved. {save_error_for_caller(str(e), current_user_id())}")]
 
     except Exception as e:
         print(f"Error saving consultation notes: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-        return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+        return [TextContent(type="text", text=f"❌ Error: {save_error_for_caller(str(e), current_user_id())}")]

@@ -125,7 +125,8 @@ before knowing anything about the athlete. Now there is one,
 - activities source (Strava or intervals.icu) and whether recovery data is
   connected, from the type of the clients `server.py` resolves (no data read);
 - whether notes storage is set up;
-- whether this user's goals file exists, and how many consultation notes they
+- whether this user's goals file exists (and, with the profile v1, whether an
+  athlete profile is saved, plus its full text), and how many consultation notes they
   have plus the most recent note's date (from file names; no note is read).
 
 The repo is synced first (`git_pull_and_read`, under the per-repo lock), so
@@ -149,12 +150,13 @@ when it's unclear. It also states the server's reading of the facts:
 
 | Facts | Server's hint |
 |---|---|
-| no goals, no notes | new athlete → Path A (onboarding) |
+| no goals, no notes (profile v1: and no profile) | new athlete → Path A (onboarding) |
+| profile only (profile v1) | onboarding cut short → Path B, continue with goal setting |
 | goals and notes | returning → Path B (consultation) |
 | notes, no goals | returning without goals → Path B, offer goal setting early |
 | goals, no notes | ambiguous → read goals, ask whether to pick up or hear what the coach does first; stays in Path B |
 | storage unavailable | can't tell → go by the message, or ask whether they've used the coach before |
-| sync with the remote failed (facts from the local clone) | uncertain → history shown means returning; no history means ask before onboarding |
+| sync with the remote failed (facts from the local clone) | uncertain → history shown means returning; no history means ask before onboarding; (profile v1) don't build or save a profile in that chat |
 
 Path A is picked by the facts, not by the athlete's wording: an athlete
 with saved history who says "set me up" stays in Path B (greeted as
@@ -174,6 +176,13 @@ the old goals.
 - **Path B (consultation):** unchanged from the old `start_consultation`
   (date, goals, notes index and last 60 days, activities, then one open
   question).
+
+**With the athlete profile v1** (see `athlete-profile.md`, "v1 scope"), the
+facts also say whether an athlete profile is saved, and its full text is
+included; any saved goals, profile or notes mean a returning athlete (a
+profile alone is an onboarding cut short: Path B, continue with goal setting);
+Path A builds the profile (`build_athlete_profile`) before the goal-setting
+conversation; and a returning athlete without a profile is offered one.
 
 What this does **not** do from Phase 1 yet: the landing page, the
 in-progress onboarding note with a checklist, the health screen and the
