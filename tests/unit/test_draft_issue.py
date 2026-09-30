@@ -85,6 +85,8 @@ def test_a_general_report_passes():
     ("on January 15 it failed", "a calendar date"),
     ("on 3rd of march it failed", "a calendar date"),
     ("since May 2024", "a calendar date"),
+    ("since 2024-01 it fails", "a calendar date"),
+    ("since 01/2024 it fails", "a calendar date"),
 ])
 def test_personal_or_unsafe_content_is_rejected(text, reason):
     message = _rejection("summary", text)
@@ -130,6 +132,7 @@ def test_every_field_is_checked_and_every_problem_is_listed():
     ({"title": "two\nlines"}, "`title` must be a single line"),
     ({"summary": 42}, "`summary` must be text"),
     ({"related_tool": "delete_everything"}, "`related_tool` must be the name of one of this server's tools"),
+    ({"related_tool": ["get_activities"]}, "`related_tool` must be the name of one of this server's tools"),
 ])
 def test_fields_are_validated(arguments, problem):
     with pytest.raises(ReportRejected) as excinfo:
@@ -158,6 +161,13 @@ def test_model_text_cannot_fake_headings_tables_or_rules():
     assert "\n\\- - -\n" in body
     assert "\nHeading\n\\=" in body
     assert "| Version | real |" in body
+
+
+def test_an_unclosed_code_fence_cannot_swallow_the_diagnostics():
+    body = render_body(Draft(kind="bug", title="t", summary="text\n```text\n~~~"), {"Version": "real"})
+
+    assert "\n\\```text\n\\~~~" in body
+    assert "\n```" not in body and "\n~~~" not in body
 
 
 def test_tables_without_leading_pipes_are_escaped():

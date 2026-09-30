@@ -119,6 +119,7 @@ _RULES: list[tuple[str, re.Pattern]] = [
     ("a calendar date", re.compile(
         r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"
         r"|\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b"
+        r"|\b\d{4}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{4}\b"
         rf"|\b(?:{_MONTHS})\.?\s+\d{{1,4}}\b"
         rf"|\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:{_MONTHS})\b",
         re.IGNORECASE,
@@ -187,8 +188,7 @@ def validate(
     }
 
     related_tool = arguments.get("related_tool") or None
-    known = set(known_tools)
-    if related_tool is not None and related_tool not in known:
+    if related_tool is not None and (not isinstance(related_tool, str) or related_tool not in set(known_tools)):
         problems.append("`related_tool` must be the name of one of this server's tools")
 
     name_patterns = _name_patterns(forbidden_names)
@@ -212,13 +212,14 @@ def validate(
 
 # --- rendering ---------------------------------------------------------------------
 
-_BLOCK_START = re.compile(r"^(\s{0,3})([#>]|[-=]+\s*$|([-*_])(?:\s*\3){2,}\s*$)")
+_BLOCK_START = re.compile(r"^(\s{0,3})([#>]|`{3,}|~{3,}|[-=]+\s*$|([-*_])(?:\s*\3){2,}\s*$)")
 
 
 def _plain(text: str) -> str:
     """Escape Markdown that could pass model text off as the diagnostics block:
     every pipe (tables, with or without leading pipes), and line starts that
-    would make headings (ATX or setext underlines), quotes or rules."""
+    would make headings (ATX or setext underlines), quotes, rules or code
+    fences (an unclosed fence would swallow the diagnostics)."""
     text = text.replace("|", "\\|")
     return "\n".join(_BLOCK_START.sub(r"\1\\\2", line) for line in text.splitlines())
 
