@@ -531,9 +531,9 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Tools
 
-The local stdio server offers 16 tools; the hosted server offers the same
-minus `setup_training_repo` (15), because its notes storage is server
-configuration.
+The local stdio server offers 17 tools; the hosted server offers the same
+minus `setup_training_repo`, because its notes storage is server
+configuration, and minus `draft_issue` for now (15).
 
 | Tool | What it's for |
 |---|---|
@@ -545,10 +545,39 @@ configuration.
 | `save_consultation_notes`, `list_consultation_notes`, `read_consultation_notes`, `search_consultation_notes` | Consultation notes, one timestamped file per save. |
 | `setup_training_repo` | Local only: point the server at the notes repository that stores goals and notes. |
 | `self_test` | Health check of the connector (see "Post-deploy smoke test"). |
+| `draft_issue` | Local only for now: draft a bug report or improvement idea about the connector for the user to file on GitHub (see "Reporting problems"). |
 
 There is no separate goal-setting tool (`discuss_goals` was removed): goal
 setting is part of `start_consultation`'s guidance, and "update my goals"
 works in any chat.
+
+### Reporting problems
+
+When something goes wrong mid-conversation (a failed save, a confusing tool
+message, a missing capability), ask Claude to "report this" or "suggest an
+improvement". After a tool error Claude may offer once to draft a report, and
+drafts it only if you agree.
+
+`draft_issue` never sends anything. It returns the report text and a link
+that opens GitHub's new-issue form with the title and body filled in; you
+check the text there and file it under your own GitHub account. The issue is
+**public**, so the server refuses drafts that contain email addresses, links,
+@mentions, `#123` references, images or HTML, token- or id-like strings,
+numbers of 6 or more digits, intervals.icu-style ids and calendar dates, and
+Claude is asked to rewrite them in general terms. It can't catch everything
+(names or health details in prose, for instance), so read the text before you
+file it.
+
+The server appends a diagnostics table: version (and `GIT_SHA` if set),
+transport, data source kind, the related tool and, if that tool failed in the
+last 30 minutes, the error's class and HTTP status only, never its message.
+
+- `ISSUE_REPORTING_REPO` (`owner/repo`) points the link at another repository,
+  e.g. a fork's. It defaults to this project's repository.
+- `ISSUE_REPORTING=off` hides the tool.
+
+The hosted server doesn't offer `draft_issue` yet. It needs a confirmation
+page and a server-side GitHub token first, tracked in issue #32.
 
 ## Troubleshooting
 
@@ -593,8 +622,8 @@ enforces this for every test:
   The global `config` loads at import time, so without this the tests would
   read your real `~/.config/train-with-gpt/config.json` and `store.db`.
 - `INTERVALS_API_KEY`, `STRAVA_CLIENT_*`, `TOKEN_ENCRYPTION_KEY`,
-  `TRAINING_REPO_PATH`, `PUBLIC_URL`, `PORT` and all `GIT_*` env vars are
-  cleared, and git gets a fixed test identity.
+  `TRAINING_REPO_PATH`, `PUBLIC_URL`, `PORT`, `ISSUE_REPORTING*` and all
+  `GIT_*` env vars are cleared, and git gets a fixed test identity.
 - The global `config` starts empty, and its file and the SQLite store live in
   the test's `tmp_path`.
 - All httpx traffic goes through a respx router (the `http_mock` fixture).
@@ -730,7 +759,8 @@ uv run pytest --pdb     # drop into the debugger on failure
   operations, headlines, zones), the HTTP clients (`test_intervals_client.py`,
   `test_strava_client.py`), OAuth (`test_oauth_provider.py`,
   `test_strava_oauth.py`, `test_intervals_connect.py` for the optional
-  intervals.icu login step and `secret_box`) and one file per tool.
+  intervals.icu login step and `secret_box`) and one file per tool
+  (`test_draft_issue.py` also covers `issue_report.py`).
 - `tests/integration/`: `test_oauth_flow.py` (full OAuth round trip, then
   MCP tool calls), `test_http_auth.py` (the /mcp auth boundary),
   `test_user_isolation.py` (per-user notes and goals) and

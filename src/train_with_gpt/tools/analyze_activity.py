@@ -6,6 +6,7 @@ from mcp.types import Tool, TextContent
 from ..intervals_client import IntervalsClient
 from ..strava_client import StravaClient
 from ..helpers import calculate_zone_distribution
+from ..issue_report import record_tool_error
 
 
 def analyze_activity_tool() -> Tool:
@@ -354,6 +355,7 @@ async def analyze_activity_handler(arguments: dict, intervals) -> list[TextConte
         return [TextContent(type="text", text=text)]
 
     except Exception as e:
+        record_tool_error("analyze_activity", e)
         print(f"Error analyzing activity: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

@@ -5,6 +5,7 @@ from mcp.types import Tool, TextContent
 
 from ..config import config
 from ..helpers import current_user_id
+from ..issue_report import record_tool_error
 
 
 def setup_training_repo_tool() -> Tool:
@@ -61,6 +62,7 @@ async def setup_training_repo_handler(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=f"✅ Training repository configured: {repo_path}\n\nYou can now use **read_goals** and **save_goals** to manage your training notes in this git repository.")]
     
     except Exception as e:
+        record_tool_error("setup_training_repo", e)
         print(f"Error setting up training repo: {e}", file=__import__('sys').stderr)
         import traceback
         traceback.print_exc()

@@ -5,6 +5,7 @@ from mcp.types import Tool, TextContent
 
 from ..intervals_client import IntervalsClient
 from ..strava_client import StravaClient
+from ..issue_report import record_tool_error
 
 _STREAM_TYPES = ['time', 'distance', 'heartrate', 'velocity_smooth', 'cadence', 'watts']
 
@@ -228,6 +229,7 @@ async def analyze_lap_handler(arguments: dict, intervals) -> list[TextContent]:
         return [TextContent(type="text", text=text)]
 
     except Exception as e:
+        record_tool_error("analyze_lap", e)
         print(f"Error analyzing lap: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

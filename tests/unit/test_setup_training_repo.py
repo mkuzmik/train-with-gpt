@@ -68,7 +68,7 @@ async def test_list_tools_hides_only_setup_training_repo_from_oauth_users():
     with as_oauth_user("1001"):
         hosted = {tool.name for tool in await list_tools()}
 
-    assert personal - hosted == {"setup_training_repo"}
+    assert personal - hosted == {"setup_training_repo", "draft_issue"}
     assert hosted < personal
 
 

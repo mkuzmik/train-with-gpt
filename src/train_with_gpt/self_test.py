@@ -58,7 +58,8 @@ TIMEOUTS = {
 # config) is listed in WRITE_TOOLS and must never be called by the prompt; a
 # unit test checks every registered tool is in exactly one of the two lists.
 # analyze_activity/analyze_lap are left out of the prompt on purpose (they
-# process a full Strava activity) - see READ_ONLY_TOOLS_NOT_IN_PROMPT.
+# process a full Strava activity) - see READ_ONLY_TOOLS_NOT_IN_PROMPT - and so
+# is draft_issue (it only drafts a report, but a test run shouldn't make one).
 READ_ONLY_TOOLS = {
     "get_current_date": "{}",
     "start_consultation": "{}",
@@ -71,7 +72,7 @@ READ_ONLY_TOOLS = {
     "get_hrv_data": "the last 3 days (start_date/end_date)",
     "get_resting_heart_rate": "the last 3 days (start_date/end_date)",
 }
-READ_ONLY_TOOLS_NOT_IN_PROMPT = ("analyze_activity", "analyze_lap")
+READ_ONLY_TOOLS_NOT_IN_PROMPT = ("analyze_activity", "analyze_lap", "draft_issue")
 WRITE_TOOLS = ("save_goals", "save_consultation_notes", "setup_training_repo", "self_test")
 
 _SAFE_MARKER_NAME = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")

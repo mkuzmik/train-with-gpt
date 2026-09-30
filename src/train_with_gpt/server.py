@@ -44,6 +44,9 @@ from .tools import (
     search_consultation_notes_handler,
     self_test_tool,
     self_test_handler,
+    draft_issue_available,
+    draft_issue_tool,
+    draft_issue_handler,
 )
 from .tools.self_test import SELF_TEST_PROMPT_NAME, self_test_prompt, self_test_prompt_result
 
@@ -147,6 +150,11 @@ async def list_tools() -> list[Tool]:
         search_consultation_notes_tool(),
         self_test_tool(),
     ]
+    # Reports are filed through a prefilled GitHub link, which only the
+    # personal (stdio) path offers so far; the hosted path needs a
+    # confirmation page first (GitHub issue #32).
+    if draft_issue_available():
+        tools.append(draft_issue_tool())
     # For OAuth'd users the training repo is server configuration (the handler
     # refuses them), so don't offer the tool. The bearer token is in context
     # for tools/list too. Clients with a cached tool list still get the refusal.
@@ -190,6 +198,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await search_consultation_notes_handler(arguments)
     elif name == "self_test":
         return await self_test_handler(arguments)
+    elif name == "draft_issue":
+        return await draft_issue_handler(arguments)
 
     raise ValueError(f"Unknown tool: {name}")
 

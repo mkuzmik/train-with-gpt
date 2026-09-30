@@ -8,6 +8,7 @@ from mcp.types import Tool, TextContent
 
 from ..config import config
 from ..helpers import GitSyncError, current_user_id, git_save_file, user_scoped_goals_file, training_repo_not_configured_message
+from ..issue_report import record_tool_error
 
 
 def save_goals_tool() -> Tool:
@@ -65,9 +66,11 @@ Saved: {timestamp}
         return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {goals_file}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
 
     except GitSyncError as e:
+        record_tool_error("save_goals", e)
         return [TextContent(type="text", text=f"❌ Error: Goals were not saved. {e}")]
 
     except Exception as e:
+        record_tool_error("save_goals", e)
         print(f"Error saving goals: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

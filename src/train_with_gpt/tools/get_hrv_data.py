@@ -6,6 +6,7 @@ from mcp.types import Tool, TextContent
 
 from ..helpers import NO_WELLNESS_DATA_MESSAGE
 from ..strava_client import StravaClient
+from ..issue_report import record_tool_error
 
 
 def get_hrv_data_tool() -> Tool:
@@ -127,6 +128,7 @@ async def get_hrv_data_handler(arguments: dict, intervals) -> list[TextContent]:
         return [TextContent(type="text", text="\n".join(lines))]
 
     except Exception as e:
+        record_tool_error("get_hrv_data", e)
         print(f"Error fetching HRV data: {e}", file=sys.stderr)
         return [TextContent(
             type="text",

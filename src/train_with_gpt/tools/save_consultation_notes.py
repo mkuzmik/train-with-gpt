@@ -9,6 +9,7 @@ from mcp.types import Tool, TextContent
 
 from ..config import config
 from ..helpers import GitSyncError, current_user_id, git_save_file, user_scoped_notes_dir, training_repo_not_configured_message
+from ..issue_report import record_tool_error
 
 
 def save_consultation_notes_tool() -> Tool:
@@ -74,9 +75,11 @@ Date: {timestamp_display}
         return [TextContent(type="text", text=f"✅ Consultation notes saved, committed{push_status}: {notes_file}\n\nThese notes are now part of your training history and can be referenced in future consultations.")]
 
     except GitSyncError as e:
+        record_tool_error("save_consultation_notes", e)
         return [TextContent(type="text", text=f"❌ Error: Consultation notes were not saved. {e}")]
 
     except Exception as e:
+        record_tool_error("save_consultation_notes", e)
         print(f"Error saving consultation notes: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

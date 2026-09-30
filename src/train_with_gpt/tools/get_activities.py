@@ -6,6 +6,7 @@ from mcp.types import Tool, TextContent
 
 from ..intervals_client import IntervalsClient
 from ..strava_client import StravaClient
+from ..issue_report import record_tool_error
 
 
 def get_activities_tool() -> Tool:
@@ -185,5 +186,6 @@ async def get_activities_handler(arguments: dict, intervals) -> list[TextContent
         return [TextContent(type="text", text="\n".join(lines))]
     
     except Exception as e:
+        record_tool_error("get_activities", e)
         print(f"Error fetching activities: {e}", file=sys.stderr)
         return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
