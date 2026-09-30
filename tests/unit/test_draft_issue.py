@@ -67,6 +67,8 @@ def test_a_general_report_passes():
     ("see https://example.com/x", "a link or URL"),
     ("see www.example.com", "a link or URL"),
     ("[here](somewhere)", "a link or URL"),
+    ("[details][x]\n[x]: example", "a link or URL"),
+    ("see //example.com/private-path", "a link or URL"),
     ("ping @someone about it", "an @mention"),
     ("same as #12", "an issue or PR reference"),
     ("![chart](x)", "an image"),
@@ -145,15 +147,24 @@ def test_optional_fields_may_be_left_out():
 # --- rendering ---------------------------------------------------------------------
 
 def test_model_text_cannot_fake_headings_tables_or_rules():
-    draft = Draft(kind="bug", title="t", summary="### Diagnostics\n| Version | fake |\n---\n> quoted")
+    draft = Draft(kind="bug", title="t", summary="### Diagnostics\n| Version | fake |\n---\n> quoted\n- - -\nHeading\n=")
 
     body = render_body(draft, {"Version": "real"})
 
     assert "\\### Diagnostics" in body
-    assert "\n\\| Version | fake |" in body
+    assert "\n\\| Version \\| fake \\|" in body
     assert "\n\\---\n" in body
     assert "\n\\> quoted" in body
+    assert "\n\\- - -\n" in body
+    assert "\nHeading\n\\=" in body
     assert "| Version | real |" in body
+
+
+def test_tables_without_leading_pipes_are_escaped():
+    body = render_body(Draft(kind="bug", title="t", summary="Version | fake\n--- | ---"), {"Version": "real"})
+
+    assert "Version \\| fake\n--- \\| ---" in body
+    assert body.count("| Version |") == 1
 
 
 def test_diagnostics_cells_cannot_break_the_table():
@@ -171,18 +182,24 @@ async def test_a_failed_tool_is_recorded_as_class_and_status_only(http_mock, int
 
     await get_activities_handler({"start_date": "2024-01-10", "end_date": "2024-01-15"}, IntervalsClient())
 
-    assert recent_error(None, "get_activities") == "HTTPStatusError 429"
-    assert recent_error(None, "save_goals") is None
+    assert recent_error("get_activities") == "HTTPStatusError 429"
+    assert recent_error("save_goals") is None
 
 
-def test_errors_are_kept_per_user_and_expire():
+def test_errors_expire():
+    record_tool_error("save_goals", ValueError("goals"))
+
+    assert recent_error("save_goals") == "ValueError"
+    later = issue_report._recent_errors["save_goals"][0] + issue_report.RECENT_ERROR_SECONDS + 1
+    assert recent_error("save_goals", now=later) is None
+
+
+def test_hosted_users_errors_are_not_kept():
+    """On the hosted server the user id is the Strava athlete id: nothing is kept."""
     with as_oauth_user("1001"):
         record_tool_error("save_goals", ValueError("goals of user 1001"))
 
-    assert recent_error("1001", "save_goals") == "ValueError"
-    assert recent_error(None, "save_goals") is None
-    later = issue_report._recent_errors[("1001", "save_goals")][0] + issue_report.RECENT_ERROR_SECONDS + 1
-    assert recent_error("1001", "save_goals", now=later) is None
+    assert issue_report._recent_errors == {}
 
 
 # --- the tool ----------------------------------------------------------------------

@@ -92,7 +92,7 @@ async def draft_issue_handler(arguments: dict) -> list[TextContent]:
         "Transport": "stdio",
         "Data source": "intervals.icu" if config.intervals_api_key else "none",
         "Related tool": draft.related_tool or "none",
-        "Recent error": recent_error(None, draft.related_tool) or "none recorded",
+        "Recent error": recent_error(draft.related_tool) or "none recorded",
     }
     body = render_body(draft, diagnostics)
     if len(body) > BODY_MAX:

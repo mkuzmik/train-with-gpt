@@ -59,30 +59,30 @@ def issue_repo() -> str:
 
 # --- recent tool errors ------------------------------------------------------------
 
-# (user id or None, tool name) -> (monotonic time, exception class, HTTP status).
-# In memory only: lost on restart, which is fine. The message is never kept, as
-# it can contain personal data (URLs with activity ids, user ids).
-_recent_errors: dict[tuple[Optional[str], str], tuple[float, str, Optional[int]]] = {}
+# tool name -> (monotonic time, exception class, HTTP status), personal
+# (stdio) path only: on the hosted server the user id is the Strava athlete id,
+# which isn't kept here, and draft_issue isn't offered there yet. In memory
+# only: lost on restart, which is fine. The message is never kept, as it can
+# contain personal data (URLs with activity ids, user ids).
+_recent_errors: dict[str, tuple[float, str, Optional[int]]] = {}
 
 
 def record_tool_error(tool: str, error: BaseException) -> None:
-    """Remember that `tool` failed for the current user: class and HTTP status only."""
+    """Remember that `tool` failed (personal path only): class and HTTP status only."""
     from .helpers import current_user_id
 
+    if current_user_id():
+        return
     response = getattr(error, "response", None)
     status = getattr(response, "status_code", None)
-    _recent_errors[(current_user_id(), tool)] = (
-        time.monotonic(),
-        type(error).__name__,
-        status if isinstance(status, int) else None,
-    )
+    _recent_errors[tool] = (time.monotonic(), type(error).__name__, status if isinstance(status, int) else None)
 
 
-def recent_error(user_id: Optional[str], tool: Optional[str], now: Optional[float] = None) -> Optional[str]:
-    """E.g. "HTTPStatusError 429" if `tool` failed for `user_id` in the last 30 minutes."""
+def recent_error(tool: Optional[str], now: Optional[float] = None) -> Optional[str]:
+    """E.g. "HTTPStatusError 429" if `tool` failed in the last 30 minutes."""
     if not tool:
         return None
-    entry = _recent_errors.get((user_id, tool))
+    entry = _recent_errors.get(tool)
     if not entry:
         return None
     at, error_class, status = entry
@@ -106,7 +106,8 @@ _MONTHS = (
 # reported first; every rule is checked.
 _RULES: list[tuple[str, re.Pattern]] = [
     ("an email address", re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")),
-    ("a link or URL", re.compile(r"\b[a-z][a-z0-9+.-]*://|\bwww\.|\]\(", re.IGNORECASE)),
+    # Scheme, www., inline link, reference-link definition, protocol-relative.
+    ("a link or URL", re.compile(r"\b[a-z][a-z0-9+.-]*://|\bwww\.|\]\s*[(:]|(?<![\w:/])//[^\s/]", re.IGNORECASE)),
     ("an @mention", re.compile(r"(?<![\w.+-])@[A-Za-z0-9][A-Za-z0-9-]*")),
     ("an issue or PR reference like #123", re.compile(r"(?<![\w&])#\d+")),
     ("an image", re.compile(r"!\[")),
@@ -211,12 +212,14 @@ def validate(
 
 # --- rendering ---------------------------------------------------------------------
 
-_BLOCK_START = re.compile(r"^(\s{0,3})([#|>]|-{3,}\s*$|={3,}\s*$|\*{3,}\s*$|_{3,}\s*$)")
+_BLOCK_START = re.compile(r"^(\s{0,3})([#>]|[-=]+\s*$|([-*_])(?:\s*\3){2,}\s*$)")
 
 
 def _plain(text: str) -> str:
-    """Escape line starts that Markdown would turn into headings, tables, quotes
-    or rules, so model text can't pass itself off as the diagnostics block."""
+    """Escape Markdown that could pass model text off as the diagnostics block:
+    every pipe (tables, with or without leading pipes), and line starts that
+    would make headings (ATX or setext underlines), quotes or rules."""
+    text = text.replace("|", "\\|")
     return "\n".join(_BLOCK_START.sub(r"\1\\\2", line) for line in text.splitlines())
 
 
