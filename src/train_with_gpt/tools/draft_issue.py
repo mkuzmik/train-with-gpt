@@ -12,6 +12,8 @@ athlete id, which isn't stored anywhere new (Strava API policy). See #32.
 """
 
 import asyncio
+import hashlib
+import hmac
 import secrets
 import sys
 from datetime import datetime
@@ -99,13 +101,22 @@ def draft_issue_tool() -> Tool:
 
 REPORT_NOT_SAVED = "❌ Error: The report was not saved"
 
+# The hosted user id is the Strava athlete id, so the in-memory maps below are
+# keyed by a salted hash of it instead. The salt lives only in this process, so
+# the key can't be turned back into the id (it would be easy to brute-force an
+# unsalted hash of a number).
+_KEY_SALT = secrets.token_bytes(32)
+
 # One lock per hosted user, held from the daily-cap check to the end of the
 # save, so concurrent calls can't all pass the cap. Single-process server.
 _report_locks: dict[str, asyncio.Lock] = {}
-# user id -> (date, reports saved that day). In memory only, so the athlete id
-# is never written to the repo; a restart resets the count, which is fine for
-# a cap meant to stop a runaway model, not a determined user.
+# user key -> (date, reports saved that day). In memory only; a restart resets
+# the count, which is fine for a cap meant to stop a runaway model.
 _reports_today: dict[str, tuple[str, int]] = {}
+
+
+def _user_key(user_id: str) -> str:
+    return hmac.new(_KEY_SALT, user_id.encode(), hashlib.sha256).hexdigest()
 
 
 def clear_report_counts() -> None:
@@ -113,14 +124,13 @@ def clear_report_counts() -> None:
 
 
 def _hosted_athlete(user_id: str) -> tuple[list, str]:
-    """The athlete's stored names (for the name check) and data source kind.
+    """The athlete's intervals.icu name (for the name check) and data source kind.
+    The Strava name (users.name) isn't used: no new processing of Strava data.
     Raises if the store can't be read: the name check must not be skipped."""
     from .. import store
 
-    user = store.get_user(user_id) or {}
     connection = store.get_intervals_connection(user_id) or {}
-    names = [user.get("name"), connection.get("athlete_name")]
-    return names, "strava, intervals.icu (wellness)" if connection else "strava"
+    return [connection.get("athlete_name")], "strava, intervals.icu (wellness)" if connection else "strava"
 
 
 async def draft_issue_handler(arguments: dict) -> list[TextContent]:
@@ -192,7 +202,7 @@ async def _save_hosted_report(user_id: str, title: str, body: str) -> list[TextC
             f"{REPORT_NOT_SAVED}: this server's report storage isn't set up. Please tell the "
             "server's operator about the problem directly."
         ))]
-    async with _report_locks.setdefault(user_id, asyncio.Lock()):
+    async with _report_locks.setdefault(_user_key(user_id), asyncio.Lock()):
         return await _save_hosted_report_locked(user_id, Path(config.training_repo_path), title, body)
 
 
@@ -200,7 +210,8 @@ async def _save_hosted_report_locked(user_id: str, repo_path: Path, title: str, 
     try:
         now = datetime.now()
         today = now.strftime("%Y-%m-%d")
-        day, sent_today = _reports_today.get(user_id, (today, 0))
+        key = _user_key(user_id)
+        day, sent_today = _reports_today.get(key, (today, 0))
         if day != today:
             sent_today = 0
         if sent_today >= HOSTED_REPORTS_PER_DAY:
@@ -214,7 +225,7 @@ async def _save_hosted_report_locked(user_id: str, repo_path: Path, title: str, 
         push_status = await asyncio.to_thread(
             git_save_file, repo_path, relative_path, content, f"Add report - {now.strftime('%Y-%m-%d %H:%M')}"
         )
-        _reports_today[user_id] = (today, sent_today + 1)
+        _reports_today[key] = (today, sent_today + 1)
         push_status = save_status_for_caller(push_status, user_id)
         return [TextContent(type="text", text=(
             f"✅ Report saved for the server's operator{push_status}. It is private; the operator "

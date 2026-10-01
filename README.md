@@ -576,7 +576,7 @@ does so only if you agree.
 Either way the server refuses reports that contain email addresses, links,
 @mentions, issue references, images or HTML, token- or id-like strings,
 numbers of 6 or more digits, intervals.icu-style ids, calendar dates and (on
-a hosted server) the athlete's stored name, and Claude is asked to rewrite
+a hosted server) the athlete's intervals.icu name, and Claude is asked to rewrite
 them in general terms. It can't catch everything (other names or health
 details in prose, for instance), so read the text before agreeing.
 

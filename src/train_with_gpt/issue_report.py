@@ -147,7 +147,7 @@ _RULES: list[tuple[str, re.Pattern]] = [
     # day or a preceding day number.
     ("a calendar date", re.compile(
         rf"\bMay\b{_DATE_SEP}(?:of\s+)?\d{{1,4}}|\b\d{{1,4}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?May\b"
-        rf"|\bmay\b{_DATE_SEP}(?:of\s+\d{{4}}\b|\d{{4}}\b|\d{{1,2}}(?:st|nd|rd|th)\b)"
+        rf"|\bmay\b{_DATE_SEP}(?:of\s+\d{{4}}\b|\d{{4}}\b|\d{{1,2}}\b|\d{{1,2}}(?:st|nd|rd|th)\b)"
         rf"|\b\d{{1,2}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?may\b"
         rf"|\b\d{{4}}{_DATE_SEP}may\b"
     )),
@@ -170,7 +170,7 @@ class Draft:
 
 
 def _name_patterns(names: Iterable[Optional[str]]) -> list[re.Pattern]:
-    parts = {part for name in names if name for part in re.split(r"[\s,]+", name) if len(part) >= 2}
+    parts = {part for name in names if name for part in re.split(r"[\s,.'\u2019-]+", name) if len(part) >= 2}
     return [re.compile(rf"(?<!\w){re.escape(part)}(?!\w)", re.IGNORECASE) for part in sorted(parts)]
 
 

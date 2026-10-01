@@ -112,6 +112,7 @@ def test_a_general_report_passes():
     ("in January of 2024", "a calendar date"),
     ("in May of 2024", "a calendar date"),
     ("in may of 2024", "a calendar date"),
+    ("on may 15 it failed", "a calendar date"),
     ("since 01/2024 it fails", "a calendar date"),
 ])
 def test_personal_or_unsafe_content_is_rejected(text, reason):
@@ -373,14 +374,34 @@ async def test_hosted_report_path_and_body_never_carry_the_user_id(training_repo
     assert "1001" not in remote_file(git_remote, saved)
 
 
-async def test_hosted_report_rejects_the_athletes_stored_name(training_repo, git_remote, db):
-    store.upsert_user("1001", "strava", "Sam Example", "access", "refresh", None)
+async def test_hosted_report_rejects_the_athletes_intervals_name_parts(training_repo, git_remote, db):
+    store.save_intervals_connection("1001", "synthetic-athlete", "Anne-Marie Example", "not-a-real-key")
 
     with as_oauth_user("1001"):
-        output = text_of(await draft_issue_handler({**REPORT, "summary": "Sam asked about it."}))
+        output = text_of(await draft_issue_handler({**REPORT, "summary": "Marie asked about it."}))
 
     assert "the athlete's name" in output
     assert not [path for path in remote_files(git_remote) if path.startswith("reports/")]
+
+
+async def test_hosted_report_does_not_read_the_strava_name(training_repo, git_remote, db):
+    """No new processing of Strava data: the Strava name (users.name) isn't checked."""
+    store.upsert_user("1001", "strava", "Sam Example", "access", "refresh", None)
+
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler({**REPORT, "summary": "The note list was empty for Sam."}))
+
+    assert output.startswith("✅")
+
+
+async def test_hosted_in_memory_state_never_holds_the_raw_user_id(training_repo, git_remote, db):
+    from train_with_gpt.tools import draft_issue as module
+
+    with as_oauth_user("1001"):
+        await draft_issue_handler(REPORT)
+
+    assert module._reports_today and module._report_locks
+    assert "1001" not in repr(module._reports_today) + repr(module._report_locks)
 
 
 async def test_hosted_reports_are_capped_per_day(training_repo, git_remote, db):
