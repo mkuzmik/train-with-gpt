@@ -122,6 +122,9 @@ _RULES: list[tuple[str, re.Pattern]] = [
     ("an image", re.compile(r"!\[")),
     ("HTML", re.compile(r"<\s*[A-Za-z!/?]")),
     ("a token or key", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_|\bgithub_pat_|\bBearer\s|\bsk-[A-Za-z0-9]", re.IGNORECASE)),
+    # Shorter prefixed key ids the generic rule below misses: AWS (AKIA/ASIA...),
+    # Google API keys (AIza...), Slack tokens (xox?-).
+    ("a token or key", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|\bAIza[0-9A-Za-z_-]{20,}|\bxox[abposr]-")),
     ("a token- or id-like string", re.compile(r"(?=[A-Za-z0-9_\-+/=]*\d)(?=[A-Za-z0-9_\-+/=]*[A-Za-z])[A-Za-z0-9_\-+/=]{24,}")),
     # Also grouped: 12,345,678 / 123 456 / 1.234.567 (incl. no-break and thin spaces).
     ("a long number (6 or more digits, e.g. an activity or athlete id)", re.compile(

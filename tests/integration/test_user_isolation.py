@@ -114,7 +114,7 @@ async def test_personal_path_does_not_see_user_notes(login):
     assert "Alice private note" not in result.content[0].text
 
 
-def test_hosted_reports_are_saved_per_user_in_the_training_repo(login, git_remote):
+def test_hosted_reports_are_saved_without_the_user_id_in_the_training_repo(login, git_remote):
     alice = login(ALICE)
 
     output = alice.call_tool("draft_issue", {
@@ -123,5 +123,5 @@ def test_hosted_reports_are_saved_per_user_in_the_training_repo(login, git_remot
 
     reports = [path for path in remote_files(git_remote) if path.startswith("reports/")]
     assert output.startswith("✅ Report saved for the server's operator")
-    assert len(reports) == 1 and reports[0].startswith(f"reports/{ALICE}/")
+    assert len(reports) == 1 and str(ALICE) not in reports[0]
     assert "| Transport | http (hosted) |" in remote_file(git_remote, reports[0])

@@ -22,7 +22,7 @@ from train_with_gpt.issue_report import (
 )
 from train_with_gpt.server import list_tools
 from train_with_gpt.tools import draft_issue_handler, get_activities_handler
-from train_with_gpt.tools.draft_issue import HOSTED_REPORTS_PER_DAY
+from train_with_gpt.tools.draft_issue import HOSTED_REPORTS_PER_DAY, clear_report_counts
 from train_with_gpt.intervals_client import IntervalsClient
 
 TOOLS = ("get_activities", "save_consultation_notes")
@@ -40,8 +40,10 @@ REPORT = {
 @pytest.fixture(autouse=True)
 def _no_recent_errors():
     issue_report.clear_recent_errors()
+    clear_report_counts()
     yield
     issue_report.clear_recent_errors()
+    clear_report_counts()
 
 
 def _link(output: str) -> str:
@@ -80,6 +82,7 @@ def test_a_general_report_passes():
     ("</details>", "HTML"),
     ("token ghp_abc", "a token or key"),
     ("header Bearer abc", "a token or key"),
+    ("key AKIAIOSFODNN7EXAMPLE", "a token or key"),
     ("key github_pat_x", "a token or key"),
     ("value Zx9Qm2Lp8Rt4Vw7Yk3Hn6Bc5", "a token- or id-like string"),
     ("activity 1234567 failed", "a long number"),
@@ -347,7 +350,7 @@ async def test_hosted_report_is_saved_privately_in_the_training_repo(training_re
     assert "draft_issue" in names
     assert output.startswith("✅ Report saved for the server's operator")
     assert "https://" not in output
-    saved = [path for path in remote_files(git_remote) if path.startswith("reports/1001/")]
+    saved = [path for path in remote_files(git_remote) if path.startswith("reports/")]
     assert len(saved) == 1
     content = remote_file(git_remote, saved[0])
     assert content.startswith(f"# {REPORT['title']}\n\n**Kind:** bug")
@@ -357,12 +360,13 @@ async def test_hosted_report_is_saved_privately_in_the_training_repo(training_re
     assert content.split("\n\n", 1)[1] in output  # the user is shown exactly what was saved
 
 
-async def test_hosted_report_body_never_carries_the_user_id(training_repo, git_remote, db):
+async def test_hosted_report_path_and_body_never_carry_the_user_id(training_repo, git_remote, db):
     with as_oauth_user("1001"):
         record_tool_error("save_consultation_notes", RuntimeError("user 1001"))
         await draft_issue_handler(REPORT)
 
-    saved = next(path for path in remote_files(git_remote) if path.startswith("reports/1001/"))
+    saved = next(path for path in remote_files(git_remote) if path.startswith("reports/"))
+    assert "1001" not in saved  # the Strava athlete id isn't stored in the repo
     assert "1001" not in remote_file(git_remote, saved)
 
 
@@ -384,7 +388,7 @@ async def test_hosted_reports_are_capped_per_day(training_repo, git_remote, db):
 
     assert all(output.startswith("✅") for output in outputs[:-1])
     assert outputs[-1].startswith(f"❌ The report was not saved: the limit is {HOSTED_REPORTS_PER_DAY} reports a day.")
-    assert len([path for path in remote_files(git_remote) if path.startswith("reports/1001/")]) == HOSTED_REPORTS_PER_DAY
+    assert len([path for path in remote_files(git_remote) if path.startswith("reports/")]) == HOSTED_REPORTS_PER_DAY + 1
     assert other.startswith("✅")
 
 
@@ -413,7 +417,7 @@ async def test_concurrent_hosted_reports_cannot_exceed_the_daily_cap(training_re
     with as_oauth_user("1001"):
         outputs = await asyncio.gather(*(draft_issue_handler(REPORT) for _ in range(HOSTED_REPORTS_PER_DAY + 2)))
 
-    saved = [path for path in remote_files(git_remote) if path.startswith("reports/1001/")]
+    saved = [path for path in remote_files(git_remote) if path.startswith("reports/")]
     assert len(saved) == HOSTED_REPORTS_PER_DAY
     assert sum(text_of(output).startswith("✅") for output in outputs) == HOSTED_REPORTS_PER_DAY
 

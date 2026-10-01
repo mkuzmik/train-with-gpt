@@ -5,8 +5,10 @@ and the user files it under their own account.
 
 Hosted server: hosted users may not have a GitHub account and shouldn't file
 publicly under their name, so the report is saved privately in the server's
-training repo (reports/<user_id>/), where the operator triages it and, when
-warranted, writes a public issue. No GitHub token is needed. See issue #32.
+training repo (reports/<timestamp>-<random>.md), where the operator triages
+it and, when warranted, writes a public issue. No GitHub token is needed. The
+path and the text carry no user id: on the hosted server it is the Strava
+athlete id, which isn't stored anywhere new (Strava API policy). See #32.
 """
 
 import asyncio
@@ -97,9 +99,17 @@ def draft_issue_tool() -> Tool:
 
 REPORT_NOT_SAVED = "❌ Error: The report was not saved"
 
-# One lock per hosted user, held from the daily-cap count to the end of the
+# One lock per hosted user, held from the daily-cap check to the end of the
 # save, so concurrent calls can't all pass the cap. Single-process server.
 _report_locks: dict[str, asyncio.Lock] = {}
+# user id -> (date, reports saved that day). In memory only, so the athlete id
+# is never written to the repo; a restart resets the count, which is fine for
+# a cap meant to stop a runaway model, not a determined user.
+_reports_today: dict[str, tuple[str, int]] = {}
+
+
+def clear_report_counts() -> None:
+    _reports_today.clear()
 
 
 def _hosted_athlete(user_id: str) -> tuple[list, str]:
@@ -188,19 +198,21 @@ async def _save_hosted_report(user_id: str, title: str, body: str) -> list[TextC
 async def _save_hosted_report_locked(user_id: str, repo_path: Path, title: str, body: str) -> list[TextContent]:
     try:
         now = datetime.now()
-        reports_dir = repo_path / "reports" / user_id
         today = now.strftime("%Y-%m-%d")
-        sent_today = len(list(reports_dir.glob(f"{today}-*.md"))) if reports_dir.exists() else 0
+        day, sent_today = _reports_today.get(user_id, (today, 0))
+        if day != today:
+            sent_today = 0
         if sent_today >= HOSTED_REPORTS_PER_DAY:
             return [TextContent(type="text", text=(
                 f"❌ The report was not saved: the limit is {HOSTED_REPORTS_PER_DAY} reports a day. "
                 "Please try again tomorrow."
             ))]
 
-        relative_path = f"reports/{user_id}/{now.strftime('%Y-%m-%d-%H-%M-%S')}-{secrets.token_hex(2)}.md"
+        relative_path = f"reports/{now.strftime('%Y-%m-%d-%H-%M-%S')}-{secrets.token_hex(4)}.md"
         push_status = await asyncio.to_thread(
             git_save_file, repo_path, relative_path, f"# {title}\n\n{body}", f"Add report - {now.strftime('%Y-%m-%d %H:%M')}"
         )
+        _reports_today[user_id] = (today, sent_today + 1)
         push_status = save_status_for_caller(push_status, user_id)
         return [TextContent(type="text", text=(
             f"✅ Report saved for the server's operator{push_status}. It is private; the operator "

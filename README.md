@@ -171,9 +171,9 @@ anything. `train-with-gpt-purge-user <user_id>`, run next to the server's
 `su app -c 'train-with-gpt-purge-user <user_id>'`), removes their Strava
 tokens and name, intervals.icu key, and the server's tokens and codes for
 them. It first asks Strava to revoke the app's access (skip with
-`--no-deauthorize`). Their notes, goals, athlete profile and reports in the training repo
-(`notes/<user_id>/`, `goals/<user_id>.md`, `athlete/<user_id>.md`,
-`reports/<user_id>/`) aren't touched; delete them there in a normal commit if needed. Git history keeps them until it's rewritten.
+`--no-deauthorize`). Their notes, goals and athlete profile in the training repo
+(`notes/<user_id>/`, `goals/<user_id>.md`, `athlete/<user_id>.md`) aren't
+touched; delete them there in a normal commit if needed. Git history keeps them until it's rewritten.
 
 ### Running the HTTP server in Docker
 
@@ -211,9 +211,9 @@ clients, kept at mode `600`) survives `docker compose restart`/rebuilds;
 `config.json` is re-copied from the host file on every start.
 `docker compose down -v` clears the store (not the host file).
 
-**Notes/goals repo in Docker.** OAuth'd users' notes, goals, athlete
-profiles and bug reports are stored per user (`notes/<user_id>/`,
-`goals/<user_id>.md`, `athlete/<user_id>.md`, `reports/<user_id>/`) in a separate, *private* git
+**Notes/goals repo in Docker.** OAuth'd users' notes, goals and athlete
+profiles are stored per user (`notes/<user_id>/`, `goals/<user_id>.md`,
+`athlete/<user_id>.md`), and bug reports under `reports/`, in a separate, *private* git
 repo, cloned by the container on first start (`docker-entrypoint.sh`) and
 pushed to on every save. Set it up once:
 
@@ -567,9 +567,11 @@ does so only if you agree.
   filled in; you check the text there and file it under your own GitHub
   account. The issue is **public**.
 - **Hosted server:** the report is saved privately in the server's training
-  repo, under `reports/<user_id>/`, like notes. Nobody else sees it; the
-  operator reads it there and, when it's worth it, writes a public issue
-  without your data. Each user can save 5 reports a day.
+  repo, as `reports/<timestamp>-<random>.md`. Neither the file name nor the
+  text says who sent it (the hosted user id is the Strava athlete id). Nobody
+  else sees it; the operator reads it there and, when it's worth it, writes a
+  public issue. Each user can save 5 reports a day (counted in memory, so a
+  restart resets it).
 
 Either way the server refuses reports that contain email addresses, links,
 @mentions, issue references, images or HTML, token- or id-like strings,

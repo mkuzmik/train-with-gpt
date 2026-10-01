@@ -10,8 +10,8 @@ deleting, it asks Strava to revoke this app's access (best effort, with the
 stored access token; if that token has expired, the athlete can still revoke
 it under Strava -> Settings -> My Apps).
 
-Notes, goals and reports in the training repo (notes/<id>/, goals/<id>.md,
-reports/<id>/) are left alone; remove them there by hand if needed.
+Notes and goals in the training repo (notes/<id>/, goals/<id>.md) are left
+alone; remove them there by hand if needed.
 """
 
 import argparse
@@ -67,7 +67,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     deleted = store.purge_user(args.user_id)
     for table, count in deleted.items():
         print(f"{table}: {count} row(s) deleted")
-    print(f"Not touched: notes/{args.user_id}/, goals/{args.user_id}.md and reports/{args.user_id}/ in the training repo.")
+    print(f"Not touched: notes/{args.user_id}/ and goals/{args.user_id}.md in the training repo.")
     return 0
 
 
