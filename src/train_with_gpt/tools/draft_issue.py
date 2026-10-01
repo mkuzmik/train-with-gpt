@@ -24,7 +24,6 @@ from ..helpers import (
     git_save_file,
     save_error_for_caller,
     save_status_for_caller,
-    training_repo_not_configured_message,
 )
 from ..issue_report import (
     BODY_MAX,
@@ -96,26 +95,22 @@ def draft_issue_tool() -> Tool:
     )
 
 
-def _stored_names(user_id: str) -> list:
-    """The hosted athlete's stored names (Strava, intervals.icu), for the name check."""
+REPORT_NOT_SAVED = "❌ Error: The report was not saved"
+
+# One lock per hosted user, held from the daily-cap count to the end of the
+# save, so concurrent calls can't all pass the cap. Single-process server.
+_report_locks: dict[str, asyncio.Lock] = {}
+
+
+def _hosted_athlete(user_id: str) -> tuple[list, str]:
+    """The athlete's stored names (for the name check) and data source kind.
+    Raises if the store can't be read: the name check must not be skipped."""
     from .. import store
 
-    try:
-        user = store.get_user(user_id) or {}
-        connection = store.get_intervals_connection(user_id) or {}
-    except Exception:  # the store is a convenience here; never block a report on it
-        return []
-    return [user.get("name"), connection.get("athlete_name")]
-
-
-def _hosted_data_source(user_id: str) -> str:
-    from .. import store
-
-    try:
-        connected = bool(store.get_intervals_connection(user_id))
-    except Exception:
-        connected = False
-    return "strava, intervals.icu (wellness)" if connected else "strava"
+    user = store.get_user(user_id) or {}
+    connection = store.get_intervals_connection(user_id) or {}
+    names = [user.get("name"), connection.get("athlete_name")]
+    return names, "strava, intervals.icu (wellness)" if connection else "strava"
 
 
 async def draft_issue_handler(arguments: dict) -> list[TextContent]:
@@ -126,8 +121,15 @@ async def draft_issue_handler(arguments: dict) -> list[TextContent]:
     from ..self_test import registered_tool_names
 
     user_id = current_user_id()
+    names, data_source = (), None
+    if user_id:
+        try:
+            names, data_source = _hosted_athlete(user_id)
+        except Exception as e:  # fail closed: never save without the name check
+            print(f"Error reading the store for a report: {type(e).__name__}", file=sys.stderr)
+            return [TextContent(type="text", text=f"{REPORT_NOT_SAVED}: the server couldn't check it just now. Please try again later.")]
     try:
-        draft = validate(arguments, await registered_tool_names(), _stored_names(user_id) if user_id else ())
+        draft = validate(arguments, await registered_tool_names(), names)
     except ReportRejected as e:
         return [TextContent(type="text", text=f"❌ {e}")]
 
@@ -135,7 +137,7 @@ async def draft_issue_handler(arguments: dict) -> list[TextContent]:
         diagnostics = {
             "Version": version_string(),
             "Transport": "http (hosted)",
-            "Data source": _hosted_data_source(user_id),
+            "Data source": data_source,
             "Related tool": draft.related_tool or "none",
             # Not kept on the hosted server: the user id is the Strava athlete id.
             "Recent error": "not recorded on the hosted server",
@@ -174,13 +176,17 @@ async def draft_issue_handler(arguments: dict) -> list[TextContent]:
 
 async def _save_hosted_report(user_id: str, title: str, body: str) -> list[TextContent]:
     """Save the report to reports/<user_id>/ in the training repo, for the operator."""
-    try:
-        if not config.training_repo_path:
-            return [TextContent(type="text", text=training_repo_not_configured_message())]
-        repo_path = Path(config.training_repo_path)
-        if not repo_path.exists():
-            return [TextContent(type="text", text=f"❌ Error: {save_error_for_caller('', user_id)}")]
+    if not config.training_repo_path or not Path(config.training_repo_path).exists():
+        return [TextContent(type="text", text=(
+            f"{REPORT_NOT_SAVED}: this server's report storage isn't set up. Please tell the "
+            "server's operator about the problem directly."
+        ))]
+    async with _report_locks.setdefault(user_id, asyncio.Lock()):
+        return await _save_hosted_report_locked(user_id, Path(config.training_repo_path), title, body)
 
+
+async def _save_hosted_report_locked(user_id: str, repo_path: Path, title: str, body: str) -> list[TextContent]:
+    try:
         now = datetime.now()
         reports_dir = repo_path / "reports" / user_id
         today = now.strftime("%Y-%m-%d")
@@ -203,8 +209,8 @@ async def _save_hosted_report(user_id: str, title: str, body: str) -> list[TextC
         ))]
 
     except GitSyncError as e:
-        return [TextContent(type="text", text=f"❌ Error: The report was not saved. {save_error_for_caller(str(e), user_id)}")]
+        return [TextContent(type="text", text=f"{REPORT_NOT_SAVED}. {save_error_for_caller(str(e), user_id)}")]
 
     except Exception as e:
         print(f"Error saving report: {type(e).__name__}", file=sys.stderr)
-        return [TextContent(type="text", text=f"❌ Error: The report was not saved. {save_error_for_caller(str(e), user_id)}")]
+        return [TextContent(type="text", text=f"{REPORT_NOT_SAVED}. {save_error_for_caller(str(e), user_id)}")]

@@ -3,6 +3,7 @@
 All report text here is synthetic.
 """
 
+import asyncio
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -82,6 +83,9 @@ def test_a_general_report_passes():
     ("key github_pat_x", "a token or key"),
     ("value Zx9Qm2Lp8Rt4Vw7Yk3Hn6Bc5", "a token- or id-like string"),
     ("activity 1234567 failed", "a long number"),
+    ("activity 12,345,678 failed", "a long number"),
+    ("athlete 123 456 failed", "a long number"),
+    ("activity 1.234.567 failed", "a long number"),
     ("activity i4242 failed", "an intervals.icu-style id"),
     ("on 2024-01-15 it failed", "a calendar date"),
     ("on 15/01/2024 it failed", "a calendar date"),
@@ -94,6 +98,14 @@ def test_a_general_report_passes():
     ("since 2024 January", "a calendar date"),
     ("on 2024-Jan-15", "a calendar date"),
     ("in 2024 May", "a calendar date"),
+    ("on Jan-15 it failed", "a calendar date"),
+    ("on 15-Jan it failed", "a calendar date"),
+    ("on January 3rd it failed", "a calendar date"),
+    ("since may 2024", "a calendar date"),
+    ("on 3 may it failed", "a calendar date"),
+    ("since January, 2024", "a calendar date"),
+    ("since 2024, January", "a calendar date"),
+    ("since Jan '24", "a calendar date"),
     ("since 01/2024 it fails", "a calendar date"),
 ])
 def test_personal_or_unsafe_content_is_rejected(text, reason):
@@ -108,6 +120,9 @@ def test_personal_or_unsafe_content_is_rejected(text, reason):
     "save_goals reported success; intervals.icu data looked fine.",
     "It may be slow when there are 30 notes.",
     "A 5 km run shows 3 laps instead of 5.",
+    "A run of 1,234 m shows no laps.",
+    "You may need 2 tries before it saves.",
+    "The march to 10 km felt slow.",
 ])
 def test_ordinary_prose_is_accepted(text):
     assert validate({**REPORT, "summary": text}, TOOLS).summary == text
@@ -373,11 +388,43 @@ async def test_hosted_reports_are_capped_per_day(training_repo, git_remote, db):
     assert other.startswith("✅")
 
 
-async def test_hosted_report_without_a_training_repo_points_to_the_operator(db):
+async def test_hosted_report_without_a_training_repo_says_it_was_not_saved(db):
     with as_oauth_user("1001"):
         output = text_of(await draft_issue_handler(REPORT))
 
-    assert "contact the server's operator" in output
+    assert output.startswith("❌ Error: The report was not saved: this server's report storage isn't set up.")
+    assert "goals" not in output and "notes" not in output
+
+
+async def test_hosted_report_is_refused_when_the_name_check_cannot_run(training_repo, git_remote, tmp_path, monkeypatch):
+    """Fail closed: an unreadable store must not skip the athlete's-name check."""
+    broken = tmp_path / "not-a-db"
+    broken.mkdir()
+    monkeypatch.setattr(store, "DB_PATH", broken)
+
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler(REPORT))
+
+    assert output.startswith("❌ Error: The report was not saved: the server couldn't check it just now.")
+    assert not [path for path in remote_files(git_remote) if path.startswith("reports/")]
+
+
+async def test_concurrent_hosted_reports_cannot_exceed_the_daily_cap(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        outputs = await asyncio.gather(*(draft_issue_handler(REPORT) for _ in range(HOSTED_REPORTS_PER_DAY + 2)))
+
+    saved = [path for path in remote_files(git_remote) if path.startswith("reports/1001/")]
+    assert len(saved) == HOSTED_REPORTS_PER_DAY
+    assert sum(text_of(output).startswith("✅") for output in outputs) == HOSTED_REPORTS_PER_DAY
+
+
+async def test_hosted_report_footer_does_not_claim_the_user_filed_it(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        await draft_issue_handler(REPORT)
+
+    content = remote_file(git_remote, next(path for path in remote_files(git_remote) if path.startswith("reports/")))
+    assert "the user reviewed this text" in content
+    assert "filed by the user" not in content
 
 
 async def test_the_kill_switch_hides_and_refuses(monkeypatch):
