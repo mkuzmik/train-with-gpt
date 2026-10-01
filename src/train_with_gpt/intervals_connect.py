@@ -2,7 +2,7 @@
 
 After Strava's callback identifies the user, and before redirecting back to
 Claude, we show one page asking for the user's personal intervals.icu API key
-(Strava has no sleep/HRV/resting-HR data; intervals.icu has it from Garmin).
+(Strava has no sleep/HRV/resting-HR/weight data; intervals.icu has it from Garmin).
 The key goes straight from the browser to this server - never through Claude
 or the chat - is validated against intervals.icu, and is stored encrypted
 (secret_box.py). Skipping finishes the login exactly as before.
@@ -71,7 +71,7 @@ def _render(token: str, connection: dict | None, error: str | None = None, statu
     .ok {{ color: #3fb950; }} .err, .link {{ color: #ff7b72; }}
   }}
 </style></head><body>
-<h1>Add sleep, HRV and resting HR (optional)</h1>
+<h1>Add sleep, HRV, resting HR and body weight (optional)</h1>
 <p>Strava has no wellness data. If your Garmin syncs to intervals.icu, paste your
 intervals.icu API key to use it.</p>
 <p class="muted">Find it on intervals.icu under Settings &rarr; Developer Settings &rarr; API key.</p>

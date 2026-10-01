@@ -7,7 +7,7 @@ from tests.support import text_of
 from train_with_gpt.helpers import NO_WELLNESS_DATA_MESSAGE
 from train_with_gpt.intervals_client import IntervalsClient
 from train_with_gpt.strava_client import StravaClient
-from train_with_gpt.tools import get_weight_data_handler
+from train_with_gpt.tools import get_weight_data_handler, get_weight_data_tool
 
 WELLNESS_URL = "https://intervals.icu/api/v1/athlete/0/wellness"
 
@@ -79,6 +79,13 @@ async def test_long_range_up_to_366_days_is_allowed(intervals, wellness):
 
     assert "70.0 kg" in output
     assert wellness.called
+
+
+def test_schema_accepts_null_mode_but_only_known_strings():
+    mode = get_weight_data_tool().inputSchema["properties"]["mode"]
+
+    assert mode["type"] == ["string", "null"]
+    assert mode["enum"] == ["datapoints", "summary", None]
 
 
 async def test_null_mode_means_the_default(intervals, wellness):

@@ -36,9 +36,10 @@ def get_weight_data_tool() -> Tool:
                     "description": "End date in YYYY-MM-DD format. Required.",
                 },
                 "mode": {
-                    "type": "string",
-                    "enum": list(MODES),
-                    "description": "'datapoints' (default): every weigh-in plus a summary. 'summary': statistics only.",
+                    # Nullable: some clients send null for an optional argument they leave unset.
+                    "type": ["string", "null"],
+                    "enum": [*MODES, None],
+                    "description": "'datapoints' (default, also when omitted or null): every weigh-in plus a summary. 'summary': statistics only.",
                 },
             },
             "required": ["start_date", "end_date"],
