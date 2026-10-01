@@ -62,7 +62,7 @@ async def test_stdio_lists_all_tools(stdio_env):
     async with StdioServer(stdio_env) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 19
+    assert len(tools) == 20
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -83,7 +83,7 @@ async def test_console_script_serves_stdio(stdio_env):
     async with StdioServer(stdio_env, command=[CONSOLE_SCRIPT]) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 19
+    assert len(tools) == 20
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -154,7 +154,7 @@ async def test_intervals_backed_tools(http_mock, intervals_api_key):
         "id": "i1", "type": "Run", "distance": 5000, "moving_time": 1500, "start_date": "2024-01-15T07:00:00Z",
     }]))
     http_mock.get(f"{INTERVALS}/athlete/0/wellness").mock(return_value=Response(200, json=[
-        {"id": "2024-01-15", "sleepSecs": 28800, "sleepScore": 90, "hrv": 61, "restingHR": 48},
+        {"id": "2024-01-15", "sleepSecs": 28800, "sleepScore": 90, "hrv": 61, "restingHR": 48, "weight": 70.2},
     ]))
     http_mock.get(f"{INTERVALS}/activity/i1").mock(return_value=Response(200, json={
         "id": "i1", "type": "Run", "icu_intervals": [{"start_time": 0, "end_time": 1500, "distance": 5000,
@@ -171,6 +171,7 @@ async def test_intervals_backed_tools(http_mock, intervals_api_key):
         sleep = _text(await session.call_tool("get_sleep_data", day))
         hrv = _text(await session.call_tool("get_hrv_data", day))
         rhr = _text(await session.call_tool("get_resting_heart_rate", day))
+        weight = _text(await session.call_tool("get_weight_data", day))
         analysis = _text(await session.call_tool("analyze_activity", {"activity_id": "i1"}))
         lap = _text(await session.call_tool("analyze_lap", {"activity_id": "i1", "lap_number": 1, "num_splits": 3}))
 
@@ -178,6 +179,7 @@ async def test_intervals_backed_tools(http_mock, intervals_api_key):
     assert "8h 0m | ⭐ Score: 90/100" in sleep
     assert "HRV: 61ms" in hrv
     assert "RHR: 48 bpm" in rhr
+    assert "70.2 kg" in weight
     assert "only one lap" in analysis
     assert "Split into 3 segments" in lap
 

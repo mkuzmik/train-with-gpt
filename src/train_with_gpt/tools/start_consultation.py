@@ -336,6 +336,7 @@ comes up, {how_to_add}
   - Higher HRV = better recovery, lower = potential fatigue/stress
 - **get_resting_heart_rate** - Daily resting heart rate trends
   - Lower RHR = better fitness, elevated = possible overtraining or illness
+- **get_weight_data** - Body weight history (every weigh-in, or only the average/trend)
 
 **When to Check Recovery Data:**
 - When discussing training load or planning volume increases

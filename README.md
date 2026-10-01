@@ -5,7 +5,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 ## What This Does
 
 - **Training Analysis**: View and analyze your activities with detailed metrics and zone distribution
-- **Sleep & Health Tracking**: Access wellness data - sleep duration/quality, HRV, resting heart rate
+- **Sleep & Health Tracking**: Access wellness data - sleep duration/quality, HRV, resting heart rate, body weight
 - **Goal Tracking**: Set training goals and have them persist across conversations
 - **Athlete Profile**: Claude builds a short profile of you with you (background, race results, health patterns, constraints, what works), checks it against your data, and starts every consultation from it
 - **Consultation History**: Claude remembers past conversations and provides continuity
@@ -492,7 +492,8 @@ This single entry point tells Claude what's saved for you (goals, athlete profil
 - "Show me my sleep from last night"
 - "How was my sleep on January 15?"
 - "What's my HRV trend this week?"
-- Claude shows: sleep duration/quality score, HRV, resting heart rate, rolling averages
+- "What was my average weight last month?"
+- Claude shows: sleep duration/quality score, HRV, resting heart rate, body weight, rolling averages
 
 **Continuing Conversations**
 
@@ -534,8 +535,8 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Tools
 
-The local stdio server offers 19 tools; the hosted server offers the same
-minus `setup_training_repo` (18), because its notes storage is server
+The local stdio server offers 20 tools; the hosted server offers the same
+minus `setup_training_repo` (19), because its notes storage is server
 configuration.
 
 | Tool | What it's for |
@@ -543,7 +544,7 @@ configuration.
 | `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one, and guides Claude through onboarding a new athlete or a consultation with a returning one. |
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
-| `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate` | Wellness data from intervals.icu (hosted users only if they connected it at login). |
+| `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. |
 | `read_goals`, `save_goals` | The athlete's goals: target, date, milestones, current block (saving replaces them). |
 | `build_athlete_profile`, `read_athlete_profile`, `save_athlete_profile` | The athlete profile: the coach's confirmed conclusions about the athlete (background, race results and PBs, tests, health patterns, constraints, strengths and limiters, what works, preferences), no weekly stats. `build_athlete_profile` is guidance for building it (interview, check against 12 months of data with the existing tools, discussion); saving replaces the whole profile (`athlete-profile.md`, or `athlete/<user_id>.md` on a hosted server) and is refused over 8,000 characters. |
 | `save_consultation_notes`, `list_consultation_notes`, `read_consultation_notes`, `search_consultation_notes` | Consultation notes, one timestamped file per save. |
