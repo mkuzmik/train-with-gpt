@@ -185,7 +185,8 @@ async def draft_issue_handler(arguments: dict) -> list[TextContent]:
 
 
 async def _save_hosted_report(user_id: str, title: str, body: str) -> list[TextContent]:
-    """Save the report to reports/<user_id>/ in the training repo, for the operator."""
+    """Save the report to reports/<timestamp>-<random>.md in the training repo, for
+    the operator. Never put the user id (the Strava athlete id) in the path or text."""
     if not config.training_repo_path or not Path(config.training_repo_path).exists():
         return [TextContent(type="text", text=(
             f"{REPORT_NOT_SAVED}: this server's report storage isn't set up. Please tell the "
@@ -209,15 +210,16 @@ async def _save_hosted_report_locked(user_id: str, repo_path: Path, title: str, 
             ))]
 
         relative_path = f"reports/{now.strftime('%Y-%m-%d-%H-%M-%S')}-{secrets.token_hex(4)}.md"
+        content = f"# {title}\n\n{body}"
         push_status = await asyncio.to_thread(
-            git_save_file, repo_path, relative_path, f"# {title}\n\n{body}", f"Add report - {now.strftime('%Y-%m-%d %H:%M')}"
+            git_save_file, repo_path, relative_path, content, f"Add report - {now.strftime('%Y-%m-%d %H:%M')}"
         )
         _reports_today[user_id] = (today, sent_today + 1)
         push_status = save_status_for_caller(push_status, user_id)
         return [TextContent(type="text", text=(
             f"✅ Report saved for the server's operator{push_status}. It is private; the operator "
             "reviews reports and may turn this one into a public GitHub issue. Show the user this "
-            f"text verbatim:\n\n**Title:** {title}\n\n{body}"
+            f"text verbatim; it is exactly what was saved:\n\n{content}"
         ))]
 
     except GitSyncError as e:

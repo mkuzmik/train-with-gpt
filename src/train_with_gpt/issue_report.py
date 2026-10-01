@@ -137,8 +137,8 @@ _RULES: list[tuple[str, re.Pattern]] = [
         r"|\b\d{4}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{4}\b"
         # A month name next to a day or year, either order, with spaces or
         # punctuation between (Jan 15, Jan-15, January 3rd, January, 2024,
-        # Jan '24, 15-Jan, 3rd of March, 2024 January, 2024, Jan).
-        rf"|\b(?:{_MONTHS})\b\.?{_DATE_SEP}\d{{1,4}}"
+        # Jan '24, January of 2024, 15-Jan, 3rd of March, 2024 January, 2024, Jan).
+        rf"|\b(?:{_MONTHS})\b\.?{_DATE_SEP}(?:of\s+)?\d{{1,4}}"
         rf"|\b\d{{1,4}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?(?:{_MONTHS})\b",
         re.IGNORECASE,
     )),
@@ -146,8 +146,8 @@ _RULES: list[tuple[str, re.Pattern]] = [
     # "May" next to a number, or lowercase "may" next to a year, an ordinal
     # day or a preceding day number.
     ("a calendar date", re.compile(
-        rf"\bMay\b{_DATE_SEP}\d{{1,4}}|\b\d{{1,4}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?May\b"
-        rf"|\bmay\b{_DATE_SEP}(?:\d{{4}}\b|\d{{1,2}}(?:st|nd|rd|th)\b)"
+        rf"\bMay\b{_DATE_SEP}(?:of\s+)?\d{{1,4}}|\b\d{{1,4}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?May\b"
+        rf"|\bmay\b{_DATE_SEP}(?:of\s+\d{{4}}\b|\d{{4}}\b|\d{{1,2}}(?:st|nd|rd|th)\b)"
         rf"|\b\d{{1,2}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?may\b"
         rf"|\b\d{{4}}{_DATE_SEP}may\b"
     )),

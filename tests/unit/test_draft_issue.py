@@ -109,6 +109,9 @@ def test_a_general_report_passes():
     ("since January, 2024", "a calendar date"),
     ("since 2024, January", "a calendar date"),
     ("since Jan '24", "a calendar date"),
+    ("in January of 2024", "a calendar date"),
+    ("in May of 2024", "a calendar date"),
+    ("in may of 2024", "a calendar date"),
     ("since 01/2024 it fails", "a calendar date"),
 ])
 def test_personal_or_unsafe_content_is_rejected(text, reason):
@@ -357,7 +360,7 @@ async def test_hosted_report_is_saved_privately_in_the_training_repo(training_re
     assert "| Transport | http (hosted) |" in content
     assert "| Data source | strava |" in content
     assert "| Recent error | not recorded on the hosted server |" in content
-    assert content.split("\n\n", 1)[1] in output  # the user is shown exactly what was saved
+    assert content in output  # the user is shown exactly what was saved, heading included
 
 
 async def test_hosted_report_path_and_body_never_carry_the_user_id(training_repo, git_remote, db):
