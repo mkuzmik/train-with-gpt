@@ -81,6 +81,16 @@ async def test_long_range_up_to_366_days_is_allowed(intervals, wellness):
     assert wellness.called
 
 
+async def test_null_mode_means_the_default(intervals, wellness):
+    wellness.mock(return_value=Response(200, json=[{"id": "2024-01-15", "weight": 70.2}]))
+
+    output = text_of(await get_weight_data_handler(
+        {"start_date": "2024-01-15", "end_date": "2024-01-15", "mode": None}, intervals,
+    ))
+
+    assert "2024-01-15: ⚖️  70.2 kg" in output
+
+
 async def test_no_data_found(intervals, wellness):
     wellness.mock(return_value=Response(200, json=[{"id": "2024-01-15", "restingHR": 50}]))
 
@@ -108,6 +118,8 @@ async def test_api_error(intervals, wellness):
     ({"start_date": "2023-01-01", "end_date": "2024-02-15"}, "Date range too large (411 days)"),
     ({"start_date": "2024-01-01", "end_date": "2025-01-01"}, "Date range too large (367 days)"),
     ({"start_date": "2024-01-15", "end_date": "2024-01-15", "mode": "weekly"}, "Invalid mode 'weekly'"),
+    ({"start_date": "2024-01-15", "end_date": "2024-01-15", "mode": ""}, "Invalid mode ''"),
+    ({"start_date": "2024-01-15", "end_date": "2024-01-15", "mode": False}, "Invalid mode 'False'"),
 ])
 async def test_invalid_arguments_make_no_request(intervals, wellness, args, message):
     output = text_of(await get_weight_data_handler(args, intervals))
@@ -123,4 +135,5 @@ async def test_strava_accounts_have_no_wellness_data(wellness):
     ))
 
     assert output == NO_WELLNESS_DATA_MESSAGE
+    assert "body weight" in output
     assert not wellness.called

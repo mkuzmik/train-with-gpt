@@ -1,6 +1,6 @@
 # Train With GPT
 
-A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. It reads your training data and keeps context about your goals and training history across conversations. Where the data comes from depends on how you use it: a **hosted server** reads activities from Strava (sleep, HRV and resting heart rate only if you also connect intervals.icu), and a **local (stdio) install** reads everything from [intervals.icu](https://intervals.icu).
+A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. It reads your training data and keeps context about your goals and training history across conversations. Where the data comes from depends on how you use it: a **hosted server** reads activities from Strava (sleep, HRV, resting heart rate and body weight only if you also connect intervals.icu), and a **local (stdio) install** reads everything from [intervals.icu](https://intervals.icu).
 
 ## What This Does
 
@@ -13,14 +13,14 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 
 On a local install, all training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
 
-There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Self-hosting"). Hosted users get Strava activity data only; sleep/HRV/resting HR need the intervals.icu path.
+There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Self-hosting"). Hosted users get Strava activity data only; sleep/HRV/resting HR/weight need the intervals.icu path.
 
 ## Using the hosted server
 
 If someone runs a hosted server for you, there's nothing to install. You need its connector URL, `https://<server>/mcp`.
 
 1. **Add it on claude.ai** (in a browser): Settings → Connectors → Add custom connector, and paste the URL. Custom connectors can't be added from the mobile app, but once added on claude.ai the connector syncs to Claude Desktop and mobile too. If its tools don't show up in a chat, turn the connector on from the chat's "+" / tools menu.
-2. **Sign in with Strava** and approve access. The server only lets in athletes its operator has put on its allowlist; anyone else sees a "This server is private" page after the Strava consent (see [Who can sign in](#who-can-sign-in-allowlist)). Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV and resting heart rate; you can skip it and add it later by disconnecting and reconnecting the connector.
+2. **Sign in with Strava** and approve access. The server only lets in athletes its operator has put on its allowlist; anyone else sees a "This server is private" page after the Strava consent (see [Who can sign in](#who-can-sign-in-allowlist)). Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV, resting heart rate and body weight; you can skip it and add it later by disconnecting and reconnecting the connector.
 3. **Type this first, in a new chat:** "Start a training consultation". It's the one entry point: the server tells Claude whether you're new (no goals, profile or notes saved yet) or returning, so the first time Claude introduces itself, builds your athlete profile and sets your goals with you, and after that it picks up from your profile, goals and past notes. Start each chat the same way; say "Save notes" at the end of a useful one.
 
 Hosted users skip the local setup below; there's no training repository to configure. To run your own hosted server, see "Self-hosting".
@@ -393,7 +393,7 @@ su app -c 'train-with-gpt-selftest --user-id <strava_athlete_id>'
 - **Clients without custom connectors:** use `mcp-remote` as in the local
   setup, with the `https://<host>/mcp` URL.
 
-**Sleep, HRV and resting HR (optional).** Strava has no wellness data. After
+**Sleep, HRV, resting HR and weight (optional).** Strava has no wellness data. After
 the Strava consent, the login shows one more page asking for your
 intervals.icu API key (intervals.icu → Settings → Developer Settings). If your
 Garmin syncs to intervals.icu, paste it there and the wellness tools use it;
@@ -432,7 +432,7 @@ stored encrypted.
   `~/.mcp-auth`. If you wipe the server's store, clear that folder too or you
   will get `400` on `/authorize`.
 - **Limitations:** OAuth'd users' activities always come from Strava.
-  Wellness (sleep/HRV/resting HR) needs the optional intervals.icu key.
+  Wellness (sleep/HRV/resting HR/weight) needs the optional intervals.icu key.
 
 ## Usage
 
@@ -562,7 +562,7 @@ works in any chat.
 1. Check `~/.config/train-with-gpt/config.json` has `intervalsApiKey` set, or that `INTERVALS_API_KEY` is exported in your environment
 2. Restart Claude Desktop after changing config
 
-**Problem:** No wellness data (sleep/HRV/resting HR) shows up
+**Problem:** No wellness data (sleep/HRV/resting HR/weight) shows up
 **Solution:** intervals.icu only has wellness data for dates you've synced a source (Garmin, Oura, etc.) into it. Check your intervals.icu account has a wellness source connected.
 
 ## Development

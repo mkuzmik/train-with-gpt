@@ -58,7 +58,10 @@ async def get_weight_data_handler(arguments: dict, intervals) -> list[TextConten
 
         start_date_str = arguments.get("start_date")
         end_date_str = arguments.get("end_date")
-        mode = arguments.get("mode") or "datapoints"
+        # Only a missing (or null) mode means the default; any other value must be valid.
+        mode = arguments.get("mode")
+        if mode is None:
+            mode = "datapoints"
 
         if not start_date_str or not end_date_str:
             return [TextContent(

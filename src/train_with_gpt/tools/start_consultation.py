@@ -146,7 +146,7 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
     )
     lines = [
         f"- **Activities source:** {activities}",
-        f"- **Recovery data (sleep, HRV, resting HR):** {wellness}",
+        f"- **Recovery data (sleep, HRV, resting HR, body weight):** {wellness}",
     ]
     if _intervals_key_missing(data_client):
         lines = [
@@ -294,7 +294,7 @@ def _data_sources_section(data_client, wellness_client) -> str:
 
 **None right now:** intervals.icu has no API key on this install (see the facts
 above), so skip every get_activities, analyze_activity, analyze_lap, get_sleep_data,
-get_hrv_data and get_resting_heart_rate step in the paths below. Ask the athlete
+get_hrv_data, get_resting_heart_rate and get_weight_data step in the paths below. Ask the athlete
 about their recent training instead, and remind them to set INTERVALS_API_KEY.
 
 """
@@ -315,9 +315,9 @@ about their recent training instead, and remind them to set INTERVALS_API_KEY.
                 "tell them this server doesn't offer connecting intervals.icu right now; "
                 "they can ask the server's operator about it."
             )
-        section += f"""**Recovery Metrics: not connected.** Sleep, HRV and resting heart rate aren't
-available for this athlete, so don't call get_sleep_data, get_hrv_data or
-get_resting_heart_rate. Rely on how the athlete says they feel. If recovery
+        section += f"""**Recovery Metrics: not connected.** Sleep, HRV, resting heart rate and body
+weight aren't available for this athlete, so don't call get_sleep_data,
+get_hrv_data, get_resting_heart_rate or get_weight_data. Rely on how the athlete says they feel. If recovery
 comes up, {how_to_add}
 
 **When Analyzing Activities:**
@@ -336,7 +336,8 @@ comes up, {how_to_add}
   - Higher HRV = better recovery, lower = potential fatigue/stress
 - **get_resting_heart_rate** - Daily resting heart rate trends
   - Lower RHR = better fitness, elevated = possible overtraining or illness
-- **get_weight_data** - Body weight history (every weigh-in, or only the average/trend)
+- **get_weight_data** - Body weight history: every weigh-in, or only the average, range and
+  first-to-last change (mode='summary')
 
 **When to Check Recovery Data:**
 - When discussing training load or planning volume increases
