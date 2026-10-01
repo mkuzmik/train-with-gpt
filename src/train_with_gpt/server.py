@@ -159,9 +159,7 @@ async def list_tools() -> list[Tool]:
         search_consultation_notes_tool(),
         self_test_tool(),
     ]
-    # Reports are filed through a prefilled GitHub link, which only the
-    # personal (stdio) path offers so far; the hosted path needs a
-    # confirmation page first (GitHub issue #32).
+    # Unless reporting is turned off (ISSUE_REPORTING=off).
     if draft_issue_available():
         tools.append(draft_issue_tool())
     # For OAuth'd users the training repo is server configuration (the handler

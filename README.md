@@ -171,9 +171,9 @@ anything. `train-with-gpt-purge-user <user_id>`, run next to the server's
 `su app -c 'train-with-gpt-purge-user <user_id>'`), removes their Strava
 tokens and name, intervals.icu key, and the server's tokens and codes for
 them. It first asks Strava to revoke the app's access (skip with
-`--no-deauthorize`). Their notes, goals and athlete profile in the training repo
-(`notes/<user_id>/`, `goals/<user_id>.md`, `athlete/<user_id>.md`) aren't
-touched; delete them there in a normal commit if needed. Git history keeps them until it's rewritten.
+`--no-deauthorize`). Their notes, goals, athlete profile and reports in the training repo
+(`notes/<user_id>/`, `goals/<user_id>.md`, `athlete/<user_id>.md`,
+`reports/<user_id>/`) aren't touched; delete them there in a normal commit if needed. Git history keeps them until it's rewritten.
 
 ### Running the HTTP server in Docker
 
@@ -211,9 +211,9 @@ clients, kept at mode `600`) survives `docker compose restart`/rebuilds;
 `config.json` is re-copied from the host file on every start.
 `docker compose down -v` clears the store (not the host file).
 
-**Notes/goals repo in Docker.** OAuth'd users' notes, goals and athlete
-profiles are stored per user (`notes/<user_id>/`, `goals/<user_id>.md`,
-`athlete/<user_id>.md`) in a separate, *private* git
+**Notes/goals repo in Docker.** OAuth'd users' notes, goals, athlete
+profiles and bug reports are stored per user (`notes/<user_id>/`,
+`goals/<user_id>.md`, `athlete/<user_id>.md`, `reports/<user_id>/`) in a separate, *private* git
 repo, cloned by the container on first start (`docker-entrypoint.sh`) and
 pushed to on every save. Set it up once:
 
@@ -535,8 +535,8 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 ### Tools
 
 The local stdio server offers 20 tools; the hosted server offers the same
-minus `setup_training_repo`, because its notes storage is server
-configuration, and minus `draft_issue` for now (18).
+minus `setup_training_repo` (19), because its notes storage is server
+configuration.
 
 | Tool | What it's for |
 |---|---|
@@ -549,7 +549,7 @@ configuration, and minus `draft_issue` for now (18).
 | `save_consultation_notes`, `list_consultation_notes`, `read_consultation_notes`, `search_consultation_notes` | Consultation notes, one timestamped file per save. |
 | `setup_training_repo` | Local only: point the server at the notes repository that stores goals, the athlete profile and notes. |
 | `self_test` | Health check of the connector (see "Post-deploy smoke test"). |
-| `draft_issue` | Local only for now: draft a bug report or improvement idea about the connector for the user to file on GitHub (see "Reporting problems"). |
+| `draft_issue` | Report a bug or suggest an improvement about the connector: a prefilled GitHub link locally, a private report for the operator on a hosted server (see "Reporting problems"). |
 
 There is no separate goal-setting tool (`discuss_goals` was removed): goal
 setting is part of `start_consultation`'s guidance, and "update my goals"
@@ -559,29 +559,33 @@ works in any chat.
 
 When something goes wrong mid-conversation (a failed save, a confusing tool
 message, a missing capability), ask Claude to "report this" or "suggest an
-improvement". After a tool error Claude may offer once to draft a report, and
-drafts it only if you agree.
+improvement". After a tool error Claude may offer once to write a report, and
+does so only if you agree.
 
-`draft_issue` never sends anything. It returns the report text and a link
-that opens GitHub's new-issue form with the title and body filled in; you
-check the text there and file it under your own GitHub account. The issue is
-**public**, so the server refuses drafts that contain email addresses, links,
-@mentions, `#123` references, images or HTML, token- or id-like strings,
-numbers of 6 or more digits, intervals.icu-style ids and calendar dates, and
-Claude is asked to rewrite them in general terms. It can't catch everything
-(names or health details in prose, for instance), so read the text before you
-file it.
+- **Local (stdio) server:** `draft_issue` sends nothing. It returns the report
+  text and a link that opens GitHub's new-issue form with the title and body
+  filled in; you check the text there and file it under your own GitHub
+  account. The issue is **public**.
+- **Hosted server:** the report is saved privately in the server's training
+  repo, under `reports/<user_id>/`, like notes. Nobody else sees it; the
+  operator reads it there and, when it's worth it, writes a public issue
+  without your data. Each user can save 5 reports a day.
+
+Either way the server refuses reports that contain email addresses, links,
+@mentions, issue references, images or HTML, token- or id-like strings,
+numbers of 6 or more digits, intervals.icu-style ids, calendar dates and (on
+a hosted server) the athlete's stored name, and Claude is asked to rewrite
+them in general terms. It can't catch everything (other names or health
+details in prose, for instance), so read the text before agreeing.
 
 The server appends a diagnostics table: version (and `GIT_SHA` if set),
-transport, data source kind, the related tool and, if that tool failed in the
-last 30 minutes, the error's class and HTTP status only, never its message.
+transport, data source kind, the related tool and, on a local server, the
+class and HTTP status of that tool's error in the last 30 minutes, never its
+message. The hosted server doesn't record tool errors.
 
-- `ISSUE_REPORTING_REPO` (`owner/repo`) points the link at another repository,
-  e.g. a fork's. It defaults to this project's repository.
-- `ISSUE_REPORTING=off` hides the tool.
-
-The hosted server doesn't offer `draft_issue` yet. It needs a confirmation
-page and a server-side GitHub token first, tracked in issue #32.
+- `ISSUE_REPORTING_REPO` (`owner/repo`) points the local link at another
+  repository, e.g. a fork's. It defaults to this project's repository.
+- `ISSUE_REPORTING=off` hides the tool on either server.
 
 ## Troubleshooting
 

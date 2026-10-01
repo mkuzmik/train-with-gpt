@@ -8,8 +8,8 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from tests.support import as_oauth_user, text_of
-from train_with_gpt import issue_report
+from tests.support import as_oauth_user, remote_file, remote_files, text_of
+from train_with_gpt import issue_report, store
 from train_with_gpt.issue_report import (
     BODY_MAX,
     Draft,
@@ -21,6 +21,7 @@ from train_with_gpt.issue_report import (
 )
 from train_with_gpt.server import list_tools
 from train_with_gpt.tools import draft_issue_handler, get_activities_handler
+from train_with_gpt.tools.draft_issue import HOSTED_REPORTS_PER_DAY
 from train_with_gpt.intervals_client import IntervalsClient
 
 TOOLS = ("get_activities", "save_consultation_notes")
@@ -321,14 +322,62 @@ def test_the_tool_description_does_not_overstate_the_checks():
     assert "can't detect" in description and "user must check the text" in description
 
 
-async def test_hosted_users_are_not_offered_the_tool_and_are_refused():
+# --- hosted server: saved privately in the training repo ----------------------------
+
+async def test_hosted_report_is_saved_privately_in_the_training_repo(training_repo, git_remote, db):
     with as_oauth_user("1001"):
         names = {tool.name for tool in await list_tools()}
         output = text_of(await draft_issue_handler(REPORT))
 
-    assert "draft_issue" not in names
-    assert output.startswith("❌ Error: Reporting issues from the chat isn't available on this server yet.")
+    assert "draft_issue" in names
+    assert output.startswith("✅ Report saved for the server's operator")
     assert "https://" not in output
+    saved = [path for path in remote_files(git_remote) if path.startswith("reports/1001/")]
+    assert len(saved) == 1
+    content = remote_file(git_remote, saved[0])
+    assert content.startswith(f"# {REPORT['title']}\n\n**Kind:** bug")
+    assert "| Transport | http (hosted) |" in content
+    assert "| Data source | strava |" in content
+    assert "| Recent error | not recorded on the hosted server |" in content
+    assert content.split("\n\n", 1)[1] in output  # the user is shown exactly what was saved
+
+
+async def test_hosted_report_body_never_carries_the_user_id(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        record_tool_error("save_consultation_notes", RuntimeError("user 1001"))
+        await draft_issue_handler(REPORT)
+
+    saved = next(path for path in remote_files(git_remote) if path.startswith("reports/1001/"))
+    assert "1001" not in remote_file(git_remote, saved)
+
+
+async def test_hosted_report_rejects_the_athletes_stored_name(training_repo, git_remote, db):
+    store.upsert_user("1001", "strava", "Sam Example", "access", "refresh", None)
+
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler({**REPORT, "summary": "Sam asked about it."}))
+
+    assert "the athlete's name" in output
+    assert not [path for path in remote_files(git_remote) if path.startswith("reports/")]
+
+
+async def test_hosted_reports_are_capped_per_day(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        outputs = [text_of(await draft_issue_handler(REPORT)) for _ in range(HOSTED_REPORTS_PER_DAY + 1)]
+    with as_oauth_user("1002"):
+        other = text_of(await draft_issue_handler(REPORT))
+
+    assert all(output.startswith("✅") for output in outputs[:-1])
+    assert outputs[-1].startswith(f"❌ The report was not saved: the limit is {HOSTED_REPORTS_PER_DAY} reports a day.")
+    assert len([path for path in remote_files(git_remote) if path.startswith("reports/1001/")]) == HOSTED_REPORTS_PER_DAY
+    assert other.startswith("✅")
+
+
+async def test_hosted_report_without_a_training_repo_points_to_the_operator(db):
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler(REPORT))
+
+    assert "contact the server's operator" in output
 
 
 async def test_the_kill_switch_hides_and_refuses(monkeypatch):

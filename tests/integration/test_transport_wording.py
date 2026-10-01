@@ -40,7 +40,7 @@ async def test_hosted_users_are_not_offered_setup_training_repo(login):
     personal = await _personal_tool_names()
 
     assert "setup_training_repo" not in hosted
-    assert personal - hosted == {"setup_training_repo", "draft_issue"}
+    assert personal - hosted == {"setup_training_repo"}
 
 
 async def test_stdio_offers_setup_training_repo(stdio_env):

@@ -1,4 +1,4 @@
-"""Per-user isolation of notes, goals and athlete profiles, black box over HTTP.
+"""Per-user isolation of notes, goals, athlete profiles and reports, black box over HTTP.
 
 Two real OAuth logins (Alice and Bob) against one server and one shared
 training repo: each must only ever see their own `notes/<user_id>/`,
@@ -112,3 +112,16 @@ async def test_personal_path_does_not_see_user_notes(login):
         result = await personal.call_tool("search_consultation_notes", {"query": "private"})
 
     assert "Alice private note" not in result.content[0].text
+
+
+def test_hosted_reports_are_saved_per_user_in_the_training_repo(login, git_remote):
+    alice = login(ALICE)
+
+    output = alice.call_tool("draft_issue", {
+        "kind": "bug", "title": "Notes list is empty", "summary": "list_consultation_notes showed nothing.",
+    })
+
+    reports = [path for path in remote_files(git_remote) if path.startswith("reports/")]
+    assert output.startswith("✅ Report saved for the server's operator")
+    assert len(reports) == 1 and reports[0].startswith(f"reports/{ALICE}/")
+    assert "| Transport | http (hosted) |" in remote_file(git_remote, reports[0])

@@ -63,12 +63,12 @@ async def test_list_tools_offers_setup_training_repo_on_the_personal_path():
     assert "setup_training_repo" in {tool.name for tool in await list_tools()}
 
 
-async def test_list_tools_hides_only_stdio_tools_from_oauth_users():
+async def test_list_tools_hides_only_setup_training_repo_from_oauth_users():
     personal = {tool.name for tool in await list_tools()}
     with as_oauth_user("1001"):
         hosted = {tool.name for tool in await list_tools()}
 
-    assert personal - hosted == {"setup_training_repo", "draft_issue"}
+    assert personal - hosted == {"setup_training_repo"}
     assert hosted < personal
 
 

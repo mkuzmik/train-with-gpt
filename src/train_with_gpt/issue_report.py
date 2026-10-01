@@ -2,10 +2,12 @@
 
 The model writes the text; this module checks it, adds a diagnostics block the
 server fills in, and builds a GitHub new-issue link with the title and body
-prefilled. Nothing is sent from here: a person opens the link, reviews the
-exact text on GitHub and files it under their own account.
+prefilled (personal server). Nothing is sent from here: a person opens the
+link, reviews the exact text on GitHub and files it under their own account.
+On the hosted server tools/draft_issue.py saves the same text privately in
+the training repo instead.
 
-Issues on the target repo are public and permanent, so the checks reject
+Reports may end up as public, permanent issues, so the checks reject
 (never silently strip) anything that looks personal or unsafe, and the model
 rewrites the report in general terms. See GitHub issue #32 for the design.
 
