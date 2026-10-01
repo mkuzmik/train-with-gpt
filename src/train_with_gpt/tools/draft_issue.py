@@ -121,6 +121,7 @@ def _user_key(user_id: str) -> str:
 
 def clear_report_counts() -> None:
     _reports_today.clear()
+    _report_locks.clear()
 
 
 def _hosted_athlete(user_id: str) -> tuple[list, str]:

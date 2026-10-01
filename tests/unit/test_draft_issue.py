@@ -451,29 +451,39 @@ async def test_concurrent_hosted_reports_cannot_exceed_the_daily_cap(training_re
 
 
 async def test_a_cancelled_hosted_report_still_counts_toward_the_cap(training_repo, git_remote, db):
-    """Cancelling the call can't stop the save thread: whatever it saves must count."""
+    """Cancelling the call can't stop the save thread: the report it saves must count.
+
+    A real pre-commit hook holds the save until the test has cancelled the call."""
     from train_with_gpt.tools import draft_issue as module
+
+    git_dir = training_repo / ".git"
+    entered, release = git_dir / "save-entered", git_dir / "save-release"
+    hook = git_dir / "hooks" / "pre-commit"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f"#!/bin/sh\ntouch '{entered}'\nwhile [ ! -f '{release}' ]; do sleep 0.02; done\n")
+    hook.chmod(0o755)
 
     with as_oauth_user("1001"):
         task = asyncio.ensure_future(draft_issue_handler(REPORT))
-        while not module._report_locks:  # the call holds the lock, then starts the save
-            await asyncio.sleep(0)
-        for _ in range(3):
-            await asyncio.sleep(0)
+        for _ in range(1000):  # wait until the save is inside git commit
+            if entered.exists():
+                break
+            await asyncio.sleep(0.01)
+        assert entered.exists()
         task.cancel()
         try:
             await task
         except asyncio.CancelledError:
             pass
+        release.touch()
 
-    reports = training_repo / "reports"
-    for _ in range(500):  # the save thread keeps running; give it time to write
-        if reports.exists() and list(reports.glob("*.md")):
+    for _ in range(1000):  # the save thread keeps running after the cancel
+        if [path for path in remote_files(git_remote) if path.startswith("reports/")]:
             break
         await asyncio.sleep(0.01)
-    saved = list(reports.glob("*.md")) if reports.exists() else []
-    counted = sum(count for _, count in module._reports_today.values())
-    assert counted >= len(saved)
+    saved = [path for path in remote_files(git_remote) if path.startswith("reports/")]
+    assert len(saved) == 1
+    assert sum(count for _, count in module._reports_today.values()) == 1
 
 
 async def test_hosted_report_footer_does_not_claim_the_user_filed_it(training_repo, git_remote, db):
