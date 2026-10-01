@@ -251,6 +251,7 @@ async def test_stdio_without_an_intervals_key_is_not_reported_as_connected(monke
     assert "connected (intervals.icu)" not in output
     assert "INTERVALS_API_KEY" in output
     assert "no API key is configured" in output
+    assert "the sleep/HRV/resting-HR/weight tools will fail" in output
     # The data-sources guidance doesn't advertise the tools that would fail...
     assert "**Recovery Metrics (intervals.icu wellness data):**" not in output
     assert "**Training Activities (intervals.icu):**" not in output

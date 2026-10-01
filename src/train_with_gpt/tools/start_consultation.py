@@ -151,7 +151,7 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
     if _intervals_key_missing(data_client):
         lines = [
             "- **Activities and recovery data (intervals.icu):** no API key is configured, so "
-            "get_activities, analyze_activity and the sleep/HRV/resting-HR tools will fail. Tell "
+            "get_activities, analyze_activity and the sleep/HRV/resting-HR/weight tools will fail. Tell "
             "the athlete to set INTERVALS_API_KEY (see the README's Quick Start) and restart; "
             "meanwhile coach from what they tell you.",
         ]

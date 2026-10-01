@@ -114,7 +114,7 @@ def _get_wellness_client():
 
 def wellness_client_for(user_id: Optional[str]):
     """
-    Resolve the client for sleep/HRV/resting-HR tools for `user_id`.
+    Resolve the client for sleep/HRV/resting-HR/weight tools for `user_id`.
 
     OAuth'd users get an IntervalsClient on their own intervals.icu key if they
     added one at login (intervals_connect.py); otherwise their StravaClient,
