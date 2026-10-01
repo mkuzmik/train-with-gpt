@@ -176,7 +176,7 @@ class Draft:
 
 
 def _name_patterns(names: Iterable[Optional[str]]) -> list[re.Pattern]:
-    parts = {part for name in names if name for part in re.split(r"[\s,.'\u2019-]+", name) if len(part) >= 2}
+    parts = {part for name in names if name for part in re.split(r"[\W_]+", name) if len(part) >= 2}
     return [re.compile(rf"(?<!\w){re.escape(part)}(?!\w)", re.IGNORECASE) for part in sorted(parts)]
 
 

@@ -1,9 +1,10 @@
-"""Per-user isolation of notes, goals, athlete profiles and reports, black box over HTTP.
+"""Per-user isolation of notes, goals and athlete profiles, black box over HTTP.
 
 Two real OAuth logins (Alice and Bob) against one server and one shared
 training repo: each must only ever see their own `notes/<user_id>/`,
 `goals/<user_id>.md` and `athlete/<user_id>.md`, and the personal (no-OAuth)
-path sees none of them.
+path sees none of them. Bug reports are different: they go to one shared,
+operator-only `reports/` folder and must carry no user id at all.
 """
 
 import pytest

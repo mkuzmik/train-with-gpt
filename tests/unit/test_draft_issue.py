@@ -388,6 +388,15 @@ async def test_hosted_report_rejects_the_athletes_intervals_name_parts(training_
     assert not [path for path in remote_files(git_remote) if path.startswith("reports/")]
 
 
+async def test_hosted_name_parts_split_on_any_punctuation(training_repo, git_remote, db):
+    store.save_intervals_connection("1001", "synthetic-athlete", "Anne/Marie_Example", "not-a-real-key")
+
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler({**REPORT, "summary": "Anne asked about it."}))
+
+    assert "the athlete's name" in output
+
+
 async def test_hosted_report_does_not_read_the_strava_name(training_repo, git_remote, db):
     """No new processing of Strava data: the Strava name (users.name) isn't checked."""
     store.upsert_user("1001", "strava", "Sam Example", "access", "refresh", None)
@@ -404,8 +413,10 @@ async def test_hosted_in_memory_state_never_holds_the_raw_user_id(training_repo,
     with as_oauth_user("1001"):
         await draft_issue_handler(REPORT)
 
-    assert module._reports_today and module._report_locks
-    assert "1001" not in repr(module._reports_today) + repr(module._report_locks)
+    expected = module._user_key("1001")
+    assert expected != "1001"
+    assert set(module._reports_today) == {expected}
+    assert set(module._report_locks) == {expected}
 
 
 async def test_hosted_reports_are_capped_per_day(training_repo, git_remote, db):
