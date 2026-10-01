@@ -69,9 +69,10 @@ async def test_summary_mode_omits_datapoints(intervals, wellness):
     assert "Change: +2.0 kg" in output
 
 
-async def test_long_range_up_to_a_year_is_allowed(intervals, wellness):
+async def test_long_range_up_to_366_days_is_allowed(intervals, wellness):
     wellness.mock(return_value=Response(200, json=[{"id": "2024-03-01", "weight": 70.0}]))
 
+    # Both ends are inclusive: 2024 is a leap year, so this is exactly 366 days.
     output = text_of(await get_weight_data_handler(
         {"start_date": "2024-01-01", "end_date": "2024-12-31"}, intervals,
     ))
@@ -104,7 +105,8 @@ async def test_api_error(intervals, wellness):
     ({"start_date": "2024-01-15"}, "Both start_date and end_date are required"),
     ({"start_date": "2024-13-01", "end_date": "2024-01-15"}, "Invalid date format"),
     ({"start_date": "2024-01-20", "end_date": "2024-01-15"}, "cannot be after end_date"),
-    ({"start_date": "2023-01-01", "end_date": "2024-02-15"}, "Date range too large (410 days)"),
+    ({"start_date": "2023-01-01", "end_date": "2024-02-15"}, "Date range too large (411 days)"),
+    ({"start_date": "2024-01-01", "end_date": "2025-01-01"}, "Date range too large (367 days)"),
     ({"start_date": "2024-01-15", "end_date": "2024-01-15", "mode": "weekly"}, "Invalid mode 'weekly'"),
 ])
 async def test_invalid_arguments_make_no_request(intervals, wellness, args, message):

@@ -89,11 +89,12 @@ async def get_weight_data_handler(arguments: dict, intervals) -> list[TextConten
                 text=f"❌ start_date ({start_date_str}) cannot be after end_date ({end_date_str})"
             )]
 
-        delta = (end_date - start_date).days
-        if delta > MAX_RANGE_DAYS:
+        # Both ends are inclusive, so count calendar days, not the difference.
+        days = (end_date - start_date).days + 1
+        if days > MAX_RANGE_DAYS:
             return [TextContent(
                 type="text",
-                text=f"❌ Date range too large ({delta} days). Maximum is {MAX_RANGE_DAYS} days."
+                text=f"❌ Date range too large ({days} days). Maximum is {MAX_RANGE_DAYS} days."
             )]
 
         wellness_records = await intervals.get_wellness(start_date_str, end_date_str)
