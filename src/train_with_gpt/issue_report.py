@@ -116,6 +116,12 @@ _RULES: list[tuple[str, re.Pattern]] = [
     ("an email address", re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")),
     # Scheme, www., inline link, reference-link definition, protocol-relative.
     ("a link or URL", re.compile(r"\b[a-z][a-z0-9+.-]*://|\bwww\.|\]\s*[(:]|(?<![\w:/])//[^\s/]", re.IGNORECASE)),
+    # Without a scheme: a domain or IP followed by a path or port
+    # (example.com/path, 10.0.0.1:8080). A bare name like intervals.icu is fine.
+    ("a link or URL", re.compile(
+        r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?::\d+)?/[^\s]|\b\d{1,3}(?:\.\d{1,3}){3}\b",
+        re.IGNORECASE,
+    )),
     ("an @mention", re.compile(r"(?<![\w.+-])@[A-Za-z0-9][A-Za-z0-9-]*")),
     # Also owner/repo#123 and GH-123, which GitHub links too.
     ("an issue or PR reference like #123", re.compile(r"(?<!&)#\d+|\bGH-\d+", re.IGNORECASE)),

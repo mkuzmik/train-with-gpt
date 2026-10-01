@@ -222,10 +222,17 @@ async def _save_hosted_report_locked(user_id: str, repo_path: Path, title: str, 
 
         relative_path = f"reports/{now.strftime('%Y-%m-%d-%H-%M-%S')}-{secrets.token_hex(4)}.md"
         content = f"# {title}\n\n{body}"
-        push_status = await asyncio.to_thread(
-            git_save_file, repo_path, relative_path, content, f"Add report - {now.strftime('%Y-%m-%d %H:%M')}"
-        )
+        # Reserve the slot before the save starts: a cancelled call can't stop
+        # the save thread, so it must still count. Given back only when the
+        # save is known to have failed.
         _reports_today[key] = (today, sent_today + 1)
+        try:
+            push_status = await asyncio.to_thread(
+                git_save_file, repo_path, relative_path, content, f"Add report - {now.strftime('%Y-%m-%d %H:%M')}"
+            )
+        except Exception:
+            _reports_today[key] = (today, sent_today)
+            raise
         push_status = save_status_for_caller(push_status, user_id)
         return [TextContent(type="text", text=(
             f"✅ Report saved for the server's operator{push_status}. It is private; the operator "

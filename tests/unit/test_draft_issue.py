@@ -73,6 +73,9 @@ def test_a_general_report_passes():
     ("[here](somewhere)", "a link or URL"),
     ("[details][x]\n[x]: example", "a link or URL"),
     ("see //example.com/private-path", "a link or URL"),
+    ("see private.example.com/athlete/details", "a link or URL"),
+    ("server 10.0.0.1 failed", "a link or URL"),
+    ("see example.com:8080/x", "a link or URL"),
     ("ping @someone about it", "an @mention"),
     ("same as #12", "an issue or PR reference"),
     ("same as owner/repo#12", "an issue or PR reference"),
@@ -130,6 +133,7 @@ def test_personal_or_unsafe_content_is_rejected(text, reason):
     "A run of 1,234 m shows no laps.",
     "You may need 2 tries before it saves.",
     "The march to 10 km felt slow.",
+    "Data from intervals.icu looked fine, version 1.30.0 too.",
 ])
 def test_ordinary_prose_is_accepted(text):
     assert validate({**REPORT, "summary": text}, TOOLS).summary == text
@@ -444,6 +448,32 @@ async def test_concurrent_hosted_reports_cannot_exceed_the_daily_cap(training_re
     saved = [path for path in remote_files(git_remote) if path.startswith("reports/")]
     assert len(saved) == HOSTED_REPORTS_PER_DAY
     assert sum(text_of(output).startswith("✅") for output in outputs) == HOSTED_REPORTS_PER_DAY
+
+
+async def test_a_cancelled_hosted_report_still_counts_toward_the_cap(training_repo, git_remote, db):
+    """Cancelling the call can't stop the save thread: whatever it saves must count."""
+    from train_with_gpt.tools import draft_issue as module
+
+    with as_oauth_user("1001"):
+        task = asyncio.ensure_future(draft_issue_handler(REPORT))
+        while not module._report_locks:  # the call holds the lock, then starts the save
+            await asyncio.sleep(0)
+        for _ in range(3):
+            await asyncio.sleep(0)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    reports = training_repo / "reports"
+    for _ in range(500):  # the save thread keeps running; give it time to write
+        if reports.exists() and list(reports.glob("*.md")):
+            break
+        await asyncio.sleep(0.01)
+    saved = list(reports.glob("*.md")) if reports.exists() else []
+    counted = sum(count for _, count in module._reports_today.values())
+    assert counted >= len(saved)
 
 
 async def test_hosted_report_footer_does_not_claim_the_user_filed_it(training_repo, git_remote, db):
