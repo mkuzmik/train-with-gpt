@@ -71,7 +71,7 @@ def training_repo_not_configured_message() -> str:
 
 
 NO_WELLNESS_DATA_MESSAGE = (
-    "ℹ️ Wellness data (sleep, HRV, resting heart rate) isn't available: Strava has no "
+    "ℹ️ Wellness data (sleep, HRV, resting heart rate, body weight) isn't available: Strava has no "
     "wellness data. To add it, connect intervals.icu: disconnect and reconnect this "
     "connector in Claude's settings, and paste your intervals.icu API key on the "
     "page shown after the Strava login."

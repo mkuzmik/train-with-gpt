@@ -36,7 +36,7 @@ def _basic_auth_key(request) -> str:
 # Every tool a hosted (OAuth'd) user is offered: setup_training_repo is personal-only.
 HOSTED_TOOLS = {
     "start_consultation", "get_current_date", "get_activities", "get_sleep_data", "get_hrv_data",
-    "get_resting_heart_rate", "analyze_activity", "analyze_lap", "save_goals",
+    "get_resting_heart_rate", "get_weight_data", "analyze_activity", "analyze_lap", "save_goals",
     "read_goals", "build_athlete_profile", "read_athlete_profile", "save_athlete_profile",
     "save_consultation_notes", "read_consultation_notes", "list_consultation_notes",
     "search_consultation_notes", "self_test",
@@ -199,7 +199,7 @@ def test_authorization_server_metadata(http):
 def test_wellness_tools_explain_strava_has_no_wellness_data(login):
     mcp = login(31)
 
-    for tool in ("get_sleep_data", "get_hrv_data", "get_resting_heart_rate"):
+    for tool in ("get_sleep_data", "get_hrv_data", "get_resting_heart_rate", "get_weight_data"):
         assert mcp.call_tool(tool, {"start_date": "2024-01-15", "end_date": "2024-01-16"}) == NO_WELLNESS_DATA_MESSAGE
 
 
@@ -209,7 +209,7 @@ def test_login_with_intervals_key_serves_wellness_from_the_users_own_account(htt
         return_value=Response(200, json={"id": "i777", "name": "Jane D"})
     )
     wellness = http_mock.get(f"{INTERVALS}/athlete/0/wellness").mock(return_value=Response(200, json=[
-        {"id": "2024-01-15", "restingHR": 48, "hrv": 61, "sleepSecs": 28800, "sleepScore": 90},
+        {"id": "2024-01-15", "restingHR": 48, "hrv": 61, "sleepSecs": 28800, "sleepScore": 90, "weight": 70.2},
     ]))
     strava.activities[42] = []
 
@@ -222,6 +222,7 @@ def test_login_with_intervals_key_serves_wellness_from_the_users_own_account(htt
     assert "RHR: 48 bpm" in mcp.call_tool("get_resting_heart_rate", DAY)
     assert "HRV: 61ms" in mcp.call_tool("get_hrv_data", DAY)
     assert "Score: 90/100" in mcp.call_tool("get_sleep_data", DAY)
+    assert "70.2 kg" in mcp.call_tool("get_weight_data", DAY)
     assert {_basic_auth_key(call.request) for call in wellness.calls} == {"users-own-key"}
     # Activities still come from Strava.
     assert mcp.call_tool("get_activities", DAY) == "No activities found for 2024-01-15."

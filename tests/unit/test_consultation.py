@@ -69,6 +69,7 @@ async def test_start_consultation_for_a_hosted_user_names_strava_and_no_wellness
     assert "intervals.icu wellness data" not in output
     assert "**Recovery Metrics: not connected.**" in output
     assert "**get_hrv_data**" not in output
+    assert "get_resting_heart_rate or get_weight_data" in output
     assert "Consider recovery metrics alongside training data" not in output
 
 
@@ -250,11 +251,13 @@ async def test_stdio_without_an_intervals_key_is_not_reported_as_connected(monke
     assert "connected (intervals.icu)" not in output
     assert "INTERVALS_API_KEY" in output
     assert "no API key is configured" in output
+    assert "the sleep/HRV/resting-HR/weight tools will fail" in output
     # The data-sources guidance doesn't advertise the tools that would fail...
     assert "**Recovery Metrics (intervals.icu wellness data):**" not in output
     assert "**Training Activities (intervals.icu):**" not in output
     # ...and tells the model to skip the paths' activity steps.
     assert "skip every get_activities" in output
+    assert "get_resting_heart_rate and get_weight_data step" in output
 
 
 # The intervals.icu page after the Strava login only exists when the server
@@ -320,7 +323,7 @@ async def test_facts_name_the_connected_sources(data, wellness, activities, reco
     output = await _start(data, wellness)
 
     assert f"- **Activities source:** {activities}" in output
-    assert f"- **Recovery data (sleep, HRV, resting HR):** {recovery}" in output
+    assert f"- **Recovery data (sleep, HRV, resting HR, body weight):** {recovery}" in output
 
 
 def _formatted(moment: datetime) -> str:
