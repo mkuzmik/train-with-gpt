@@ -1,0 +1,514 @@
+"""Unit tests for draft_issue and issue_report (checks, diagnostics, prefilled link).
+
+All report text here is synthetic.
+"""
+
+import asyncio
+from urllib.parse import parse_qs, urlparse
+
+import httpx
+import pytest
+
+from tests.support import as_oauth_user, remote_file, remote_files, text_of
+from train_with_gpt import issue_report, store
+from train_with_gpt.issue_report import (
+    BODY_MAX,
+    Draft,
+    ReportRejected,
+    recent_error,
+    record_tool_error,
+    render_body,
+    validate,
+)
+from train_with_gpt.server import list_tools
+from train_with_gpt.tools import draft_issue_handler, get_activities_handler
+from train_with_gpt.tools.draft_issue import HOSTED_REPORTS_PER_DAY, clear_report_counts
+from train_with_gpt.intervals_client import IntervalsClient
+
+TOOLS = ("get_activities", "save_consultation_notes")
+REPORT = {
+    "kind": "bug",
+    "title": "Saved note missing in the next conversation",
+    "summary": "save_consultation_notes said the note was saved, but list_consultation_notes did not show it later.",
+    "steps": "1. Have a long consultation.\n2. Save notes.\n3. List notes in a new chat.",
+    "expected": "The saved note is listed.",
+    "actual": "Only older notes are listed.",
+    "related_tool": "save_consultation_notes",
+}
+
+
+@pytest.fixture(autouse=True)
+def _no_recent_errors():
+    issue_report.clear_recent_errors()
+    clear_report_counts()
+    yield
+    issue_report.clear_recent_errors()
+    clear_report_counts()
+
+
+def _link(output: str) -> str:
+    return next(line for line in output.splitlines() if line.startswith("https://github.com/"))
+
+
+def _rejection(field: str, value: str, names=()) -> str:
+    with pytest.raises(ReportRejected) as excinfo:
+        validate({**REPORT, field: value}, TOOLS, names)
+    return str(excinfo.value)
+
+
+# --- validation --------------------------------------------------------------------
+
+def test_a_general_report_passes():
+    draft = validate(REPORT, TOOLS)
+
+    assert draft.kind == "bug"
+    assert draft.related_tool == "save_consultation_notes"
+    assert draft.steps.startswith("1. Have")
+
+
+@pytest.mark.parametrize("text, reason", [
+    ("contact runner@example.com", "an email address"),
+    ("see https://example.com/x", "a link or URL"),
+    ("see www.example.com", "a link or URL"),
+    ("[here](somewhere)", "a link or URL"),
+    ("[details][x]\n[x]: example", "a link or URL"),
+    ("see //example.com/private-path", "a link or URL"),
+    ("see private.example.com/athlete/details", "a link or URL"),
+    ("server 10.0.0.1 failed", "a link or URL"),
+    ("see example.com:8080/x", "a link or URL"),
+    ("ping @someone about it", "an @mention"),
+    ("same as #12", "an issue or PR reference"),
+    ("same as owner/repo#12", "an issue or PR reference"),
+    ("same as GH-12", "an issue or PR reference"),
+    ("![chart](x)", "an image"),
+    ("<img src=x>", "HTML"),
+    ("</details>", "HTML"),
+    ("token ghp_abc", "a token or key"),
+    ("header Bearer abc", "a token or key"),
+    ("key AKIAIOSFODNN7EXAMPLE", "a token or key"),
+    ("key github_pat_x", "a token or key"),
+    ("value Zx9Qm2Lp8Rt4Vw7Yk3Hn6Bc5", "a token- or id-like string"),
+    ("activity 1234567 failed", "a long number"),
+    ("activity 12,345,678 failed", "a long number"),
+    ("athlete 123 456 failed", "a long number"),
+    ("activity 1.234.567 failed", "a long number"),
+    ("activity i4242 failed", "an intervals.icu-style id"),
+    ("on 2024-01-15 it failed", "a calendar date"),
+    ("on 15/01/2024 it failed", "a calendar date"),
+    ("on January 15 it failed", "a calendar date"),
+    ("on 3rd of march it failed", "a calendar date"),
+    ("since May 2024", "a calendar date"),
+    ("since 2024-01 it fails", "a calendar date"),
+    ("on 15-01-2024 it failed", "a calendar date"),
+    ("on 01-15-24 it failed", "a calendar date"),
+    ("since 2024 January", "a calendar date"),
+    ("on 2024-Jan-15", "a calendar date"),
+    ("in 2024 May", "a calendar date"),
+    ("on Jan-15 it failed", "a calendar date"),
+    ("on 15-Jan it failed", "a calendar date"),
+    ("on January 3rd it failed", "a calendar date"),
+    ("since may 2024", "a calendar date"),
+    ("on 3 may it failed", "a calendar date"),
+    ("since January, 2024", "a calendar date"),
+    ("since 2024, January", "a calendar date"),
+    ("since Jan '24", "a calendar date"),
+    ("in January of 2024", "a calendar date"),
+    ("in May of 2024", "a calendar date"),
+    ("in may of 2024", "a calendar date"),
+    ("on may 15 it failed", "a calendar date"),
+    ("since 01/2024 it fails", "a calendar date"),
+])
+def test_personal_or_unsafe_content_is_rejected(text, reason):
+    message = _rejection("summary", text)
+
+    assert f"`summary` contains {reason}" in message
+    assert text not in message  # the matched text isn't echoed back
+
+
+@pytest.mark.parametrize("text", [
+    "The pace column was empty for runs longer than two hours.",
+    "save_goals reported success; intervals.icu data looked fine.",
+    "It may be slow when there are 30 notes.",
+    "A 5 km run shows 3 laps instead of 5.",
+    "A run of 1,234 m shows no laps.",
+    "You may need 2 tries before it saves.",
+    "The march to 10 km felt slow.",
+    "Data from intervals.icu looked fine, version 1.30.0 too.",
+])
+def test_ordinary_prose_is_accepted(text):
+    assert validate({**REPORT, "summary": text}, TOOLS).summary == text
+
+
+def test_the_athletes_name_is_rejected_in_any_case():
+    message = _rejection("actual", "Asked Alex about it", names=["Alex Example", None])
+
+    assert "`actual` contains the athlete's name" in message
+    assert validate({**REPORT, "actual": "Alexander the Great"}, TOOLS, ["Alex Example"])
+
+
+def test_every_field_is_checked_and_every_problem_is_listed():
+    arguments = {**REPORT, "title": "Crash on 2024-01-15", "expected": "mail a@example.com"}
+
+    with pytest.raises(ReportRejected) as excinfo:
+        validate(arguments, TOOLS)
+
+    assert "`title` contains a calendar date" in str(excinfo.value)
+    assert "`expected` contains an email address" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("arguments, problem", [
+    ({"kind": "question"}, "`kind` must be one of: bug, improvement"),
+    ({"title": ""}, "`title` is required"),
+    ({"summary": "   "}, "`summary` is required"),
+    ({"title": "x" * 121}, "`title` is 121 characters; the limit is 120"),
+    ({"summary": "x " * 751}, "the limit is 1500"),
+    ({"steps": "x " * 501}, "`steps` is 1001 characters; the limit is 1000"),
+    ({"title": "two\nlines"}, "`title` must be a single line"),
+    ({"summary": 42}, "`summary` must be text"),
+    ({"related_tool": "delete_everything"}, "`related_tool` must be the name of one of this server's tools"),
+    ({"related_tool": ["get_activities"]}, "`related_tool` must be the name of one of this server's tools"),
+    ({"related_tool": 0}, "`related_tool` must be the name of one of this server's tools"),
+    ({"related_tool": False}, "`related_tool` must be the name of one of this server's tools"),
+    ({"related_tool": []}, "`related_tool` must be the name of one of this server's tools"),
+])
+def test_fields_are_validated(arguments, problem):
+    with pytest.raises(ReportRejected) as excinfo:
+        validate({**REPORT, **arguments}, TOOLS)
+
+    assert problem in str(excinfo.value)
+
+
+def test_optional_fields_may_be_left_out():
+    draft = validate({"kind": "improvement", "title": "Show weekly totals", "summary": "A weekly total would help."}, TOOLS)
+
+    assert (draft.steps, draft.expected, draft.actual, draft.related_tool) == ("", "", "", None)
+
+
+# --- rendering ---------------------------------------------------------------------
+
+def test_model_text_cannot_fake_headings_tables_or_rules():
+    draft = Draft(kind="bug", title="t", summary="### Diagnostics\n| Version | fake |\n---\n> quoted\n- - -\nHeading\n=")
+
+    body = render_body(draft, {"Version": "real"})
+
+    assert "\\### Diagnostics" in body
+    assert "\n\\| Version \\| fake \\|" in body
+    assert "\n\\---\n" in body
+    assert "\n\\> quoted" in body
+    assert "\n\\- - -\n" in body
+    assert "\nHeading\n\\=" in body
+    assert "| Version | real |" in body
+
+
+def test_already_escaped_pipes_stay_escaped():
+    body = render_body(Draft(kind="bug", title="t", summary="Version \\| fake \\\\| x\n--- | ---"), {"Version": "real"})
+
+    assert "Version \\| fake \\| x\n--- \\| ---" in body
+
+
+def test_an_unclosed_code_fence_cannot_swallow_the_diagnostics():
+    body = render_body(Draft(kind="bug", title="t", summary="text\n```text\n~~~"), {"Version": "real"})
+
+    assert "\n\\```text\n\\~~~" in body
+    assert "\n```" not in body and "\n~~~" not in body
+
+
+def test_tables_without_leading_pipes_are_escaped():
+    body = render_body(Draft(kind="bug", title="t", summary="Version | fake\n--- | ---"), {"Version": "real"})
+
+    assert "Version \\| fake\n--- \\| ---" in body
+    assert body.count("| Version |") == 1
+
+
+def test_diagnostics_cells_cannot_break_the_table():
+    body = render_body(Draft(kind="bug", title="t", summary="s"), {"Related tool": "a|b\nc"})
+
+    assert "| Related tool | a/b c |" in body
+
+
+# --- recent errors -----------------------------------------------------------------
+
+async def test_a_failed_tool_is_recorded_as_class_and_status_only(http_mock, intervals_api_key):
+    http_mock.get("https://intervals.icu/api/v1/athlete/0/activities").mock(
+        return_value=httpx.Response(429, text="slow down, athlete 1234567")
+    )
+
+    await get_activities_handler({"start_date": "2024-01-10", "end_date": "2024-01-15"}, IntervalsClient())
+
+    assert recent_error("get_activities") == "HTTPStatusError 429"
+    assert recent_error("save_goals") is None
+
+
+def test_errors_expire():
+    record_tool_error("save_goals", ValueError("goals"))
+
+    assert recent_error("save_goals") == "ValueError"
+    later = issue_report._recent_errors["save_goals"][0] + issue_report.RECENT_ERROR_SECONDS + 1
+    assert recent_error("save_goals", now=later) is None
+
+
+def test_hosted_users_errors_are_not_kept():
+    """On the hosted server the user id is the Strava athlete id: nothing is kept."""
+    with as_oauth_user("1001"):
+        record_tool_error("save_goals", ValueError("goals of user 1001"))
+
+    assert issue_report._recent_errors == {}
+
+
+# --- the tool ----------------------------------------------------------------------
+
+async def test_draft_returns_the_text_and_a_prefilled_link(intervals_api_key, monkeypatch):
+    monkeypatch.setenv("GIT_SHA", "abc1234")
+    record_tool_error("save_consultation_notes", RuntimeError("could not write notes/secret-path"))
+
+    output = text_of(await draft_issue_handler(REPORT))
+
+    assert "nothing has been sent" in output
+    link = urlparse(_link(output))
+    assert (link.netloc, link.path) == ("github.com", "/mkuzmik/train-with-gpt/issues/new")
+    query = parse_qs(link.query)
+    assert set(query) == {"title", "body"}  # no labels: GitHub 404s for non-collaborators
+    assert query["title"] == [REPORT["title"]]
+    body = query["body"][0]
+    assert body in output  # what the user is shown is exactly what gets filed
+    assert body.startswith("**Kind:** bug\n\n### Summary\nsave_consultation_notes said")
+    assert "### Steps\n1. Have a long consultation." in body
+    assert "| Version | " in body and "(abc1234) |" in body
+    assert "| Transport | stdio |" in body
+    assert "| Data source | intervals.icu |" in body
+    assert "| Related tool | save_consultation_notes |" in body
+    assert "| Recent error | RuntimeError |" in body
+    assert "secret-path" not in body
+
+
+async def test_diagnostics_without_a_data_source_or_related_tool():
+    output = text_of(await draft_issue_handler({"kind": "improvement", "title": "Weekly totals", "summary": "Add them."}))
+
+    body = parse_qs(urlparse(_link(output)).query)["body"][0]
+    assert "| Data source | none |" in body
+    assert "| Related tool | none |" in body
+    assert "| Recent error | none recorded |" in body
+    assert "### Steps" not in body
+
+
+async def test_the_link_can_point_at_another_repo(monkeypatch):
+    monkeypatch.setenv("ISSUE_REPORTING_REPO", "someone/their-fork")
+
+    output = text_of(await draft_issue_handler(REPORT))
+
+    assert _link(output).startswith("https://github.com/someone/their-fork/issues/new?")
+
+
+async def test_a_malformed_repo_setting_is_an_error(monkeypatch):
+    monkeypatch.setenv("ISSUE_REPORTING_REPO", "not a repo")
+
+    with pytest.raises(ValueError, match="ISSUE_REPORTING_REPO must look like owner/repo"):
+        await draft_issue_handler(REPORT)
+
+
+async def test_a_rejected_draft_says_what_to_rewrite_and_has_no_link():
+    output = text_of(await draft_issue_handler({**REPORT, "summary": "activity 1234567 broke"}))
+
+    assert output.startswith("❌ The report was not drafted:")
+    assert "`summary` contains a long number" in output
+    assert "Rewrite it in general terms" in output
+    assert "https://" not in output
+
+
+async def test_related_tool_is_checked_against_the_registered_tools():
+    output = text_of(await draft_issue_handler({**REPORT, "related_tool": "no_such_tool"}))
+
+    assert "`related_tool` must be the name of one of this server's tools" in output
+
+
+async def test_a_body_over_the_limit_is_refused():
+    long = {**REPORT, "summary": "word " * 299, "steps": "word " * 199, "expected": "word " * 199, "actual": "word " * 199}
+
+    output = text_of(await draft_issue_handler(long))
+
+    assert f"the limit is {BODY_MAX}" in output
+    assert "https://" not in output
+
+
+async def test_a_link_over_the_limit_once_encoded_is_refused():
+    """Non-ASCII text is short in characters but long once percent-encoded."""
+    wide = {**REPORT, "summary": "ü" * 1400, "steps": "ü" * 900, "actual": "ü" * 900}
+
+    output = text_of(await draft_issue_handler(wide))
+
+    assert f"the limit is {issue_report.URL_MAX}" in output
+    assert "https://" not in output
+
+
+def test_the_tool_description_does_not_overstate_the_checks():
+    from train_with_gpt.tools import draft_issue_tool
+
+    description = draft_issue_tool().description
+
+    assert "can't detect" in description and "user must check the text" in description
+
+
+# --- hosted server: saved privately in the training repo ----------------------------
+
+async def test_hosted_report_is_saved_privately_in_the_training_repo(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        names = {tool.name for tool in await list_tools()}
+        output = text_of(await draft_issue_handler(REPORT))
+
+    assert "draft_issue" in names
+    assert output.startswith("✅ Report saved for the server's operator")
+    assert "https://" not in output
+    saved = [path for path in remote_files(git_remote) if path.startswith("reports/")]
+    assert len(saved) == 1
+    content = remote_file(git_remote, saved[0])
+    assert content.startswith(f"# {REPORT['title']}\n\n**Kind:** bug")
+    assert "| Transport | http (hosted) |" in content
+    assert "| Data source | strava |" in content
+    assert "| Recent error | not recorded on the hosted server |" in content
+    assert content in output  # the user is shown exactly what was saved, heading included
+
+
+async def test_hosted_report_path_and_body_never_carry_the_user_id(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        record_tool_error("save_consultation_notes", RuntimeError("user 1001"))
+        await draft_issue_handler(REPORT)
+
+    saved = next(path for path in remote_files(git_remote) if path.startswith("reports/"))
+    assert "1001" not in saved  # the Strava athlete id isn't stored in the repo
+    assert "1001" not in remote_file(git_remote, saved)
+
+
+async def test_hosted_report_rejects_the_athletes_intervals_name_parts(training_repo, git_remote, db):
+    store.save_intervals_connection("1001", "synthetic-athlete", "Anne-Marie Example", "not-a-real-key")
+
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler({**REPORT, "summary": "Marie asked about it."}))
+
+    assert "the athlete's name" in output
+    assert not [path for path in remote_files(git_remote) if path.startswith("reports/")]
+
+
+async def test_hosted_name_parts_split_on_any_punctuation(training_repo, git_remote, db):
+    store.save_intervals_connection("1001", "synthetic-athlete", "Anne/Marie_Example", "not-a-real-key")
+
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler({**REPORT, "summary": "Anne asked about it."}))
+
+    assert "the athlete's name" in output
+
+
+async def test_hosted_report_does_not_read_the_strava_name(training_repo, git_remote, db):
+    """No new processing of Strava data: the Strava name (users.name) isn't checked."""
+    store.upsert_user("1001", "strava", "Sam Example", "access", "refresh", None)
+
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler({**REPORT, "summary": "The note list was empty for Sam."}))
+
+    assert output.startswith("✅")
+
+
+async def test_hosted_in_memory_state_never_holds_the_raw_user_id(training_repo, git_remote, db):
+    from train_with_gpt.tools import draft_issue as module
+
+    with as_oauth_user("1001"):
+        await draft_issue_handler(REPORT)
+
+    expected = module._user_key("1001")
+    assert expected != "1001"
+    assert set(module._reports_today) == {expected}
+    assert set(module._report_locks) == {expected}
+
+
+async def test_hosted_reports_are_capped_per_day(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        outputs = [text_of(await draft_issue_handler(REPORT)) for _ in range(HOSTED_REPORTS_PER_DAY + 1)]
+    with as_oauth_user("1002"):
+        other = text_of(await draft_issue_handler(REPORT))
+
+    assert all(output.startswith("✅") for output in outputs[:-1])
+    assert outputs[-1].startswith(f"❌ The report was not saved: the limit is {HOSTED_REPORTS_PER_DAY} reports a day.")
+    assert len([path for path in remote_files(git_remote) if path.startswith("reports/")]) == HOSTED_REPORTS_PER_DAY + 1
+    assert other.startswith("✅")
+
+
+async def test_hosted_report_without_a_training_repo_says_it_was_not_saved(db):
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler(REPORT))
+
+    assert output.startswith("❌ Error: The report was not saved: this server's report storage isn't set up.")
+    assert "goals" not in output and "notes" not in output
+
+
+async def test_hosted_report_is_refused_when_the_name_check_cannot_run(training_repo, git_remote, tmp_path, monkeypatch):
+    """Fail closed: an unreadable store must not skip the athlete's-name check."""
+    broken = tmp_path / "not-a-db"
+    broken.mkdir()
+    monkeypatch.setattr(store, "DB_PATH", broken)
+
+    with as_oauth_user("1001"):
+        output = text_of(await draft_issue_handler(REPORT))
+
+    assert output.startswith("❌ Error: The report was not saved: the server couldn't check it just now.")
+    assert not [path for path in remote_files(git_remote) if path.startswith("reports/")]
+
+
+async def test_concurrent_hosted_reports_cannot_exceed_the_daily_cap(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        outputs = await asyncio.gather(*(draft_issue_handler(REPORT) for _ in range(HOSTED_REPORTS_PER_DAY + 2)))
+
+    saved = [path for path in remote_files(git_remote) if path.startswith("reports/")]
+    assert len(saved) == HOSTED_REPORTS_PER_DAY
+    assert sum(text_of(output).startswith("✅") for output in outputs) == HOSTED_REPORTS_PER_DAY
+
+
+async def test_a_cancelled_hosted_report_still_counts_toward_the_cap(training_repo, git_remote, db):
+    """Cancelling the call can't stop the save thread: the report it saves must count.
+
+    A real pre-commit hook holds the save until the test has cancelled the call."""
+    from train_with_gpt.tools import draft_issue as module
+
+    git_dir = training_repo / ".git"
+    entered, release = git_dir / "save-entered", git_dir / "save-release"
+    hook = git_dir / "hooks" / "pre-commit"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f"#!/bin/sh\ntouch '{entered}'\nwhile [ ! -f '{release}' ]; do sleep 0.02; done\n")
+    hook.chmod(0o755)
+
+    with as_oauth_user("1001"):
+        task = asyncio.ensure_future(draft_issue_handler(REPORT))
+        for _ in range(1000):  # wait until the save is inside git commit
+            if entered.exists():
+                break
+            await asyncio.sleep(0.01)
+        assert entered.exists()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        release.touch()
+
+    for _ in range(1000):  # the save thread keeps running after the cancel
+        if [path for path in remote_files(git_remote) if path.startswith("reports/")]:
+            break
+        await asyncio.sleep(0.01)
+    saved = [path for path in remote_files(git_remote) if path.startswith("reports/")]
+    assert len(saved) == 1
+    assert sum(count for _, count in module._reports_today.values()) == 1
+
+
+async def test_hosted_report_footer_does_not_claim_the_user_filed_it(training_repo, git_remote, db):
+    with as_oauth_user("1001"):
+        await draft_issue_handler(REPORT)
+
+    content = remote_file(git_remote, next(path for path in remote_files(git_remote) if path.startswith("reports/")))
+    assert "the user reviewed this text" in content
+    assert "filed by the user" not in content
+
+
+async def test_the_kill_switch_hides_and_refuses(monkeypatch):
+    assert "draft_issue" in {tool.name for tool in await list_tools()}
+    monkeypatch.setenv("ISSUE_REPORTING", "off")
+
+    assert "draft_issue" not in {tool.name for tool in await list_tools()}
+    assert text_of(await draft_issue_handler(REPORT)) == "❌ Error: Reporting issues is turned off on this server."

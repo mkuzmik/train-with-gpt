@@ -59,6 +59,7 @@ TIMEOUTS = {
 # unit test checks every registered tool is in exactly one of the two lists.
 # analyze_activity/analyze_lap are left out of the prompt on purpose (they
 # process a full Strava activity) - see READ_ONLY_TOOLS_NOT_IN_PROMPT.
+# draft_issue is a write tool: on the hosted server it saves a report.
 READ_ONLY_TOOLS = {
     "get_current_date": "{}",
     "start_consultation": "{}",
@@ -75,7 +76,7 @@ READ_ONLY_TOOLS = {
     "get_weight_data": "the last 3 days (start_date/end_date)",
 }
 READ_ONLY_TOOLS_NOT_IN_PROMPT = ("analyze_activity", "analyze_lap")
-WRITE_TOOLS = ("save_goals", "save_athlete_profile", "save_consultation_notes", "setup_training_repo", "self_test")
+WRITE_TOOLS = ("save_goals", "save_athlete_profile", "save_consultation_notes", "setup_training_repo", "self_test", "draft_issue")
 
 _SAFE_MARKER_NAME = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")
 

@@ -75,6 +75,21 @@ async def test_stdio_ignores_the_hosted_allowlist(stdio_env):
     assert output
 
 
+async def test_stdio_drafts_an_issue_as_a_prefilled_github_link(stdio_env):
+    """draft_issue sends nothing: it returns the text and a GitHub new-issue link."""
+    report = {"kind": "bug", "title": "Notes list is empty", "summary": "list_consultation_notes showed nothing.",
+              "related_tool": "list_consultation_notes"}
+
+    async with StdioServer(stdio_env) as session:
+        output = _text(await session.call_tool("draft_issue", report))
+        rejected = _text(await session.call_tool("draft_issue", {**report, "summary": "athlete 1234567"}))
+
+    assert "nothing has been sent" in output
+    assert "| Transport | stdio |" in output
+    assert "https://github.com/mkuzmik/train-with-gpt/issues/new?title=Notes%20list%20is%20empty&body=" in output
+    assert rejected.startswith("❌ The report was not drafted:")
+
+
 async def test_console_script_serves_stdio(stdio_env):
     """The installed `train-with-gpt` command really serves MCP (it once just
     created an un-awaited coroutine and exited)."""

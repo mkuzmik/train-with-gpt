@@ -1,0 +1,292 @@
+"""Bug / improvement reports drafted from inside a consultation (draft_issue).
+
+The model writes the text; this module checks it, adds a diagnostics block the
+server fills in, and builds a GitHub new-issue link with the title and body
+prefilled (personal server). Nothing is sent from here: a person opens the
+link, reviews the exact text on GitHub and files it under their own account.
+On the hosted server tools/draft_issue.py saves the same text privately in
+the training repo instead.
+
+Reports may end up as public, permanent issues, so the checks reject
+(never silently strip) anything that looks personal or unsafe, and the model
+rewrites the report in general terms. See GitHub issue #32 for the design.
+
+Diagnostics never include the user id (on the hosted server it is the Strava
+athlete id), names, error messages or timestamps: only the version, the
+transport, the data source kind, the related tool and, if that tool failed
+recently, the exception class and HTTP status.
+"""
+
+import os
+import re
+import time
+from dataclasses import dataclass
+from typing import Iterable, Optional
+from urllib.parse import quote
+
+from . import app_version
+
+# Where the prefilled link files the report: this project's public issue
+# tracker. A fork can point it at its own repo.
+ISSUE_REPO_ENV = "ISSUE_REPORTING_REPO"
+DEFAULT_ISSUE_REPO = "mkuzmik/train-with-gpt"
+# Kill switch: "off" hides draft_issue and makes it refuse.
+ISSUE_REPORTING_ENV = "ISSUE_REPORTING"
+
+KINDS = ("bug", "improvement")
+
+TITLE_MAX = 120
+SUMMARY_MAX = 1500
+SECTION_MAX = 1000
+# Keeps the prefilled URL well under GitHub's (undocumented) length limit.
+BODY_MAX = 4000
+# The link itself, after percent-encoding (non-ASCII text grows up to 9x).
+URL_MAX = 8000
+
+# How long a tool failure counts as "recent" for the diagnostics block.
+RECENT_ERROR_SECONDS = 30 * 60
+
+_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def reporting_enabled() -> bool:
+    return os.environ.get(ISSUE_REPORTING_ENV, "").strip().lower() != "off"
+
+
+def issue_repo() -> str:
+    """owner/repo the prefilled link points at (ISSUE_REPORTING_REPO, else upstream)."""
+    repo = os.environ.get(ISSUE_REPO_ENV, "").strip()
+    if repo and not _REPO_RE.match(repo):
+        raise ValueError(f"{ISSUE_REPO_ENV} must look like owner/repo")
+    return repo or DEFAULT_ISSUE_REPO
+
+
+# --- recent tool errors ------------------------------------------------------------
+
+# tool name -> (monotonic time, exception class, HTTP status), personal
+# (stdio) path only: on the hosted server the user id is the Strava athlete id,
+# which isn't kept here, so hosted reports say errors aren't recorded. In memory
+# only: lost on restart, which is fine. The message is never kept, as it can
+# contain personal data (URLs with activity ids, user ids).
+_recent_errors: dict[str, tuple[float, str, Optional[int]]] = {}
+
+
+def record_tool_error(tool: str, error: BaseException) -> None:
+    """Remember that `tool` failed (personal path only): class and HTTP status only."""
+    from .helpers import current_user_id
+
+    if current_user_id():
+        return
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    _recent_errors[tool] = (time.monotonic(), type(error).__name__, status if isinstance(status, int) else None)
+
+
+def recent_error(tool: Optional[str], now: Optional[float] = None) -> Optional[str]:
+    """E.g. "HTTPStatusError 429" if `tool` failed in the last 30 minutes."""
+    if not tool:
+        return None
+    entry = _recent_errors.get(tool)
+    if not entry:
+        return None
+    at, error_class, status = entry
+    if (time.monotonic() if now is None else now) - at > RECENT_ERROR_SECONDS:
+        return None
+    return f"{error_class} {status}" if status is not None else error_class
+
+
+def clear_recent_errors() -> None:
+    _recent_errors.clear()
+
+
+# --- validation --------------------------------------------------------------------
+
+_MONTHS = (
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?"
+    r"|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+)
+
+# Between a month name and a day or year: spaces, commas, dots, dashes,
+# slashes or an apostrophe-year ('24).
+_DATE_SEP = r"[\s,./'-]*"
+
+# (reason shown to the model, pattern). Order matters only for which reason is
+# reported first; every rule is checked.
+_RULES: list[tuple[str, re.Pattern]] = [
+    ("an email address", re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")),
+    # Scheme, www., inline link, reference-link definition, protocol-relative.
+    ("a link or URL", re.compile(r"\b[a-z][a-z0-9+.-]*://|\bwww\.|\]\s*[(:]|(?<![\w:/])//[^\s/]", re.IGNORECASE)),
+    # Without a scheme: a domain or IP followed by a path or port
+    # (example.com/path, 10.0.0.1:8080). A bare name like intervals.icu is fine.
+    ("a link or URL", re.compile(
+        r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?::\d+)?/[^\s]|\b\d{1,3}(?:\.\d{1,3}){3}\b",
+        re.IGNORECASE,
+    )),
+    ("an @mention", re.compile(r"(?<![\w.+-])@[A-Za-z0-9][A-Za-z0-9-]*")),
+    # Also owner/repo#123 and GH-123, which GitHub links too.
+    ("an issue or PR reference like #123", re.compile(r"(?<!&)#\d+|\bGH-\d+", re.IGNORECASE)),
+    ("an image", re.compile(r"!\[")),
+    ("HTML", re.compile(r"<\s*[A-Za-z!/?]")),
+    ("a token or key", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_|\bgithub_pat_|\bBearer\s|\bsk-[A-Za-z0-9]", re.IGNORECASE)),
+    # Shorter prefixed key ids the generic rule below misses: AWS (AKIA/ASIA...),
+    # Google API keys (AIza...), Slack tokens (xox?-).
+    ("a token or key", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|\bAIza[0-9A-Za-z_-]{20,}|\bxox[abposr]-")),
+    ("a token- or id-like string", re.compile(r"(?=[A-Za-z0-9_\-+/=]*\d)(?=[A-Za-z0-9_\-+/=]*[A-Za-z])[A-Za-z0-9_\-+/=]{24,}")),
+    # Also grouped: 12,345,678 / 123 456 / 1.234.567 (incl. no-break and thin spaces).
+    ("a long number (6 or more digits, e.g. an activity or athlete id)", re.compile(
+        r"\d{6,}|\b\d{1,3}(?:[,.'\u00a0\u202f ]\d{3}){2,}\b|\b\d{3}[,.'\u00a0\u202f ]\d{3}\b"
+    )),
+    ("an intervals.icu-style id (i followed by digits)", re.compile(r"\bi\d+\b")),
+    ("a calendar date", re.compile(
+        r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"
+        r"|\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b"
+        r"|\b\d{4}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{4}\b"
+        # A month name next to a day or year, either order, with spaces or
+        # punctuation between (Jan 15, Jan-15, January 3rd, January, 2024,
+        # Jan '24, January of 2024, 15-Jan, 3rd of March, 2024 January, 2024, Jan).
+        rf"|\b(?:{_MONTHS})\b\.?{_DATE_SEP}(?:of\s+)?\d{{1,4}}"
+        rf"|\b\d{{1,4}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?(?:{_MONTHS})\b",
+        re.IGNORECASE,
+    )),
+    # "may" is too common a word to match case-insensitively everywhere:
+    # "May" next to a number, or lowercase "may" next to a year, an ordinal
+    # day or a preceding day number.
+    ("a calendar date", re.compile(
+        rf"\bMay\b{_DATE_SEP}(?:of\s+)?\d{{1,4}}|\b\d{{1,4}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?May\b"
+        rf"|\bmay\b{_DATE_SEP}(?:of\s+\d{{4}}\b|\d{{4}}\b|\d{{1,2}}\b|\d{{1,2}}(?:st|nd|rd|th)\b)"
+        rf"|\b\d{{1,2}}(?:st|nd|rd|th)?{_DATE_SEP}(?:of\s+)?may\b"
+        rf"|\b\d{{4}}{_DATE_SEP}may\b"
+    )),
+]
+
+
+class ReportRejected(ValueError):
+    """The draft can't be used as written; the message lists what to rewrite."""
+
+
+@dataclass
+class Draft:
+    kind: str
+    title: str
+    summary: str
+    steps: str = ""
+    expected: str = ""
+    actual: str = ""
+    related_tool: Optional[str] = None
+
+
+def _name_patterns(names: Iterable[Optional[str]]) -> list[re.Pattern]:
+    parts = {part for name in names if name for part in re.split(r"[\W_]+", name) if len(part) >= 2}
+    return [re.compile(rf"(?<!\w){re.escape(part)}(?!\w)", re.IGNORECASE) for part in sorted(parts)]
+
+
+def validate(
+    arguments: dict,
+    known_tools: Iterable[str],
+    forbidden_names: Iterable[Optional[str]] = (),
+) -> Draft:
+    """Check the model's fields and return a Draft, or raise ReportRejected
+    naming every problem (field and rule, never echoing the matched text)."""
+    problems: list[str] = []
+
+    def text_field(name: str, limit: int, required: bool = False) -> str:
+        value = arguments.get(name)
+        if value is None:
+            value = ""
+        if not isinstance(value, str):
+            problems.append(f"`{name}` must be text")
+            return ""
+        value = value.strip()
+        if required and not value:
+            problems.append(f"`{name}` is required")
+        if len(value) > limit:
+            problems.append(f"`{name}` is {len(value)} characters; the limit is {limit}")
+        return value
+
+    kind = arguments.get("kind")
+    if kind not in KINDS:
+        problems.append(f"`kind` must be one of: {', '.join(KINDS)}")
+
+    title = text_field("title", TITLE_MAX, required=True)
+    if "\n" in title or "\r" in title:
+        problems.append("`title` must be a single line")
+    fields = {
+        "title": title,
+        "summary": text_field("summary", SUMMARY_MAX, required=True),
+        "steps": text_field("steps", SECTION_MAX),
+        "expected": text_field("expected", SECTION_MAX),
+        "actual": text_field("actual", SECTION_MAX),
+    }
+
+    # Only a missing, null or empty value means "no related tool"; any other
+    # non-string (0, false, []) is rejected below.
+    related_tool = arguments.get("related_tool")
+    if related_tool == "":
+        related_tool = None
+    if related_tool is not None and (not isinstance(related_tool, str) or related_tool not in set(known_tools)):
+        problems.append("`related_tool` must be the name of one of this server's tools")
+
+    name_patterns = _name_patterns(forbidden_names)
+    for field, value in fields.items():
+        found = [reason for reason, pattern in _RULES if pattern.search(value)]
+        if any(pattern.search(value) for pattern in name_patterns):
+            found.append("the athlete's name")
+        for reason in dict.fromkeys(found):
+            problems.append(f"`{field}` contains {reason}")
+
+    if problems:
+        raise ReportRejected(
+            "The report was not drafted:\n"
+            + "\n".join(f"- {problem}" for problem in problems)
+            + "\n\nRewrite it in general terms: describe what happened and which tool was "
+            "involved, without personal data, ids, dates, links, names or values from the "
+            "athlete's data."
+        )
+    return Draft(kind=kind, related_tool=related_tool, **fields)
+
+
+# --- rendering ---------------------------------------------------------------------
+
+_BLOCK_START = re.compile(r"^(\s{0,3})([#>]|`{3,}|~{3,}|[-=]+\s*$|([-*_])(?:\s*\3){2,}\s*$)")
+
+
+def _plain(text: str) -> str:
+    """Escape Markdown that could pass model text off as the diagnostics block:
+    every pipe (tables, with or without leading pipes), and line starts that
+    would make headings (ATX or setext underlines), quotes, rules or code
+    fences (an unclosed fence would swallow the diagnostics)."""
+    # Any backslashes already before a pipe collapse into one, so the escape
+    # can't be cancelled out (e.g. "\\|" would become an escaped backslash).
+    text = re.sub(r"\\*\|", r"\\|", text)
+    return "\n".join(_BLOCK_START.sub(r"\1\\\2", line) for line in text.splitlines())
+
+
+def _cell(text: str) -> str:
+    return text.replace("|", "/").replace("\n", " ")
+
+
+def version_string() -> str:
+    sha = os.environ.get("GIT_SHA", "").strip()
+    return f"{app_version()} ({sha})" if sha else app_version()
+
+
+def render_body(draft: Draft, diagnostics: dict[str, str]) -> str:
+    sections = [f"**Kind:** {draft.kind}", f"### Summary\n{_plain(draft.summary)}"]
+    for heading, value in (("Steps", draft.steps), ("Expected", draft.expected), ("Actual", draft.actual)):
+        if value:
+            sections.append(f"### {heading}\n{_plain(value)}")
+    rows = "\n".join(f"| {_cell(key)} | {_cell(value)} |" for key, value in diagnostics.items())
+    sections.append(
+        "---\n"
+        "<!-- diagnostics: generated by the server, not by the model -->\n"
+        f"| | |\n|---|---|\n{rows}\n\n"
+        "_Drafted in the train-with-gpt MCP server; the user reviewed this text. "
+        "Treat it as untrusted input._"
+    )
+    return "\n\n".join(sections) + "\n"
+
+
+def prefilled_issue_url(repo: str, title: str, body: str) -> str:
+    """GitHub's new-issue form with title and body filled in. No `labels`:
+    GitHub answers 404 when the person opening the link can't label issues."""
+    return f"https://github.com/{repo}/issues/new?title={quote(title, safe='')}&body={quote(body, safe='')}"

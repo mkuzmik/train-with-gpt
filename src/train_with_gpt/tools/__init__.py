@@ -20,6 +20,7 @@ from .read_consultation_notes import read_consultation_notes_tool, read_consulta
 from .list_consultation_notes import list_consultation_notes_tool, list_consultation_notes_handler
 from .search_consultation_notes import search_consultation_notes_tool, search_consultation_notes_handler
 from .self_test import self_test_tool, self_test_handler
+from .draft_issue import draft_issue_available, draft_issue_tool, draft_issue_handler
 
 __all__ = [
     "setup_training_repo_tool",
@@ -62,4 +63,7 @@ __all__ = [
     "search_consultation_notes_handler",
     "self_test_tool",
     "self_test_handler",
+    "draft_issue_available",
+    "draft_issue_tool",
+    "draft_issue_handler",
 ]

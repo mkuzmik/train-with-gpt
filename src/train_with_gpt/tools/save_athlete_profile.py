@@ -8,6 +8,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
+from ..issue_report import record_tool_error
 from ..helpers import (
     GitSyncError,
     current_user_id,
@@ -125,9 +126,11 @@ Saved: {timestamp}
         return [TextContent(type="text", text=f"✅ Athlete profile saved, committed{push_status}: {shown_path}\n\nIt will be included at the start of every consultation.")]
 
     except GitSyncError as e:
+        record_tool_error("save_athlete_profile", e)
         return [TextContent(type="text", text=f"❌ Error: The athlete profile was not saved. {save_error_for_caller(str(e), current_user_id())}")]
 
     except Exception as e:
+        record_tool_error("save_athlete_profile", e)
         print(f"Error saving athlete profile: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

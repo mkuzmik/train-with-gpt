@@ -6,6 +6,7 @@ from mcp.types import Tool, TextContent
 
 from ..helpers import NO_WELLNESS_DATA_MESSAGE
 from ..strava_client import StravaClient
+from ..issue_report import record_tool_error
 
 
 def get_resting_heart_rate_tool() -> Tool:
@@ -109,6 +110,7 @@ async def get_resting_heart_rate_handler(arguments: dict, intervals) -> list[Tex
         return [TextContent(type="text", text="\n".join(lines))]
 
     except Exception as e:
+        record_tool_error("get_resting_heart_rate", e)
         print(f"Error fetching resting heart rate data: {e}", file=sys.stderr)
         return [TextContent(
             type="text",

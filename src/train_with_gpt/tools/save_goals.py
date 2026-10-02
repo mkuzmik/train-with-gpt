@@ -16,6 +16,7 @@ from ..helpers import (
     training_repo_not_configured_message,
     user_scoped_goals_file,
 )
+from ..issue_report import record_tool_error
 
 
 def save_goals_tool() -> Tool:
@@ -82,9 +83,11 @@ Saved: {timestamp}
         return [TextContent(type="text", text=f"✅ Goals saved, committed{push_status}: {shown_path}\n\nYou can now analyze activities and provide coaching advice in the context of these goals.")]
 
     except GitSyncError as e:
+        record_tool_error("save_goals", e)
         return [TextContent(type="text", text=f"❌ Error: Goals were not saved. {save_error_for_caller(str(e), current_user_id())}")]
 
     except Exception as e:
+        record_tool_error("save_goals", e)
         print(f"Error saving goals: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

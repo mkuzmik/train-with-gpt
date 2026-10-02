@@ -6,6 +6,7 @@ from pathlib import Path
 from mcp.types import Tool, TextContent
 
 from ..config import config
+from ..issue_report import record_tool_error
 from ..helpers import (
     current_user_id,
     git_pull_and_read,
@@ -66,6 +67,7 @@ async def read_athlete_profile_handler(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=content)]
 
     except Exception as e:
+        record_tool_error("read_athlete_profile", e)
         print(f"Error reading athlete profile: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

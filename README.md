@@ -213,7 +213,7 @@ clients, kept at mode `600`) survives `docker compose restart`/rebuilds;
 
 **Notes/goals repo in Docker.** OAuth'd users' notes, goals and athlete
 profiles are stored per user (`notes/<user_id>/`, `goals/<user_id>.md`,
-`athlete/<user_id>.md`) in a separate, *private* git
+`athlete/<user_id>.md`), and bug reports under `reports/`, in a separate, *private* git
 repo, cloned by the container on first start (`docker-entrypoint.sh`) and
 pushed to on every save. Set it up once:
 
@@ -550,10 +550,45 @@ configuration.
 | `save_consultation_notes`, `list_consultation_notes`, `read_consultation_notes`, `search_consultation_notes` | Consultation notes, one timestamped file per save. |
 | `setup_training_repo` | Local only: point the server at the notes repository that stores goals, the athlete profile and notes. |
 | `self_test` | Health check of the connector (see "Post-deploy smoke test"). |
+| `draft_issue` | Report a bug or suggest an improvement about the connector: a prefilled GitHub link locally, a private report for the operator on a hosted server (see "Reporting problems"). |
 
 There is no separate goal-setting tool (`discuss_goals` was removed): goal
 setting is part of `start_consultation`'s guidance, and "update my goals"
 works in any chat.
+
+### Reporting problems
+
+When something goes wrong mid-conversation (a failed save, a confusing tool
+message, a missing capability), ask Claude to "report this" or "suggest an
+improvement". After a tool error Claude may offer once to write a report, and
+does so only if you agree.
+
+- **Local (stdio) server:** `draft_issue` sends nothing. It returns the report
+  text and a link that opens GitHub's new-issue form with the title and body
+  filled in; you check the text there and file it under your own GitHub
+  account. The issue is **public**.
+- **Hosted server:** the report is saved privately in the server's training
+  repo, as `reports/<timestamp>-<random>.md`. Neither the file name nor the
+  text says who sent it (the hosted user id is the Strava athlete id). Nobody
+  else sees it; the operator reads it there and, when it's worth it, writes a
+  public issue. Each user can save 5 reports a day (counted in memory, so a
+  restart resets it).
+
+Either way the server refuses reports that contain email addresses, links,
+@mentions, issue references, images or HTML, token- or id-like strings,
+numbers of 6 or more digits, intervals.icu-style ids, calendar dates and (on
+a hosted server) the athlete's intervals.icu name, and Claude is asked to rewrite
+them in general terms. It can't catch everything (other names or health
+details in prose, for instance), so read the text before agreeing.
+
+The server appends a diagnostics table: version (and `GIT_SHA` if set),
+transport, data source kind, the related tool and, on a local server, the
+class and HTTP status of that tool's error in the last 30 minutes, never its
+message. The hosted server doesn't record tool errors.
+
+- `ISSUE_REPORTING_REPO` (`owner/repo`) points the local link at another
+  repository, e.g. a fork's. It defaults to this project's repository.
+- `ISSUE_REPORTING=off` hides the tool on either server.
 
 ## Troubleshooting
 
@@ -598,8 +633,8 @@ enforces this for every test:
   The global `config` loads at import time, so without this the tests would
   read your real `~/.config/train-with-gpt/config.json` and `store.db`.
 - `INTERVALS_API_KEY`, `STRAVA_CLIENT_*`, `TOKEN_ENCRYPTION_KEY`,
-  `TRAINING_REPO_PATH`, `PUBLIC_URL`, `PORT` and all `GIT_*` env vars are
-  cleared, and git gets a fixed test identity.
+  `TRAINING_REPO_PATH`, `PUBLIC_URL`, `PORT`, `ISSUE_REPORTING*` and all
+  `GIT_*` env vars are cleared, and git gets a fixed test identity.
 - The global `config` starts empty, and its file and the SQLite store live in
   the test's `tmp_path`.
 - All httpx traffic goes through a respx router (the `http_mock` fixture).
@@ -735,7 +770,8 @@ uv run pytest --pdb     # drop into the debugger on failure
   operations, headlines, zones), the HTTP clients (`test_intervals_client.py`,
   `test_strava_client.py`), OAuth (`test_oauth_provider.py`,
   `test_strava_oauth.py`, `test_intervals_connect.py` for the optional
-  intervals.icu login step and `secret_box`) and one file per tool.
+  intervals.icu login step and `secret_box`) and one file per tool
+  (`test_draft_issue.py` also covers `issue_report.py`).
 - `tests/integration/`: `test_oauth_flow.py` (full OAuth round trip, then
   MCP tool calls), `test_http_auth.py` (the /mcp auth boundary),
   `test_user_isolation.py` (per-user notes, goals and athlete profiles) and

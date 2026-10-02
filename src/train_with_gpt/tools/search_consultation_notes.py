@@ -7,6 +7,7 @@ from mcp.types import Tool, TextContent
 
 from ..config import config
 from ..helpers import current_user_id, sync_note_for_caller,git_pull_and_read, read_note_files, user_scoped_notes_dir, training_repo_not_configured_message
+from ..issue_report import record_tool_error
 
 _CONTEXT_LINES = 2
 
@@ -118,6 +119,7 @@ async def search_consultation_notes_handler(arguments: dict) -> list[TextContent
         return [TextContent(type="text", text=f"{summary}\n\n{content}")]
 
     except Exception as e:
+        record_tool_error("search_consultation_notes", e)
         print(f"Error searching consultation notes: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

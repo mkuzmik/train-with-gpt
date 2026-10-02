@@ -7,6 +7,7 @@ from mcp.types import Tool, TextContent
 
 from ..config import config
 from ..helpers import current_user_id, sync_note_for_caller,git_pull_and_read, read_file_if_exists, user_scoped_goals_file, training_repo_not_configured_message
+from ..issue_report import record_tool_error
 
 
 def read_goals_tool() -> Tool:
@@ -49,6 +50,7 @@ async def read_goals_handler(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=content)]
     
     except Exception as e:
+        record_tool_error("read_goals", e)
         print(f"Error reading goals: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

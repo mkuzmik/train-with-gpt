@@ -3,7 +3,8 @@
 Two real OAuth logins (Alice and Bob) against one server and one shared
 training repo: each must only ever see their own `notes/<user_id>/`,
 `goals/<user_id>.md` and `athlete/<user_id>.md`, and the personal (no-OAuth)
-path sees none of them.
+path sees none of them. Bug reports are different: they go to one shared,
+operator-only `reports/` folder and must carry no user id at all.
 """
 
 import pytest
@@ -112,3 +113,16 @@ async def test_personal_path_does_not_see_user_notes(login):
         result = await personal.call_tool("search_consultation_notes", {"query": "private"})
 
     assert "Alice private note" not in result.content[0].text
+
+
+def test_hosted_reports_are_saved_without_the_user_id_in_the_training_repo(login, git_remote):
+    alice = login(ALICE)
+
+    output = alice.call_tool("draft_issue", {
+        "kind": "bug", "title": "Notes list is empty", "summary": "list_consultation_notes showed nothing.",
+    })
+
+    reports = [path for path in remote_files(git_remote) if path.startswith("reports/")]
+    assert output.startswith("✅ Report saved for the server's operator")
+    assert len(reports) == 1 and str(ALICE) not in reports[0]
+    assert "| Transport | http (hosted) |" in remote_file(git_remote, reports[0])
