@@ -10,6 +10,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 - **Athlete Profile**: Claude builds a short profile of you with you (background, race results, health patterns, constraints, what works), checks it against your data, and starts every consultation from it
 - **Consultation History**: Claude remembers past conversations and provides continuity
 - **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
+- **Evidence-aware advice**: every consultation carries a short, dated set of training-science principles with confidence labels and DOI citations (the coach is told to cite only those, never from memory), plus safety rules that pause coaching and recommend a professional for red flags, and conservative weight guidance. It is general information, not medical advice.
 
 On a local install, all training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
 
@@ -493,7 +494,7 @@ This single entry point tells Claude what's saved for you (goals, athlete profil
 - "How was my sleep on January 15?"
 - "What's my HRV trend this week?"
 - "What was my average weight last month?"
-- Claude shows: sleep duration/quality score, HRV, resting heart rate, body weight, rolling averages
+- Claude shows: sleep duration/quality score, HRV, resting heart rate, body weight, rolling averages; HRV and resting HR are read against your own baseline, not as "higher/lower is better"
 
 **Continuing Conversations**
 
@@ -541,7 +542,7 @@ configuration.
 
 | Tool | What it's for |
 |---|---|
-| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one, and guides Claude through onboarding a new athlete or a consultation with a returning one. |
+| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one, and guides Claude through onboarding a new athlete or a consultation with a returning one. Also carries the training-science principles and safety rules for both paths (`coaching_science.py`; kept under 2,800 characters, and its DOIs must be in that module's source list). |
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. |
@@ -735,7 +736,9 @@ uv run pytest --pdb     # drop into the debugger on failure
   operations, headlines, zones), the HTTP clients (`test_intervals_client.py`,
   `test_strava_client.py`), OAuth (`test_oauth_provider.py`,
   `test_strava_oauth.py`, `test_intervals_connect.py` for the optional
-  intervals.icu login step and `secret_box`) and one file per tool.
+  intervals.icu login step and `secret_box`), one file per tool, and
+  `test_coaching_science.py` (the training-science section's size budget,
+  sources and where the guidance carries it).
 - `tests/integration/`: `test_oauth_flow.py` (full OAuth round trip, then
   MCP tool calls), `test_http_auth.py` (the /mcp auth boundary),
   `test_user_isolation.py` (per-user notes, goals and athlete profiles) and
