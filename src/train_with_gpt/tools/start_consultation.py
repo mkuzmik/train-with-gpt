@@ -539,6 +539,7 @@ _PATH_B = """## Path B: Consultation with a Returning Athlete
 _REMINDERS = """## Important Reminders (both paths)
 - ONE question at a time - let them answer before moving on
 - Save consultation notes at the END of meaningful conversations
+- If a safety rule applied, say so in the consultation note (save_consultation_notes)
 - Update goals when they evolve (save_goals)
 - When a durable fact about the athlete changes (a race result, an injury, availability,
   a new conclusion about what works), propose the updated profile and save it after they

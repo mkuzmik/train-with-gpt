@@ -89,3 +89,22 @@ async def test_profile_interview_defers_to_the_shared_safety_list():
 
     assert "start_consultation's Safety list" in output
     assert SAFETY_RULES.startswith("Safety - ")
+
+
+def test_the_shared_safety_list_assumes_no_notes_storage():
+    assert "notes" not in SAFETY_RULES
+
+
+async def test_red_flags_go_into_the_notes_only_when_notes_can_be_saved(training_repo):
+    with_storage = text_of(await start_consultation_handler({}, _intervals(), _intervals()))
+    reminders = with_storage.split("## Important Reminders", 1)[1]
+
+    assert "safety rule" in reminders and "save_consultation_notes" in reminders
+
+
+async def test_without_storage_nothing_asks_to_record_red_flags_in_notes():
+    output = text_of(await start_consultation_handler({}, _intervals(), _intervals()))
+    reminders = output.split("## Important Reminders", 1)[1]
+
+    assert "safety rule" not in reminders
+    assert "Nothing is saved this chat" in reminders

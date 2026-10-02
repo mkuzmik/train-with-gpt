@@ -71,7 +71,7 @@ items as options, not rules.
 """
 
 SAFETY_RULES = """\
-Safety - pause coaching, recommend a professional, and mention it in the notes:
+Safety - pause coaching and recommend a professional:
 - chest pain, fainting, palpitations or unusual breathlessness in exercise
   -> stop, see a physician;
 - signs of low energy availability (missed/changed periods, repeated bone
