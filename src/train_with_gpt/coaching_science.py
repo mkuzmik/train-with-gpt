@@ -41,8 +41,8 @@ SOURCES = {
 
 PRINCIPLES = """\
 ## Training science (both paths; reviewed: 2026-09; confidence in brackets)
-Use these when advising. Cite only the sources named here or records a tool
-returned; never cite from memory. If unsure, say so.
+Use these when advising. Cite only the sources named here or records that a
+tool returned; never cite from memory. If unsure, say so.
 - Intensity: most volume easy. Pyramidal and polarized both work; no model is
   clearly best. [moderate; "which model" contested] (doi:10.1007/s40279-024-02149-3)
 - Progression (running): avoid single runs >10% longer than the longest run
