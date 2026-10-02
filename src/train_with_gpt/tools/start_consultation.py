@@ -16,6 +16,7 @@ from typing import Optional
 from mcp.types import Tool, TextContent
 
 from .. import secret_box
+from ..coaching_science import TRAINING_SCIENCE
 from ..config import config
 from ..helpers import (
     HOSTED_SYNC_WARNING,
@@ -333,9 +334,11 @@ comes up, {how_to_add}
   - Essential for understanding recovery capacity
 - **get_hrv_data** - Heart Rate Variability (key recovery indicator)
   - Shows nightly HRV, 7/14/28-day rolling averages
-  - Higher HRV = better recovery, lower = potential fatigue/stress
+  - Read it against the athlete's own baseline and normal range, not as
+    "higher = better"; single nights are noisy, look at the trend
 - **get_resting_heart_rate** - Daily resting heart rate trends
-  - Lower RHR = better fitness, elevated = possible overtraining or illness
+  - A sustained rise above the athlete's own baseline can mean fatigue or
+    illness; compare with their normal range, not other people's values
 - **get_weight_data** - Body weight history: every weigh-in, or only the average, range and
   first-to-last change (mode='summary')
 
@@ -536,6 +539,7 @@ _PATH_B = """## Path B: Consultation with a Returning Athlete
 _REMINDERS = """## Important Reminders (both paths)
 - ONE question at a time - let them answer before moving on
 - Save consultation notes at the END of meaningful conversations
+- If a safety rule applied, say so in the consultation note (save_consultation_notes)
 - Update goals when they evolve (save_goals)
 - When a durable fact about the athlete changes (a race result, an injury, availability,
   a new conclusion about what works), propose the updated profile and save it after they
@@ -576,6 +580,7 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
         + _GOAL_SETTING.replace("{save_goals}", _SAVE_GOALS if storage else _SHARE_GOALS)
         .replace("{starting_point}", _STARTING_POINT_PROFILE if storage else _STARTING_POINT_NO_STORAGE)
         + (_PATH_B if storage else _PATH_B_NO_STORAGE)
+        + TRAINING_SCIENCE + "\n"
         + (_REMINDERS if storage else _REMINDERS_NO_STORAGE)
     )
     return [TextContent(type="text", text=guidance)]

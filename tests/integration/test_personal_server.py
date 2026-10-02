@@ -177,11 +177,21 @@ async def test_intervals_backed_tools(http_mock, intervals_api_key):
 
     assert "Found 1 activities for 2024-01-15" in activities and "5.00km" in activities
     assert "8h 0m | ⭐ Score: 90/100" in sleep
-    assert "HRV: 61ms" in hrv
-    assert "RHR: 48 bpm" in rhr
+    assert "HRV: 61ms" in hrv and "own baseline" in hrv
+    assert "RHR: 48 bpm" in rhr and "own baseline" in rhr
     assert "70.2 kg" in weight
     assert "only one lap" in analysis
     assert "Split into 3 segments" in lap
+
+
+async def test_start_consultation_carries_the_training_science():
+    async with create_connected_server_and_client_session(mcp_server) as session:
+        consultation = _text(await session.call_tool("start_consultation", {}))
+
+    assert "## Training science (both paths; reviewed: " in consultation
+    assert "never cite from memory" in consultation
+    assert "doi:10.1136/bjsports-2024-109380" in consultation
+    assert "Safety - pause coaching" in consultation
 
 
 async def test_unknown_tool_is_an_error():
