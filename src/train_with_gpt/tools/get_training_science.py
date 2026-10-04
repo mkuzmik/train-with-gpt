@@ -84,12 +84,14 @@ it yourself rather than relying on memory.
 - Signs of low energy availability (missed or changed periods, repeated bone stress
   injuries, frequent illness, persistent fatigue, falling performance): sports-medicine
   screening.
-- Localized bone pain that worsens with loading: stop running, get it checked.
+- Localized bone pain that worsens with loading: stop the activity that provokes it and
+  get it checked.
 - Fever, or illness with symptoms below the neck (chest, aching muscles, stomach):
   no training until it has resolved, then build back gradually.
 - Eating-disorder cues, pregnancy, new medication: professional advice.
 - Weight: screen for low energy availability first; no crash diets, never at the cost of
-  fueling training, and no weight or body-composition targets for under-18s.
+  fueling training. For under-18s or a positive screen, set no weight or body-composition
+  targets and refer them to a doctor or sports dietitian.
 
 ## Starting points (checked 2026-09)
 {_STARTING_POINTS_TEXT}

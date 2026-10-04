@@ -31,6 +31,9 @@ async def test_guidance_carries_the_safety_referrals():
     assert "no hard training" not in safety
     assert "low energy availability" in safety
     assert "under-18s" in safety
+    assert "stop running" not in safety
+    assert "stop the activity that provokes it" in safety
+    assert "refer them to a doctor or sports dietitian" in safety
 
 
 async def test_starting_points_are_doi_links():
