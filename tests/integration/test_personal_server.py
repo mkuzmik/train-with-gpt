@@ -11,6 +11,7 @@ Two ways in, both speaking real MCP:
 import contextlib
 import json
 import os
+import re
 import shutil
 import sys
 import sysconfig
@@ -188,7 +189,8 @@ async def test_training_science_guidance_over_mcp():
     async with create_connected_server_and_client_session(mcp_server) as session:
         guidance = _text(await session.call_tool("get_training_science", {}))
 
-    assert "Search the web" in guidance and "https://doi.org/" in guidance
+    assert "Search the web" in guidance
+    assert re.search(r"^- .+: .+, https://doi\.org/10\.\d{4,9}/\S+$", guidance, re.MULTILINE)
 
 
 async def test_unknown_tool_is_an_error():
