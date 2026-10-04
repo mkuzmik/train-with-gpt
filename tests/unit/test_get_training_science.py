@@ -15,6 +15,9 @@ async def test_guidance_asks_the_model_to_research_and_check_sources_itself():
     assert "Search the web" in output and "PubMed" in output
     assert "Never cite a paper you haven't found in this conversation" in output
     assert "starting point, not a limit" in output
+    # Judge quality and methods, not the document label.
+    assert "consensus statements and guidelines, then systematic reviews" not in output
+    assert "only as strong as the certainty of the underlying" in output
     assert "how sure (consensus / moderate / low / emerging / contested)" in output
     assert "suggest how\n  the athlete could go deeper" in output
 

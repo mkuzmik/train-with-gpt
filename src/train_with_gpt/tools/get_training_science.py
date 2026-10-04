@@ -54,8 +54,10 @@ it yourself rather than relying on memory.
 ## Finding evidence
 - Search the web for current research: PubMed, Europe PMC, Google Scholar, the Cochrane
   Library, and position stands (ACSM, IOC, ISSN, ECSS, national sports-medicine bodies).
-- Weigh it by type: consensus statements and guidelines, then systematic reviews and
-  meta-analyses, then single trials, then observational studies. Prefer recent work,
+- Weigh it by quality, not by label: well-conducted systematic reviews and meta-analyses
+  of trials usually carry most weight, then single trials, then observational studies. A
+  consensus statement or guideline is only as strong as the certainty of the underlying
+  evidence and its methods; some are mostly expert opinion. Prefer recent work,
   populations like the athlete (trained or recreational, sport, age, sex) and performance
   or injury outcomes. A newer study doesn't automatically win.
 - Check every source before citing it: open it (DOI or PubMed page) and base the claim on
