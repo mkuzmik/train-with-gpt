@@ -35,7 +35,8 @@ async def test_guidance_carries_the_safety_referrals():
 
 async def test_starting_points_are_doi_links():
     output = text_of(await get_training_science_handler({}))
-    starting_points = output.split("## Starting points", 1)[1].strip().splitlines()[1:]
+    section = output.split("## Starting points", 1)[1]
+    starting_points = [line for line in section.splitlines() if line.startswith("- ")]
 
     assert len(starting_points) >= 10
     assert all(re.search(r"https://doi\.org/10\.\d{4,9}/\S+$", line) for line in starting_points)

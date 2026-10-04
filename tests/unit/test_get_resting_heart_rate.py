@@ -98,3 +98,5 @@ def test_description_reads_values_against_the_athletes_baseline():
 
     assert "own baseline" in description
     assert "indicate better" not in description
+    assert "only means something" not in description
+    assert "medical check regardless of baseline" in description

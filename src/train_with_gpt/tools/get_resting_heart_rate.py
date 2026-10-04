@@ -12,7 +12,7 @@ def get_resting_heart_rate_tool() -> Tool:
     """Return the get_resting_heart_rate tool definition."""
     return Tool(
         name="get_resting_heart_rate",
-        description="Get resting heart rate (RHR) data from intervals.icu for a date range. RHR is a recovery metric that only means something against the athlete's own baseline and normal range; a sustained rise above it can mean fatigue or illness.",
+        description="Get resting heart rate (RHR) data from intervals.icu for a date range. RHR is a recovery metric best read against the athlete's own baseline and normal range; a sustained rise above it can mean fatigue or illness. An unusually high or low resting rate, or one with symptoms such as dizziness, fainting or palpitations, is worth a medical check regardless of baseline.",
         inputSchema={
             "type": "object",
             "properties": {
