@@ -42,6 +42,8 @@ from .tools import (
     read_athlete_profile_handler,
     build_athlete_profile_tool,
     build_athlete_profile_handler,
+    get_training_science_tool,
+    get_training_science_handler,
     save_consultation_notes_tool,
     save_consultation_notes_handler,
     read_consultation_notes_tool,
@@ -151,6 +153,7 @@ async def list_tools() -> list[Tool]:
         save_goals_tool(),
         read_goals_tool(),
         build_athlete_profile_tool(),
+        get_training_science_tool(),
         read_athlete_profile_tool(),
         save_athlete_profile_tool(),
         save_consultation_notes_tool(),
@@ -196,6 +199,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await read_goals_handler(arguments)
     elif name == "build_athlete_profile":
         return await build_athlete_profile_handler(arguments)
+    elif name == "get_training_science":
+        return await get_training_science_handler(arguments)
     elif name == "read_athlete_profile":
         return await read_athlete_profile_handler(arguments)
     elif name == "save_athlete_profile":

@@ -12,7 +12,7 @@ def get_hrv_data_tool() -> Tool:
     """Return the get_hrv_data tool definition."""
     return Tool(
         name="get_hrv_data",
-        description="Get Heart Rate Variability (HRV) data from intervals.icu for a date range. HRV is a key recovery metric - higher values indicate better recovery. Returns nightly HRV values and rolling averages.",
+        description="Get Heart Rate Variability (HRV) data from intervals.icu for a date range. HRV is a recovery metric best read against the athlete's own baseline and normal range; single nights are noisy and higher is not always better. Returns nightly HRV values and rolling averages.",
         inputSchema={
             "type": "object",
             "properties": {

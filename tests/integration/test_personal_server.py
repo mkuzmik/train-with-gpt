@@ -11,6 +11,7 @@ Two ways in, both speaking real MCP:
 import contextlib
 import json
 import os
+import re
 import shutil
 import sys
 import sysconfig
@@ -62,7 +63,7 @@ async def test_stdio_lists_all_tools(stdio_env):
     async with StdioServer(stdio_env) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 20
+    assert len(tools) == 21
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -83,7 +84,7 @@ async def test_console_script_serves_stdio(stdio_env):
     async with StdioServer(stdio_env, command=[CONSOLE_SCRIPT]) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 20
+    assert len(tools) == 21
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -182,6 +183,14 @@ async def test_intervals_backed_tools(http_mock, intervals_api_key):
     assert "70.2 kg" in weight
     assert "only one lap" in analysis
     assert "Split into 3 segments" in lap
+
+
+async def test_training_science_guidance_over_mcp():
+    async with create_connected_server_and_client_session(mcp_server) as session:
+        guidance = _text(await session.call_tool("get_training_science", {}))
+
+    assert "Search the web" in guidance
+    assert re.search(r"^- .+: .+, https://doi\.org/10\.\d{4,9}/\S+$", guidance, re.MULTILINE)
 
 
 async def test_unknown_tool_is_an_error():

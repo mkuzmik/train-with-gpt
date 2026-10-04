@@ -65,6 +65,7 @@ READ_ONLY_TOOLS = {
     "read_goals": "{}",
     "read_athlete_profile": "{}",
     "build_athlete_profile": "{}",
+    "get_training_science": "{}",
     "list_consultation_notes": "{}",
     "read_consultation_notes": "{}",
     "search_consultation_notes": '{"query": "test"}',

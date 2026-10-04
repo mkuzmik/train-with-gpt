@@ -7,7 +7,7 @@ from tests.support import text_of
 from train_with_gpt.helpers import NO_WELLNESS_DATA_MESSAGE
 from train_with_gpt.intervals_client import IntervalsClient
 from train_with_gpt.strava_client import StravaClient
-from train_with_gpt.tools import get_resting_heart_rate_handler
+from train_with_gpt.tools import get_resting_heart_rate_handler, get_resting_heart_rate_tool
 
 WELLNESS_URL = "https://intervals.icu/api/v1/athlete/0/wellness"
 
@@ -91,3 +91,12 @@ async def test_strava_accounts_have_no_wellness_data(wellness):
 
     assert output == NO_WELLNESS_DATA_MESSAGE
     assert not wellness.called
+
+
+def test_description_reads_values_against_the_athletes_baseline():
+    description = get_resting_heart_rate_tool().description
+
+    assert "own baseline" in description
+    assert "indicate better" not in description
+    assert "only means something" not in description
+    assert "medical check regardless of baseline" in description
