@@ -23,7 +23,9 @@ async def test_guidance_carries_the_safety_referrals():
     output = text_of(await get_training_science_handler({}))
     safety = output.split("## Safety", 1)[1].split("## Starting points", 1)[0]
 
-    assert "see a\n  physician" in safety
+    assert "call emergency services" in safety
+    assert "no training until it has resolved" in safety
+    assert "no hard training" not in safety
     assert "low energy availability" in safety
     assert "under-18s" in safety
 

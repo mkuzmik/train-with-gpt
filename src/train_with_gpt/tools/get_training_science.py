@@ -75,13 +75,16 @@ it yourself rather than relying on memory.
   sports-medicine professional.
 
 ## Safety: pause coaching and refer
-- Chest pain, fainting, palpitations or unusual breathlessness in exercise: stop, see a
-  physician.
+- Chest pain or pressure, fainting, severe or unusual breathlessness, or palpitations with
+  any of these, during or after exercise: stop. If it is happening now, is severe or
+  doesn't settle with rest, tell them to call emergency services; otherwise to see a
+  physician before training again.
 - Signs of low energy availability (missed or changed periods, repeated bone stress
   injuries, frequent illness, persistent fatigue, falling performance): sports-medicine
   screening.
 - Localized bone pain that worsens with loading: stop running, get it checked.
-- Fever or systemic illness: no hard training.
+- Fever, or illness with symptoms below the neck (chest, aching muscles, stomach):
+  no training until it has resolved, then build back gradually.
 - Eating-disorder cues, pregnancy, new medication: professional advice.
 - Weight: screen for low energy availability first; no crash diets, never at the cost of
   fueling training, and no weight or body-composition targets for under-18s.
