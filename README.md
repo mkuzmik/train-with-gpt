@@ -10,7 +10,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 - **Athlete Profile**: Claude builds a short profile of you with you (background, race results, health patterns, constraints, what works), checks it against your data, and starts every consultation from it
 - **Consultation History**: Claude remembers past conversations and provides continuity
 - **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
-- **Evidence-aware advice**: every consultation carries a short, dated set of training-science principles with confidence labels and DOI citations (the coach is told to cite only those, never from memory), plus safety rules that pause coaching and recommend a professional for red flags, and conservative weight guidance. It is general information, not medical advice.
+- **Science-based advice**: a guidance tool tells Claude to research current sport science on the web, check each source before citing it, say how sure the evidence is, and refer you to a professional for red flags. It is general information, not medical advice.
 
 On a local install, all training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
 
@@ -536,18 +536,19 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Tools
 
-The local stdio server offers 20 tools; the hosted server offers the same
-minus `setup_training_repo` (19), because its notes storage is server
+The local stdio server offers 21 tools; the hosted server offers the same
+minus `setup_training_repo` (20), because its notes storage is server
 configuration.
 
 | Tool | What it's for |
 |---|---|
-| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one, and guides Claude through onboarding a new athlete or a consultation with a returning one. Also carries the training-science principles and safety rules for both paths (`coaching_science.py`; kept under 2,800 characters, and its DOIs must be in that module's source list). |
+| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one, and guides Claude through onboarding a new athlete or a consultation with a returning one. |
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. |
 | `read_goals`, `save_goals` | The athlete's goals: target, date, milestones, current block (saving replaces them). |
 | `build_athlete_profile`, `read_athlete_profile`, `save_athlete_profile` | The athlete profile: the coach's confirmed conclusions about the athlete (background, race results and PBs, tests, health patterns, constraints, strengths and limiters, what works, preferences), no weekly stats. `build_athlete_profile` is guidance for building it (interview, check against 12 months of data with the existing tools, discussion); saving replaces the whole profile (`athlete-profile.md`, or `athlete/<user_id>.md` on a hosted server) and is refused over 8,000 characters. |
+| `get_training_science` | Guidance for basing advice on sport science: how to find and check research on the web, how to present it with a confidence level, safety referrals, and a list of reviewed papers to start from (not a limit). |
 | `save_consultation_notes`, `list_consultation_notes`, `read_consultation_notes`, `search_consultation_notes` | Consultation notes, one timestamped file per save. |
 | `setup_training_repo` | Local only: point the server at the notes repository that stores goals, the athlete profile and notes. |
 | `self_test` | Health check of the connector (see "Post-deploy smoke test"). |
@@ -736,9 +737,7 @@ uv run pytest --pdb     # drop into the debugger on failure
   operations, headlines, zones), the HTTP clients (`test_intervals_client.py`,
   `test_strava_client.py`), OAuth (`test_oauth_provider.py`,
   `test_strava_oauth.py`, `test_intervals_connect.py` for the optional
-  intervals.icu login step and `secret_box`), one file per tool, and
-  `test_coaching_science.py` (the training-science section's size budget,
-  sources and where the guidance carries it).
+  intervals.icu login step and `secret_box`) and one file per tool.
 - `tests/integration/`: `test_oauth_flow.py` (full OAuth round trip, then
   MCP tool calls), `test_http_auth.py` (the /mcp auth boundary),
   `test_user_isolation.py` (per-user notes, goals and athlete profiles) and

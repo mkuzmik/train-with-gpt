@@ -70,8 +70,6 @@ repository that its operator can read). Keep patterns that change coaching (e.g.
 drops below 40 without supplementation; supplements daily"), never raw lab panels, dated
 series of values or clinical detail. A single blood test belongs in a consultation note, if
 the athlete wants it kept at all.
-If an answer hits a red flag in start_consultation's Safety list (e.g. chest pain in
-exercise, signs of low energy availability), pause the interview and follow that rule first.
 
 ## Phase 2: Evidence (existing tools only)
 

@@ -62,7 +62,7 @@ async def test_stdio_lists_all_tools(stdio_env):
     async with StdioServer(stdio_env) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 20
+    assert len(tools) == 21
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -83,7 +83,7 @@ async def test_console_script_serves_stdio(stdio_env):
     async with StdioServer(stdio_env, command=[CONSOLE_SCRIPT]) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 20
+    assert len(tools) == 21
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -177,21 +177,18 @@ async def test_intervals_backed_tools(http_mock, intervals_api_key):
 
     assert "Found 1 activities for 2024-01-15" in activities and "5.00km" in activities
     assert "8h 0m | ⭐ Score: 90/100" in sleep
-    assert "HRV: 61ms" in hrv and "own baseline" in hrv
-    assert "RHR: 48 bpm" in rhr and "own baseline" in rhr
+    assert "HRV: 61ms" in hrv
+    assert "RHR: 48 bpm" in rhr
     assert "70.2 kg" in weight
     assert "only one lap" in analysis
     assert "Split into 3 segments" in lap
 
 
-async def test_start_consultation_carries_the_training_science():
+async def test_training_science_guidance_over_mcp():
     async with create_connected_server_and_client_session(mcp_server) as session:
-        consultation = _text(await session.call_tool("start_consultation", {}))
+        guidance = _text(await session.call_tool("get_training_science", {}))
 
-    assert "## Training science (both paths; reviewed: " in consultation
-    assert "never cite from memory" in consultation
-    assert "doi:10.1136/bjsports-2024-109380" in consultation
-    assert "Safety - pause coaching" in consultation
+    assert "Search the web" in guidance and "https://doi.org/" in guidance
 
 
 async def test_unknown_tool_is_an_error():

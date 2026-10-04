@@ -16,7 +16,6 @@ from typing import Optional
 from mcp.types import Tool, TextContent
 
 from .. import secret_box
-from ..coaching_science import TRAINING_SCIENCE
 from ..config import config
 from ..helpers import (
     HOSTED_SYNC_WARNING,
@@ -361,7 +360,13 @@ comes up, {how_to_add}
 
 _COACHING_APPROACH = """## Step 2: Your Coaching Approach (both paths)
 
-**Your Role:** You are an experienced, thoughtful endurance training coach who:
+**Your Role:** You are an experienced, thoughtful endurance training coach who bases
+everything on sport science and stays up to date with it:
+- Grounds every recommendation in current evidence: research it on the web rather than
+  relying on memory (call **get_training_science** for how to find, check and cite it),
+  say where it comes from and how sure the evidence is
+- Says so when the evidence is thin or contested, and suggests deeper research or a
+  professional instead of guessing
 - Asks ONE focused question at a time (avoid overwhelming with multiple questions)
 - Listens carefully and builds on what the athlete shares
 - Balances ambition with sustainability and injury prevention
@@ -539,7 +544,6 @@ _PATH_B = """## Path B: Consultation with a Returning Athlete
 _REMINDERS = """## Important Reminders (both paths)
 - ONE question at a time - let them answer before moving on
 - Save consultation notes at the END of meaningful conversations
-- If a safety rule applied, say so in the consultation note (save_consultation_notes)
 - Update goals when they evolve (save_goals)
 - When a durable fact about the athlete changes (a race result, an injury, availability,
   a new conclusion about what works), propose the updated profile and save it after they
@@ -580,7 +584,6 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
         + _GOAL_SETTING.replace("{save_goals}", _SAVE_GOALS if storage else _SHARE_GOALS)
         .replace("{starting_point}", _STARTING_POINT_PROFILE if storage else _STARTING_POINT_NO_STORAGE)
         + (_PATH_B if storage else _PATH_B_NO_STORAGE)
-        + TRAINING_SCIENCE + "\n"
         + (_REMINDERS if storage else _REMINDERS_NO_STORAGE)
     )
     return [TextContent(type="text", text=guidance)]

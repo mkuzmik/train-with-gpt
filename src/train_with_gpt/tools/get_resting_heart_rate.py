@@ -4,7 +4,6 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
-from ..coaching_science import BASELINE_NOTE
 from ..helpers import NO_WELLNESS_DATA_MESSAGE
 from ..strava_client import StravaClient
 
@@ -106,9 +105,6 @@ async def get_resting_heart_rate_handler(arguments: dict, intervals) -> list[Tex
         lines.append(f"📊 Summary:")
         lines.append(f"   Average RHR: {avg_rhr:.1f} bpm")
         lines.append(f"   Range: {min_rhr} - {max_rhr} bpm")
-
-        lines.append("")
-        lines.append(BASELINE_NOTE)
 
         return [TextContent(type="text", text="\n".join(lines))]
 

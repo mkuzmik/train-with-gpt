@@ -4,7 +4,6 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
-from ..coaching_science import BASELINE_NOTE
 from ..helpers import NO_WELLNESS_DATA_MESSAGE
 from ..strava_client import StravaClient
 
@@ -124,9 +123,6 @@ async def get_hrv_data_handler(arguments: dict, intervals) -> list[TextContent]:
             last_28_days = hrv_records[:28]  # Most recent 28 days (4 weeks)
             avg_28d = sum(r["hrv"] for r in last_28_days) / len(last_28_days)
             lines.append(f"   28-day Rolling Avg: {avg_28d:.1f}ms")
-
-        lines.append("")
-        lines.append(BASELINE_NOTE)
 
         return [TextContent(type="text", text="\n".join(lines))]
 
