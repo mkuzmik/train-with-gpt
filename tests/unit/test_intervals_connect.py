@@ -192,6 +192,21 @@ def test_secret_box_round_trip(token_encryption_key):
     assert secret_box.decrypt(ciphertext) == "my-api-key"
 
 
+@pytest.mark.parametrize("ciphertext", ["", "not-a-fernet-token", "YWJj"])
+def test_secret_box_rejects_malformed_ciphertext(token_encryption_key, ciphertext):
+    assert secret_box.decrypt(ciphertext) is None
+
+
+def test_secret_box_rejects_tampered_authentication_tag(token_encryption_key):
+    ciphertext = secret_box.encrypt("synthetic-api-key")
+    token = bytearray(base64.urlsafe_b64decode(ciphertext))
+    token[-1] ^= 1
+    tampered_ciphertext = base64.urlsafe_b64encode(token).decode()
+
+    assert secret_box.decrypt(tampered_ciphertext) is None
+    assert secret_box.decrypt(ciphertext) == "synthetic-api-key"
+
+
 def test_secret_box_cannot_decrypt_after_key_rotation(token_encryption_key, monkeypatch):
     ciphertext = secret_box.encrypt("my-api-key")
     monkeypatch.setattr(config, "token_encryption_key", Fernet.generate_key().decode())
