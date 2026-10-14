@@ -614,6 +614,11 @@ enforces this for every test:
 
 Test individual tools during development:
 
+When you run a tool (rather than `--help`), `test_tools.py` calls the real
+handlers using your active configuration and can make live intervals.icu
+requests. Don't run it with personal credentials or data; use the hermetic
+pytest suite for development.
+
 ```bash
 # List all available tools
 uv run python test_tools.py --help
