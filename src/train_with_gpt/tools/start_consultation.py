@@ -1,15 +1,18 @@
 """Start consultation tool: the single entry point for every training conversation.
 
 It returns what the server knows about the caller (saved goals and athlete
-profile, consultation notes, connected data sources), the full athlete profile
-when one is saved, plus guidance for both paths - onboarding a new
-athlete, or a consultation with a returning one - and leaves the choice to the
-model, which also sees the athlete's message.
+profile, consultation notes, connected data sources, today's date), and the
+saved context itself - the athlete profile, the goals, the most recent notes in
+full and an index of older ones, within a fixed size budget - so a consultation
+never depends on the model remembering to read them. Then guidance for both
+paths - onboarding a new athlete, or a consultation with a returning one - and
+leaves the choice to the model, which also sees the athlete's message.
 """
 
 import asyncio
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -22,8 +25,10 @@ from ..helpers import (
     NO_WELLNESS_DATA_MESSAGE,
     PULLED_UPDATES_PREFIX,
     current_user_id,
+    extract_note_headline,
     git_pull_and_read,
     read_file_if_exists,
+    read_note_files,
     user_scoped_goals_file,
     user_scoped_notes_dir,
     user_scoped_profile_file,
@@ -37,13 +42,12 @@ def start_consultation_tool() -> Tool:
     return Tool(
         name="start_consultation",
         description=(
-            "Call this first in any training conversation. It works for a brand-new athlete "
-            "(introduces the tool, builds their athlete profile, sets up their goals) and for a "
-            "returning one (a coaching consultation). Returns what the server knows about this "
-            "athlete - whether goals, an athlete profile and consultation notes are saved, which "
-            "data sources are connected - the full athlete profile when one is saved, and "
-            "guidance for both paths; decide which one fits from those facts and the athlete's "
-            "message."
+            "Call this first in any training conversation, before answering: it loads what's "
+            "saved about the athlete (profile, goals, recent consultation notes in full and an "
+            "index of older ones), today's date and which data sources are connected. Works for "
+            "a brand-new athlete (onboarding: profile and goals) and a returning one (a coaching "
+            "consultation); the guidance it returns covers both, so decide which fits from those "
+            "facts and the athlete's message."
         ),
         inputSchema={
             "type": "object",
@@ -59,16 +63,28 @@ class TrainingHistory:
     """What the training repo holds for the current user (our own storage only;
     no activity data). `storage` is "ok", "not_configured", "missing" or "error"."""
     storage: str
-    has_goals: bool = False
+    goals: Optional[str] = None  # the saved goals' full text
     profile: Optional[str] = None  # the saved athlete profile's full text
-    notes_count: int = 0
-    latest_note: Optional[str] = None  # YYYY-MM-DD
+    notes: list[tuple[str, str]] = field(default_factory=list)  # (file stem, text), newest first
     note: Optional[str] = None  # sync note or error detail for the model
     synced: bool = True  # False: the facts come from a clone that couldn't be synced
 
     @property
+    def has_goals(self) -> bool:
+        return self.goals is not None
+
+    @property
     def has_profile(self) -> bool:
         return self.profile is not None
+
+    @property
+    def notes_count(self) -> int:
+        return len(self.notes)
+
+    @property
+    def latest_note(self) -> Optional[str]:
+        """The newest note's date (YYYY-MM-DD), if any."""
+        return self.notes[0][0][:10] if self.notes else None
 
 
 def _sync_failed(sync_note: Optional[str]) -> bool:
@@ -78,16 +94,15 @@ def _sync_failed(sync_note: Optional[str]) -> bool:
     return bool(sync_note) and any(part.startswith("(Note:") for part in sync_note.split("\n\n"))
 
 
-def _saved_history(goals_file: Path, profile_file: Path, notes_dir: Path) -> tuple[bool, Optional[str], list[str]]:
-    """Whether the goals file exists, the athlete profile's text (None if not
-    saved), and the notes' dates (newest first), from file names only - no note
-    is read."""
-    stems = sorted((p.stem for p in notes_dir.glob("*.md")), reverse=True) if notes_dir.exists() else []
-    return goals_file.exists(), read_file_if_exists(profile_file), [stem[:10] for stem in stems]
+def _saved_history(goals_file: Path, profile_file: Path, notes_dir: Path) -> tuple[Optional[str], Optional[str], list[tuple[str, str]]]:
+    """The goals' and athlete profile's text (None if not saved) and every note
+    (newest first). Read in one go, under one sync: what goes into the reply is
+    chosen later (see _notes_sections)."""
+    return read_file_if_exists(goals_file), read_file_if_exists(profile_file), read_note_files(notes_dir)
 
 
 def read_training_history(user_id: Optional[str]) -> TrainingHistory:
-    """Sync the training repo and look up `user_id`'s goals, profile and notes (blocking)."""
+    """Sync the training repo and read `user_id`'s goals, profile and notes (blocking)."""
     if not config.training_repo_path:
         return TrainingHistory(storage="not_configured")
     repo_path = Path(config.training_repo_path)
@@ -100,7 +115,7 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
         goals_file, _ = user_scoped_goals_file(repo_path, user_id)
         profile_file, _ = user_scoped_profile_file(repo_path, user_id)
         notes_dir, _ = user_scoped_notes_dir(repo_path, user_id)
-        sync_note, (has_goals, profile, dates) = git_pull_and_read(
+        sync_note, (goals, profile, notes) = git_pull_and_read(
             repo_path, lambda: _saved_history(goals_file, profile_file, notes_dir)
         )
     except Exception as e:  # never let a storage problem block the conversation
@@ -108,10 +123,9 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
         return TrainingHistory(storage="error", note=str(e))
     return TrainingHistory(
         storage="ok",
-        has_goals=has_goals,
+        goals=goals,
         profile=profile,
-        notes_count=len(dates),
-        latest_note=dates[0] if dates else None,
+        notes=notes,
         note=sync_note,
         synced=not _sync_failed(sync_note),
     )
@@ -138,18 +152,29 @@ def _intervals_key_missing(data_client) -> bool:
     return isinstance(data_client, IntervalsClient) and not data_client.api_key
 
 
-def _facts_section(data_client, wellness_client, history: TrainingHistory, hosted: bool) -> str:
+def _today_fact(today: date) -> str:
+    # The server's clock (UTC on most hosts), not the athlete's time zone yet.
+    return (
+        f"- **Today:** {today.strftime(f'%A, %B {today.day}, %Y (%Y-%m-%d)')}, by the server's "
+        "clock; if the athlete's local date is different, go by theirs"
+    )
+
+
+def _facts_section(data_client, wellness_client, history: TrainingHistory, hosted: bool,
+                   today: date, full_notes: int = 0) -> str:
     activities = "Strava" if isinstance(data_client, StravaClient) else "intervals.icu"
     wellness = (
         "not connected" if isinstance(wellness_client, StravaClient)
         else "connected (intervals.icu)"
     )
     lines = [
+        _today_fact(today),
         f"- **Activities source:** {activities}",
         f"- **Recovery data (sleep, HRV, resting HR, body weight):** {wellness}",
     ]
     if _intervals_key_missing(data_client):
         lines = [
+            _today_fact(today),
             "- **Activities and recovery data (intervals.icu):** no API key is configured, so "
             "get_activities, analyze_activity and the sleep/HRV/resting-HR/weight tools will fail. Tell "
             "the athlete to set INTERVALS_API_KEY (see the README's Quick Start) and restart; "
@@ -157,13 +182,14 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
         ]
     if history.storage == "ok":
         lines.append("- **Notes storage:** set up")
-        lines.append(f"- **Saved goals:** {'yes' if history.has_goals else 'none'}")
+        lines.append(f"- **Saved goals:** {'yes (below)' if history.has_goals else 'none'}")
         lines.append(
             f"- **Athlete profile:** {'yes (full text below)' if history.has_profile else 'none'}"
         )
         if history.notes_count:
             lines.append(
-                f"- **Consultation notes:** {history.notes_count}, most recent {history.latest_note}"
+                f"- **Consultation notes:** {history.notes_count}, most recent {history.latest_note} "
+                f"(the latest {full_notes} in full below, then an index of older ones)"
             )
         else:
             lines.append("- **Consultation notes:** none")
@@ -210,6 +236,132 @@ whole profile with **save_athlete_profile** once they confirm.
 """
 
 
+# --- Saved context: goals and notes ---------------------------------------------------
+#
+# Loaded into every consultation, so it's kept well under what clients accept
+# from one tool result (about 25,000 tokens in Claude Code, ~150,000 characters
+# on claude.ai). The profile has its own limit when it's saved
+# (save_athlete_profile); room it doesn't use goes to the notes, as does room
+# the goals don't use. Whatever is cut is marked, never dropped silently.
+
+GOALS_BUDGET = 3_000
+PROFILE_SHARE = 6_000
+NOTES_BUDGET = 10_000
+MIN_FULL_NOTES = 3
+INDEX_BUDGET = 3_000
+INDEX_DAYS = 90
+INDEX_HEADLINE_CHARS = 120
+
+
+def _clip(text: str, limit: int) -> tuple[str, bool]:
+    """`text` cut to at most `limit` characters at a line or word break, and whether it was cut."""
+    if len(text) <= limit:
+        return text, False
+    cut = text[:limit]
+    for separator in ("\n", " "):
+        at = cut.rfind(separator)
+        if at > limit // 2:
+            return cut[:at].rstrip(), True
+    return cut, True
+
+
+def _fair_shares(lengths: list[int], budget: int) -> list[int]:
+    """Split `budget` over items of these lengths: short ones are kept whole,
+    long ones share what's left equally."""
+    shares = [0] * len(lengths)
+    left = budget
+    by_length = sorted(range(len(lengths)), key=lambda i: lengths[i])
+    for done, i in enumerate(by_length):
+        shares[i] = min(lengths[i], left // (len(by_length) - done))
+        left -= shares[i]
+    return shares
+
+
+def _notes_budget(history: TrainingHistory) -> int:
+    unused_goals = GOALS_BUDGET - min(len((history.goals or "").strip()), GOALS_BUDGET)
+    unused_profile = PROFILE_SHARE - min(len((history.profile or "").strip()), PROFILE_SHARE)
+    return NOTES_BUDGET + unused_goals + unused_profile
+
+
+def _full_notes(notes: list[tuple[str, str]], budget: int) -> list[tuple[str, str, bool]]:
+    """The newest notes to include in full, as (stem, text, was_cut): always the
+    last MIN_FULL_NOTES (cut to share the budget if together they don't fit),
+    then older ones while they fit whole. Stops at the first that doesn't, so
+    the full notes are always the most recent ones."""
+    texts = [(stem, text.strip()) for stem, text in notes]
+    first = texts[:MIN_FULL_NOTES]
+    if sum(len(text) for _, text in first) > budget:
+        shares = _fair_shares([len(text) for _, text in first], budget)
+        return [(stem, *_clip(text, share)) for (stem, text), share in zip(first, shares)]
+    full = [(stem, text, False) for stem, text in first]
+    used = sum(len(text) for _, text in first)
+    for stem, text in texts[MIN_FULL_NOTES:]:
+        if used + len(text) > budget:
+            break
+        full.append((stem, text, False))
+        used += len(text)
+    return full
+
+
+def _goals_section(history: TrainingHistory) -> str:
+    if history.storage != "ok" or not history.has_goals:
+        return ""
+    goals, cut = _clip(history.goals.strip(), GOALS_BUDGET)
+    if cut:
+        goals += "\n[... the goals are cut here to keep this short: read them in full with **read_goals**]"
+    return f"""## Goals (saved)
+
+----- goals -----
+{goals}
+----- end of goals -----
+
+"""
+
+
+def _notes_sections(history: TrainingHistory, today: date) -> tuple[str, int]:
+    """The recent notes in full and an index of the older ones, and how many
+    notes are in full."""
+    if history.storage != "ok" or not history.notes:
+        return "", 0
+    full = _full_notes(history.notes, _notes_budget(history))
+    parts = [
+        f"## Recent consultation notes (the latest {len(full)} of {history.notes_count}, newest first)\n\n"
+        "These are your memory of the last consultations: use them, and don't re-read them.\n\n"
+    ]
+    for stem, text, cut in full:
+        marker = (
+            f"\n[... this note is cut here to keep this short: read it in full with "
+            f"**read_consultation_notes** (note_date={stem[:10]})]" if cut else ""
+        )
+        parts.append(f"----- note {stem[:10]} -----\n{text}{marker}\n----- end of note -----\n\n")
+
+    older = history.notes[len(full):]
+    if older:
+        cutoff = (today - timedelta(days=INDEX_DAYS)).isoformat()
+        lines, used = [], 0
+        for stem, text in older:
+            line = f"- {stem[:10]} — {extract_note_headline(text, max_length=INDEX_HEADLINE_CHARS)}"
+            if stem[:10] < cutoff or used + len(line) > INDEX_BUDGET:
+                break
+            lines.append(line)
+            used += len(line) + 1
+        rest = older[len(lines):]
+        parts.append("## Older consultation notes (index: date and headline)\n\n")
+        if lines:
+            parts.append("\n".join(lines) + "\n\n")
+        if rest:
+            parts.append(
+                f"{'Not listed' if lines else 'Not listed here'}: {len(rest)} older note(s), from "
+                f"{rest[-1][0][:10]} to {rest[0][0][:10]}. "
+            )
+        parts.append(
+            "Read a note in full with **read_consultation_notes** (note_date=...), find a topic "
+            "with **search_consultation_notes**, or see the whole index with "
+            "**list_consultation_notes**.\n\n"
+        )
+    return "".join(parts), len(full)
+
+
 def _choose_path_section(history: TrainingHistory) -> str:
     if history.storage != "ok":
         hint = (
@@ -220,7 +372,7 @@ def _choose_path_section(history: TrainingHistory) -> str:
     elif not history.synced:
         hint = (
             "**Here the notes storage couldn't be synced just now**, so the goals/profile/notes facts "
-            "(and the profile text above) come from a possibly out-of-date copy and may miss what "
+            "(and the profile, goals and notes above) come from a possibly out-of-date copy and may miss what "
             "was saved from another device. Don't build or save an athlete profile in this chat "
             "(it could overwrite one saved elsewhere); that overrides the profile steps below. "
             "Don't treat them as final: if they show no history, ask ONE question (first time "
@@ -246,7 +398,7 @@ def _choose_path_section(history: TrainingHistory) -> str:
         hint = (
             "**Here: goals are saved but there are no consultation notes yet - ambiguous.** "
             "They may have set goals and never had a consultation, or be picking up an "
-            "unfinished first session. Read the goals, then briefly ask the athlete whether "
+            "unfinished first session. Go over the goals, then briefly ask the athlete whether "
             "they want to pick up where they left off or first hear what the coach can do; "
             "either way stay in Path B and build on the saved goals."
         )
@@ -387,8 +539,8 @@ _PATH_A = """## Path A: Onboarding a New Athlete
 
 Only for an athlete with no saved goals, profile or notes (see Step 1).
 
-1. **get_current_date**, then **get_activities** for roughly the last 2-4 weeks, so
-   you open with something concrete about their recent training.
+1. **get_activities** for roughly the last 2-4 weeks (today's date is in the facts
+   above), so you open with something concrete about their recent training.
 2. **Introduce yourself briefly** (a few sentences, not a feature list): you coach
    from their recent activities, you remember their profile, goals and past
    consultations between chats (when notes storage is set up), and you can dig into
@@ -469,8 +621,8 @@ _PATH_A_NO_STORAGE = """## Path A: Onboarding a New Athlete (no notes storage)
 Only for an athlete with no saved goals or notes (see Step 1); here the facts can't
 tell, so go by what the athlete says.
 
-1. **get_current_date**, then **get_activities** for roughly the last 2-4 weeks, so
-   you open with something concrete about their recent training.
+1. **get_activities** for roughly the last 2-4 weeks (today's date is in the facts
+   above), so you open with something concrete about their recent training.
 2. **Introduce yourself briefly** (a few sentences, not a feature list): you coach
    from their recent activities and can dig into any single workout. Say plainly
    that goals and notes can't be kept between chats right now (see the facts
@@ -486,10 +638,9 @@ _PATH_B_NO_STORAGE = """## Path B: Consultation with a Returning Athlete (no not
 
 Their saved goals and past notes can't be read in this chat, so:
 
-1. **get_current_date** - today's date and day of week
-2. Ask ONE question to recap: what they're training for right now, and anything
+1. Ask ONE question to recap: what they're training for right now, and anything
    from earlier sessions they want to carry on with
-3. **get_activities** - their recent training, patterns and volume
+2. **get_activities** - their recent training, patterns and volume
 
 **Then begin:** acknowledge what you learned, ask ONE open question about how
 they're doing, and let the athlete guide the conversation.
@@ -499,44 +650,35 @@ they're doing, and let the athlete guide the conversation.
 
 _PATH_B = """## Path B: Consultation with a Returning Athlete
 
-**Gather context first:**
+**You already have the saved context above:** today's date, the athlete profile, the
+goals, the latest consultation notes in full and an index of older ones. That is
+your memory of this athlete: don't call read_goals or read_consultation_notes to
+read it again. Use the tools only to go further:
+- **search_consultation_notes** when the athlete refers to something by topic ("the
+  calf thing", "that race") and it isn't in the notes above
+- **read_consultation_notes** (note_date=...) for an older note whose headline matters
+  today, or a note above that was cut
+- **list_consultation_notes** for the index beyond what's listed above
+- **read_goals** only if the goals above were cut
+- No goals saved: offer the goal-setting conversation above. No profile saved: offer
+  to build one (**build_athlete_profile**) at a natural moment, without forcing it.
 
-1. **get_current_date** - today's date and day of week, so you can reason about
-   "last week", "yesterday" and training cycles
+**Then check what's new:** **get_activities** - what they've done since the last
+consultation, current patterns and volume.
 
-2. **The athlete profile** - if one is saved, it's included above in full: it's your
-   baseline for who they are (no need to read it again). If none is saved, offer to
-   build one (**build_athlete_profile**) at a natural moment, without forcing it.
+**Then open with a read-back** (3-5 short lines), before any advice:
+- the goal event and date, and the target
+- the latest result or key session
+- open issues: an injury or niggle, illness, a plan change, anything the notes left
+  pending
+- what stands out in their training since the last consultation
 
-3. **read_goals** - their objectives, timeline and current block; reference them
-   throughout. If no goals are saved, offer the goal-setting conversation above.
+If something couldn't be loaded (notes storage unavailable or not synced, activities
+failing), say that first. Ask the athlete to correct anything wrong or out of date;
+a confirmed change to a durable fact goes into the profile or goals.
 
-4. **list_consultation_notes**, then **read_consultation_notes** (and **search_consultation_notes** as needed)
-   - list_consultation_notes gives you a dated index (date + one-line headline) of every
-     past consultation, without their full text
-   - Read the ENTIRE index, not just the top few lines — headlines are cheap, so scan all
-     of them for anything that might matter today: an injury or pain mention, illness, a
-     race or goal event, a plan change, a plateau or breakthrough, an unresolved standing
-     item
-   - Default to reading at least the **last 60 days** in full via read_consultation_notes
-     (since=...) — this is a floor, not a ceiling. Err on reading more rather than less;
-     a longer read is cheap, missing context that changes your advice is not
-   - On top of that default window, pull any older note whose headline flagged something
-     relevant (via note_date, or a targeted since/until around it) — don't limit yourself
-     to the default window when the index points somewhere else
-   - If the athlete references something specific ("like we discussed about my calf",
-     "when I mentioned that race") instead of a date, use **search_consultation_notes**
-     with a keyword/phrase to find it directly rather than guessing a date range
-   - Use all=true only when you genuinely need the complete history (e.g. a full-season
-     review)
-
-5. **get_activities** - what they've done since the last consultation, current
-   patterns and volume
-
-**Then begin:**
-1. Briefly acknowledge what you learned (profile, goals, recent notes, recent activities, today's date)
-2. Ask ONE open question about how they're doing or what's on their mind
-3. Let the athlete guide where the conversation goes
+**Then begin:** ask ONE open question about how they're doing or what's on their
+mind, and let the athlete guide where the conversation goes.
 
 """
 
@@ -566,17 +708,22 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
     `data_client` and `wellness_client` are the clients the activity and
     wellness tools would get for this user; only their type is used, to name
     the data sources (no activity or wellness data is read here). The training
-    repo is synced and checked for this user's goals file and note file names,
-    and their athlete profile is read and included verbatim.
+    repo is synced once, and this user's profile, goals and notes are read and
+    included within the budget above.
     """
     user_id = current_user_id()
     history = await asyncio.to_thread(read_training_history, user_id)
+    today = date.today()
+    notes, full_notes = _notes_sections(history, today)
 
     storage = history.storage == "ok"
     guidance = (
         "🏃 Training Consultation\n\n"
-        + _facts_section(data_client, wellness_client, history, hosted=bool(user_id))
+        + _facts_section(data_client, wellness_client, history, hosted=bool(user_id),
+                         today=today, full_notes=full_notes)
         + _profile_section(history)
+        + _goals_section(history)
+        + notes
         + _choose_path_section(history)
         + _COACHING_APPROACH
         + _data_sources_section(data_client, wellness_client)

@@ -33,7 +33,7 @@ async def test_start_consultation_points_at_the_context_tools(training_repo):
     output = text_of(await start_consultation_handler({}, _intervals(), _intervals()))
 
     assert output.startswith("🏃 Training Consultation")
-    for tool in ("get_current_date", "read_goals", "list_consultation_notes", "read_consultation_notes",
+    for tool in ("read_goals", "list_consultation_notes", "read_consultation_notes",
                  "search_consultation_notes", "get_activities", "save_goals", "save_consultation_notes"):
         assert tool in output
     assert "coach" in output.lower()
@@ -525,7 +525,7 @@ async def test_a_failed_sync_qualifies_the_included_profile(training_repo, git_r
     output = await _start()
 
     assert "Made-up runner" in output  # still shown, from the local copy
-    assert "the profile text above) come from a possibly out-of-date copy" in output
+    assert "the profile, goals and notes above) come from a possibly out-of-date copy" in output
     assert "Don't build or save an athlete profile in this chat" in output
 
 
@@ -540,3 +540,222 @@ async def test_a_failed_sync_never_offers_to_build_a_profile(training_repo, git_
     assert "- **Athlete profile:** none" in output
     assert "No athlete profile yet" not in output
     assert "Don't build or save an athlete profile in this chat" in output
+
+
+# --- saved context: goals and notes are included, within a budget ----------------------
+
+def _note(day: str, body: str) -> str:
+    return f"# Consultation Notes\nDate: {day}\n\n{body}\n"
+
+
+def _days_ago(days: int) -> str:
+    from datetime import date, timedelta
+    return (date.today() - timedelta(days=days)).isoformat()
+
+
+async def test_today_is_in_the_facts(training_repo):
+    before = datetime.now()
+    output = await _start()
+    after = datetime.now()
+
+    assert any(f"- **Today:** {_formatted(moment)}, by the server's clock" in output for moment in (before, after))
+
+
+async def test_today_is_in_the_facts_without_storage_or_an_intervals_key(monkeypatch):
+    from train_with_gpt.config import config
+    monkeypatch.setattr(config, "intervals_api_key", None)
+
+    output = text_of(await start_consultation_handler({}, IntervalsClient(), IntervalsClient()))
+
+    assert "- **Today:** " in output
+
+
+async def test_saved_goals_are_included_in_full(training_repo, git_remote):
+    push_files(git_remote, {"goals.md": "# Training Goals\nSynthetic 10k under 45 minutes in spring.\n"})
+
+    output = await _start()
+
+    assert "- **Saved goals:** yes (below)" in output
+    assert "## Goals (saved)" in output
+    assert "Synthetic 10k under 45 minutes in spring." in output
+    assert output.index("Synthetic 10k") < output.index("## Step 1: Choose the path")
+    assert "the goals are cut here" not in output
+
+
+async def test_long_goals_are_cut_with_a_marker(training_repo, git_remote):
+    from train_with_gpt.tools.start_consultation import GOALS_BUDGET
+    push_files(git_remote, {"goals.md": "# Training Goals\n" + "Synthetic goal line.\n" * 400})
+
+    output = await _start()
+    goals = output.split("----- goals -----")[1].split("----- end of goals -----")[0]
+
+    assert len(goals) < GOALS_BUDGET + 200
+    assert "the goals are cut here to keep this short: read them in full with **read_goals**" in goals
+
+
+async def test_recent_notes_are_included_in_full_newest_first(training_repo, git_remote):
+    push_files(git_remote, {
+        f"notes/{_days_ago(9)}-07-00-00.md": _note("a", "Oldest synthetic note: easy week."),
+        f"notes/{_days_ago(5)}-07-00-00.md": _note("b", "Middle synthetic note: calf niggle, skip hills."),
+        f"notes/{_days_ago(1)}-07-00-00.md": _note("c", "Newest synthetic note: tempo went well."),
+    })
+
+    output = await _start()
+
+    assert f"- **Consultation notes:** 3, most recent {_days_ago(1)} (the latest 3 in full below" in output
+    assert "## Recent consultation notes (the latest 3 of 3, newest first)" in output
+    newest, middle, oldest = (output.index(text) for text in ("tempo went well", "calf niggle", "easy week"))
+    assert newest < middle < oldest < output.index("## Step 1: Choose the path")
+    assert "## Older consultation notes" not in output
+
+
+async def test_notes_past_the_budget_go_to_the_index(training_repo, git_remote):
+    from train_with_gpt.tools.start_consultation import NOTES_BUDGET
+    files = {
+        f"notes/{_days_ago(day)}-07-00-00.md": _note(str(day), f"Synthetic note {day} days ago. " + "x " * 1_500)
+        for day in range(1, 21)
+    }
+    push_files(git_remote, files)
+
+    output = await _start()
+    recent = output.split("## Recent consultation notes")[1].split("## Older consultation notes")[0]
+    index = output.split("## Older consultation notes (index: date and headline)")[1].split("## Step 1")[0]
+
+    # every full note is whole, and they fit the budget (plus room the goals and profile don't use)
+    assert "this note is cut here" not in recent
+    assert len(recent) < NOTES_BUDGET + 9_000 + 1_000
+    full = recent.count("----- note ")
+    assert MIN_FULL <= full < 20
+    assert f"Synthetic note {full} days ago" in recent
+    assert f"Synthetic note {full + 1} days ago" not in recent
+    # the next note is the first line of the index, its headline shortened
+    first_line = index.strip().splitlines()[0]
+    assert first_line.startswith(f"- {_days_ago(full + 1)} — Synthetic note {full + 1} days ago.")
+    assert len(first_line) < 160
+    assert "**search_consultation_notes**" in index and "**list_consultation_notes**" in index
+
+
+MIN_FULL = 3
+
+
+async def test_the_last_three_notes_are_always_included_even_if_huge(training_repo, git_remote):
+    from train_with_gpt.tools.start_consultation import NOTES_BUDGET
+    huge = "Synthetic huge note. " + "y " * 20_000
+    push_files(git_remote, {
+        f"notes/{_days_ago(3)}-07-00-00.md": _note("a", "Short third note."),
+        f"notes/{_days_ago(2)}-07-00-00.md": _note("b", huge),
+        f"notes/{_days_ago(1)}-07-00-00.md": _note("c", "Short newest note."),
+        f"notes/{_days_ago(4)}-07-00-00.md": _note("d", "Fourth note, index only."),
+    })
+
+    output = await _start()
+    recent = output.split("## Recent consultation notes")[1].split("## Older consultation notes")[0]
+
+    assert recent.count("----- note ") == 3
+    assert "Short newest note." in recent and "Short third note." in recent
+    assert f"this note is cut here to keep this short: read it in full with **read_consultation_notes** (note_date={_days_ago(2)})" in recent
+    assert len(recent) < NOTES_BUDGET + 9_000 + 1_000
+    assert "Fourth note, index only." not in recent
+    assert f"- {_days_ago(4)} — Fourth note, index only." in output
+
+
+async def test_the_index_covers_90_days_and_counts_the_rest(training_repo, git_remote):
+    push_files(git_remote, {
+        f"notes/{_days_ago(1)}-07-00-00.md": _note("a", "One."),
+        f"notes/{_days_ago(2)}-07-00-00.md": _note("b", "Two."),
+        f"notes/{_days_ago(3)}-07-00-00.md": _note("c", "Three."),
+        f"notes/{_days_ago(30)}-07-00-00.md": _note("d", "Thirty days: " + "z " * 12_000),
+        f"notes/{_days_ago(120)}-07-00-00.md": _note("e", "Old synthetic note."),
+        f"notes/{_days_ago(200)}-07-00-00.md": _note("f", "Older synthetic note."),
+    })
+
+    output = await _start()
+    index = output.split("## Older consultation notes (index: date and headline)")[1].split("## Step 1")[0]
+
+    assert f"- {_days_ago(30)} — Thirty days:" in index
+    assert "Old synthetic note" not in index and "Older synthetic note" not in index
+    assert f"Not listed: 2 older note(s), from {_days_ago(200)} to {_days_ago(120)}." in index
+
+
+async def test_the_whole_reply_stays_within_budget_for_a_long_history(training_repo, git_remote):
+    files = {
+        f"notes/{_days_ago(day)}-07-00-00.md": _note(str(day), f"Synthetic note {day}. " + "w " * 1_000)
+        for day in range(1, 366)
+    }
+    files["goals.md"] = "# Training Goals\n" + "Synthetic goal. " * 1_000
+    files["athlete-profile.md"] = PROFILE
+    push_files(git_remote, files)
+
+    output = await _start()
+
+    assert "- **Consultation notes:** 365" in output
+    assert len(output) < 45_000  # ~32,000 of context plus the fixed guidance
+
+
+async def test_goals_and_notes_are_per_oauth_user(training_repo, git_remote):
+    push_files(git_remote, {
+        "goals/1001.md": "# Training Goals\nOwn synthetic goal\n",
+        "notes/1001/2026-04-01-08-00-00.md": _note("a", "Own synthetic note."),
+        "goals/1002.md": "# Training Goals\nOther synthetic goal\n",
+        "notes/1002/2026-04-02-08-00-00.md": _note("b", "Other synthetic note."),
+        "goals.md": "# Training Goals\nPersonal synthetic goal\n",
+        "notes/2026-04-03-08-00-00.md": _note("c", "Personal synthetic note."),
+    })
+
+    with as_oauth_user("1001"):
+        output = await _start(_strava, _strava)
+
+    assert "Own synthetic goal" in output and "Own synthetic note." in output
+    for other in ("Other synthetic", "Personal synthetic", "1002"):
+        assert other not in output
+
+
+async def test_returning_athletes_are_told_to_read_back_and_not_to_re_read(training_repo, git_remote):
+    push_files(git_remote, {"goals.md": "# Training Goals\nSub-50 10k\n", "notes/2026-01-05-07-00-00.md": NOTE})
+
+    output = await _start()
+    path_b = output.split("## Path B")[1].split("## Important Reminders")[0]
+
+    assert "don't call read_goals or read_consultation_notes to\nread it again" in path_b
+    assert "**Then open with a read-back** (3-5 short lines), before any advice" in path_b
+    assert "If something couldn't be loaded" in path_b
+    assert "60 days" not in output
+
+
+def test_fair_shares_keep_short_items_whole():
+    from train_with_gpt.tools.start_consultation import _fair_shares
+
+    assert _fair_shares([100, 50_000, 200], 9_000) == [100, 8_700, 200]
+    assert _fair_shares([50_000, 50_000, 50_000], 9_000) == [3_000, 3_000, 3_000]
+    assert _fair_shares([10, 20], 9_000) == [10, 20]
+
+
+async def test_the_tool_description_says_to_call_it_first():
+    tool = next(tool for tool in await list_tools() if tool.name == "start_consultation")
+
+    assert tool.description.startswith("Call this first in any training conversation, before answering")
+    assert len(tool.description) < 500
+
+
+def test_the_server_tells_clients_to_start_with_start_consultation():
+    from train_with_gpt.server import app
+
+    instructions = app.create_initialization_options().instructions
+    assert instructions and "call start_consultation before answering" in instructions
+
+
+async def test_the_saved_context_costs_one_sync(training_repo, git_remote, monkeypatch):
+    from train_with_gpt.tools import start_consultation as module
+    push_files(git_remote, {"goals.md": "# Training Goals\nSub-50 10k\n", "notes/2026-01-05-07-00-00.md": NOTE,
+                            "athlete-profile.md": PROFILE})
+    real, calls = module.git_pull_and_read, []
+
+    def counting(repo_path, read):
+        calls.append(repo_path)
+        return real(repo_path, read)
+    monkeypatch.setattr(module, "git_pull_and_read", counting)
+
+    output = await _start()
+
+    assert len(calls) == 1
+    assert "Sub-50 10k" in output and "Easy week." in output and "Made-up runner" in output

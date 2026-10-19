@@ -542,7 +542,7 @@ configuration.
 
 | Tool | What it's for |
 |---|---|
-| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one, and guides Claude through onboarding a new athlete or a consultation with a returning one. |
+| `start_consultation` | The one entry point for every training chat. Reports today's date, what's saved for this athlete, which data sources are connected and whether notes storage works, and includes the saved context itself: the full athlete profile and goals, the most recent consultation notes in full (at least the last 3) and an index of the older ones from the last 90 days, kept to roughly 32,000 characters with anything cut clearly marked. Then guides Claude through onboarding a new athlete, or a consultation with a returning one that opens with a short read-back of what it knows. |
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. |
@@ -556,6 +556,13 @@ configuration.
 There is no separate goal-setting tool (`discuss_goals` was removed): goal
 setting is part of `start_consultation`'s guidance, and "update my goals"
 works in any chat.
+
+Claude should call `start_consultation` at the start of every training chat
+without being asked. Its description says so, and the server also sends MCP
+`instructions` saying the same. Claude Code uses those instructions, but
+claude.ai doesn't document whether it does. To make it reliable everywhere, add
+"In training conversations, call start_consultation first" as a Project
+instruction or in your account-wide instructions in Claude's settings.
 
 ## Troubleshooting
 
