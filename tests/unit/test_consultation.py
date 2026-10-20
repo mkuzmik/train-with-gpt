@@ -759,3 +759,45 @@ async def test_the_saved_context_costs_one_sync(training_repo, git_remote, monke
 
     assert len(calls) == 1
     assert "Sub-50 10k" in output and "Easy week." in output and "Made-up runner" in output
+
+
+async def test_a_long_history_of_short_notes_stays_within_the_budget(training_repo, git_remote):
+    # Delimiters and headers count too: with only the note text counted, a
+    # year of one-line notes rendered at about twice the notes budget.
+    from train_with_gpt.tools.start_consultation import INDEX_BUDGET, _notes_budget
+    push_files(git_remote, {
+        f"notes/{_days_ago(day)}-07-00-00-abc123.md": f"# Consultation Notes\nDate: {_days_ago(day)} 07:00\n\nOK.\n"
+        for day in range(1, 366)
+    })
+
+    output = await _start()
+    recent = output.split("use them, and don't re-read them.\n\n")[1].split("## Older consultation notes")[0]
+    index = output.split("## Older consultation notes (index: date and headline)")[1].split("## Step 1")[0]
+
+    assert recent.count("----- note ") >= 3
+    assert len(recent) <= _notes_budget(None, None)
+    assert len(index) <= INDEX_BUDGET + 500  # plus the "not listed" line and the pointers
+
+
+async def test_only_the_notes_that_are_shown_are_read(training_repo, git_remote, monkeypatch):
+    # Notes are read under the repo lock every hosted user shares: a long
+    # history mustn't mean reading every note on each consultation.
+    from pathlib import Path
+    push_files(git_remote, {
+        f"notes/{_days_ago(day)}-07-00-00.md": _note(str(day), f"Synthetic note {day}. " + "v " * 1_000)
+        for day in range(1, 366)
+    })
+    notes_dir, real_open, opened = training_repo / "notes", Path.open, set()
+
+    def tracking_open(self, *args, **kwargs):
+        if self.parent == notes_dir:
+            opened.add(self.name)
+        return real_open(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "open", tracking_open)
+
+    output = await _start()
+    shown = output.count("----- note ") + output.count(f"\n- {_days_ago(0)[:2]}")
+
+    assert "- **Consultation notes:** 365" in output
+    assert len(opened) <= shown + 1  # the first note that didn't fit is read too
+    assert len(opened) < 60

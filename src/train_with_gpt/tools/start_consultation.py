@@ -28,7 +28,6 @@ from ..helpers import (
     extract_note_headline,
     git_pull_and_read,
     read_file_if_exists,
-    read_note_files,
     user_scoped_goals_file,
     user_scoped_notes_dir,
     user_scoped_profile_file,
@@ -65,7 +64,9 @@ class TrainingHistory:
     storage: str
     goals: Optional[str] = None  # the saved goals' full text
     profile: Optional[str] = None  # the saved athlete profile's full text
-    notes: list[tuple[str, str]] = field(default_factory=list)  # (file stem, text), newest first
+    note_stems: list[str] = field(default_factory=list)  # every note's file stem, newest first
+    full_notes: list[tuple[str, str, bool]] = field(default_factory=list)  # (stem, text, was cut)
+    index: list[tuple[str, str]] = field(default_factory=list)  # (stem, headline), the next older notes
     note: Optional[str] = None  # sync note or error detail for the model
     synced: bool = True  # False: the facts come from a clone that couldn't be synced
 
@@ -79,12 +80,12 @@ class TrainingHistory:
 
     @property
     def notes_count(self) -> int:
-        return len(self.notes)
+        return len(self.note_stems)
 
     @property
     def latest_note(self) -> Optional[str]:
         """The newest note's date (YYYY-MM-DD), if any."""
-        return self.notes[0][0][:10] if self.notes else None
+        return self.note_stems[0][:10] if self.note_stems else None
 
 
 def _sync_failed(sync_note: Optional[str]) -> bool:
@@ -94,14 +95,24 @@ def _sync_failed(sync_note: Optional[str]) -> bool:
     return bool(sync_note) and any(part.startswith("(Note:") for part in sync_note.split("\n\n"))
 
 
-def _saved_history(goals_file: Path, profile_file: Path, notes_dir: Path) -> tuple[Optional[str], Optional[str], list[tuple[str, str]]]:
-    """The goals' and athlete profile's text (None if not saved) and every note
-    (newest first). Read in one go, under one sync: what goes into the reply is
-    chosen later (see _notes_sections)."""
-    return read_file_if_exists(goals_file), read_file_if_exists(profile_file), read_note_files(notes_dir)
+def _saved_history(goals_file: Path, profile_file: Path, notes_dir: Path, today: date) -> dict:
+    """The goals' and athlete profile's text (None if not saved), every note's
+    file stem (newest first), and the notes that go into the reply. Runs under
+    the repo lock, so only the notes that are used are read: the recent ones in
+    full and the start of the indexed ones (see _select_full_notes)."""
+    goals, profile = read_file_if_exists(goals_file), read_file_if_exists(profile_file)
+    paths = sorted(notes_dir.glob("*.md"), reverse=True) if notes_dir.exists() else []
+    full_notes = _select_full_notes(paths, _notes_budget(goals, profile))
+    return {
+        "goals": goals,
+        "profile": profile,
+        "note_stems": [path.stem for path in paths],
+        "full_notes": full_notes,
+        "index": _select_index(paths[len(full_notes):], today),
+    }
 
 
-def read_training_history(user_id: Optional[str]) -> TrainingHistory:
+def read_training_history(user_id: Optional[str], today: date) -> TrainingHistory:
     """Sync the training repo and read `user_id`'s goals, profile and notes (blocking)."""
     if not config.training_repo_path:
         return TrainingHistory(storage="not_configured")
@@ -115,17 +126,15 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
         goals_file, _ = user_scoped_goals_file(repo_path, user_id)
         profile_file, _ = user_scoped_profile_file(repo_path, user_id)
         notes_dir, _ = user_scoped_notes_dir(repo_path, user_id)
-        sync_note, (goals, profile, notes) = git_pull_and_read(
-            repo_path, lambda: _saved_history(goals_file, profile_file, notes_dir)
+        sync_note, saved = git_pull_and_read(
+            repo_path, lambda: _saved_history(goals_file, profile_file, notes_dir, today)
         )
     except Exception as e:  # never let a storage problem block the conversation
         print(f"Error reading training history: {e}", file=sys.stderr)
         return TrainingHistory(storage="error", note=str(e))
     return TrainingHistory(
         storage="ok",
-        goals=goals,
-        profile=profile,
-        notes=notes,
+        **saved,
         note=sync_note,
         synced=not _sync_failed(sync_note),
     )
@@ -161,7 +170,7 @@ def _today_fact(today: date) -> str:
 
 
 def _facts_section(data_client, wellness_client, history: TrainingHistory, hosted: bool,
-                   today: date, full_notes: int = 0) -> str:
+                   today: date) -> str:
     activities = "Strava" if isinstance(data_client, StravaClient) else "intervals.icu"
     wellness = (
         "not connected" if isinstance(wellness_client, StravaClient)
@@ -189,7 +198,7 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
         if history.notes_count:
             lines.append(
                 f"- **Consultation notes:** {history.notes_count}, most recent {history.latest_note} "
-                f"(the latest {full_notes} in full below, then an index of older ones)"
+                f"(the latest {len(history.full_notes)} in full below, then an index of older ones)"
             )
         else:
             lines.append("- **Consultation notes:** none")
@@ -251,6 +260,7 @@ MIN_FULL_NOTES = 3
 INDEX_BUDGET = 3_000
 INDEX_DAYS = 90
 INDEX_HEADLINE_CHARS = 120
+NOTE_START_CHARS = 2_000  # read for an index headline
 
 
 def _clip(text: str, limit: int) -> tuple[str, bool]:
@@ -277,30 +287,75 @@ def _fair_shares(lengths: list[int], budget: int) -> list[int]:
     return shares
 
 
-def _notes_budget(history: TrainingHistory) -> int:
-    unused_goals = GOALS_BUDGET - min(len((history.goals or "").strip()), GOALS_BUDGET)
-    unused_profile = PROFILE_SHARE - min(len((history.profile or "").strip()), PROFILE_SHARE)
+def _notes_budget(goals: Optional[str], profile: Optional[str]) -> int:
+    unused_goals = GOALS_BUDGET - min(len((goals or "").strip()), GOALS_BUDGET)
+    unused_profile = PROFILE_SHARE - min(len((profile or "").strip()), PROFILE_SHARE)
     return NOTES_BUDGET + unused_goals + unused_profile
 
 
-def _full_notes(notes: list[tuple[str, str]], budget: int) -> list[tuple[str, str, bool]]:
-    """The newest notes to include in full, as (stem, text, was_cut): always the
-    last MIN_FULL_NOTES (cut to share the budget if together they don't fit),
-    then older ones while they fit whole. Stops at the first that doesn't, so
-    the full notes are always the most recent ones."""
-    texts = [(stem, text.strip()) for stem, text in notes]
-    first = texts[:MIN_FULL_NOTES]
-    if sum(len(text) for _, text in first) > budget:
-        shares = _fair_shares([len(text) for _, text in first], budget)
+def _read_note(path: Path) -> str:
+    return path.read_text().strip()
+
+
+def _read_note_start(path: Path) -> str:
+    """Enough of a note for its headline (extract_note_headline)."""
+    with path.open() as f:
+        return f.read(NOTE_START_CHARS)
+
+
+def _render_note(stem: str, text: str, cut: bool) -> str:
+    """A note as it appears in the reply. The budget counts all of it, not just the text."""
+    marker = (
+        f"\n[... this note is cut here to keep this short: read it in full with "
+        f"**read_consultation_notes** (note_date={stem[:10]})]" if cut else ""
+    )
+    return f"----- note {stem[:10]} -----\n{text}{marker}\n----- end of note -----\n\n"
+
+
+def _index_line(stem: str, headline: str) -> str:
+    return f"- {stem[:10]} — {headline}"
+
+
+def _select_full_notes(paths: list[Path], budget: int) -> list[tuple[str, str, bool]]:
+    """The newest notes to include in full, as (stem, text, was_cut), from
+    `paths` (newest first): always the last MIN_FULL_NOTES (cut to share the
+    budget if together they don't fit), then older ones while they fit whole.
+    Stops at the first that doesn't, so the full notes are always the most
+    recent ones, and no note past it is read."""
+    first = [(path.stem, _read_note(path)) for path in paths[:MIN_FULL_NOTES]]
+    used = sum(len(_render_note(stem, text, False)) for stem, text in first)
+    if used > budget:
+        # Every note may end up cut: leave room for its delimiters and marker.
+        frame = sum(len(_render_note(stem, "", True)) for stem, _ in first)
+        shares = _fair_shares([len(text) for _, text in first], budget - frame)
         return [(stem, *_clip(text, share)) for (stem, text), share in zip(first, shares)]
     full = [(stem, text, False) for stem, text in first]
-    used = sum(len(text) for _, text in first)
-    for stem, text in texts[MIN_FULL_NOTES:]:
-        if used + len(text) > budget:
+    for path in paths[MIN_FULL_NOTES:]:
+        text = _read_note(path)
+        size = len(_render_note(path.stem, text, False))
+        if used + size > budget:
             break
-        full.append((stem, text, False))
-        used += len(text)
+        full.append((path.stem, text, False))
+        used += size
     return full
+
+
+def _select_index(paths: list[Path], today: date) -> list[tuple[str, str]]:
+    """(stem, headline) of the notes in `paths` (newest first) that go into
+    the index: those from the last INDEX_DAYS days, while they fit
+    INDEX_BUDGET. Only the start of each listed note is read."""
+    cutoff = (today - timedelta(days=INDEX_DAYS)).isoformat()
+    index, used = [], 0
+    for path in paths:
+        if path.stem[:10] < cutoff:
+            break
+        headline = extract_note_headline(_read_note_start(path), max_length=INDEX_HEADLINE_CHARS)
+        size = len(_index_line(path.stem, headline)) + 1
+        if used + size > INDEX_BUDGET:
+            break
+        index.append((path.stem, headline))
+        used += size
+    return index
 
 
 def _goals_section(history: TrainingHistory) -> str:
@@ -318,48 +373,34 @@ def _goals_section(history: TrainingHistory) -> str:
 """
 
 
-def _notes_sections(history: TrainingHistory, today: date) -> tuple[str, int]:
-    """The recent notes in full and an index of the older ones, and how many
-    notes are in full."""
-    if history.storage != "ok" or not history.notes:
-        return "", 0
-    full = _full_notes(history.notes, _notes_budget(history))
+def _notes_sections(history: TrainingHistory) -> str:
+    """The recent notes in full and an index of the older ones."""
+    if history.storage != "ok" or not history.note_stems:
+        return ""
+    full = history.full_notes
     parts = [
         f"## Recent consultation notes (the latest {len(full)} of {history.notes_count}, newest first)\n\n"
         "These are your memory of the last consultations: use them, and don't re-read them.\n\n"
     ]
-    for stem, text, cut in full:
-        marker = (
-            f"\n[... this note is cut here to keep this short: read it in full with "
-            f"**read_consultation_notes** (note_date={stem[:10]})]" if cut else ""
-        )
-        parts.append(f"----- note {stem[:10]} -----\n{text}{marker}\n----- end of note -----\n\n")
+    parts += [_render_note(stem, text, cut) for stem, text, cut in full]
 
-    older = history.notes[len(full):]
-    if older:
-        cutoff = (today - timedelta(days=INDEX_DAYS)).isoformat()
-        lines, used = [], 0
-        for stem, text in older:
-            line = f"- {stem[:10]} — {extract_note_headline(text, max_length=INDEX_HEADLINE_CHARS)}"
-            if stem[:10] < cutoff or used + len(line) > INDEX_BUDGET:
-                break
-            lines.append(line)
-            used += len(line) + 1
-        rest = older[len(lines):]
+    if history.notes_count > len(full):
+        lines = [_index_line(stem, headline) for stem, headline in history.index]
+        rest = history.note_stems[len(full) + len(lines):]
         parts.append("## Older consultation notes (index: date and headline)\n\n")
         if lines:
             parts.append("\n".join(lines) + "\n\n")
         if rest:
             parts.append(
                 f"{'Not listed' if lines else 'Not listed here'}: {len(rest)} older note(s), from "
-                f"{rest[-1][0][:10]} to {rest[0][0][:10]}. "
+                f"{rest[-1][:10]} to {rest[0][:10]}. "
             )
         parts.append(
             "Read a note in full with **read_consultation_notes** (note_date=...), find a topic "
             "with **search_consultation_notes**, or see the whole index with "
             "**list_consultation_notes**.\n\n"
         )
-    return "".join(parts), len(full)
+    return "".join(parts)
 
 
 def _choose_path_section(history: TrainingHistory) -> str:
@@ -712,18 +753,16 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
     included within the budget above.
     """
     user_id = current_user_id()
-    history = await asyncio.to_thread(read_training_history, user_id)
     today = date.today()
-    notes, full_notes = _notes_sections(history, today)
+    history = await asyncio.to_thread(read_training_history, user_id, today)
 
     storage = history.storage == "ok"
     guidance = (
         "🏃 Training Consultation\n\n"
-        + _facts_section(data_client, wellness_client, history, hosted=bool(user_id),
-                         today=today, full_notes=full_notes)
+        + _facts_section(data_client, wellness_client, history, hosted=bool(user_id), today=today)
         + _profile_section(history)
         + _goals_section(history)
-        + notes
+        + _notes_sections(history)
         + _choose_path_section(history)
         + _COACHING_APPROACH
         + _data_sources_section(data_client, wellness_client)
