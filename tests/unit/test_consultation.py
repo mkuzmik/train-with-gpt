@@ -707,3 +707,14 @@ async def test_the_saved_context_costs_one_sync(training_repo, git_remote, monke
 
     assert len(calls) == 1
     assert "Sub-50 10k" in output and "Easy week." in output and "Made-up runner" in output
+
+
+async def test_without_storage_a_returning_athlete_hears_first_that_nothing_could_be_loaded():
+    stdio = await _start()
+    with as_oauth_user("1005"):
+        hosted = await _start(_strava, _strava)
+
+    for output in (stdio, hosted):
+        path_b = output.split("## Path B")[1].split("## Important Reminders")[0]
+        assert "**Open by saying** that their saved goals and past notes couldn't be loaded" in path_b
+        assert "read-back" in path_b

@@ -554,9 +554,12 @@ _PATH_B_NO_STORAGE = """## Path B: Consultation with a Returning Athlete (no not
 
 Their saved goals and past notes can't be read in this chat, so:
 
-1. Ask ONE question to recap: what they're training for right now, and anything
+1. **get_activities** - their recent training, patterns and volume
+2. **Open by saying** that their saved goals and past notes couldn't be loaded in
+   this chat, then give a short read-back of what you can see in their recent
+   training (2-3 lines)
+3. Ask ONE question to recap: what they're training for right now, and anything
    from earlier sessions they want to carry on with
-2. **get_activities** - their recent training, patterns and volume
 
 **Then begin:** acknowledge what you learned, ask ONE open question about how
 they're doing, and let the athlete guide the conversation.
