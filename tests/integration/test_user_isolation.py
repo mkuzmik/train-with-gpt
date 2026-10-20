@@ -87,6 +87,23 @@ def test_notes_are_isolated_per_user(login, git_remote):
     assert "sore knee" not in other
 
 
+def test_start_consultation_includes_only_the_callers_goals_and_notes(login):
+    alice, bob = login(ALICE), login(BOB)
+
+    alice.call_tool("save_goals", {"goals_text": "Alice: sub-3 marathon"})
+    alice.call_tool("save_consultation_notes", {"notes": "Alice: long run felt strong"})
+    bob.call_tool("save_goals", {"goals_text": "Bob: first century ride"})
+
+    alice_context = alice.call_tool("start_consultation")
+    bob_context = bob.call_tool("start_consultation")
+
+    assert "sub-3 marathon" in alice_context and "long run felt strong" in alice_context
+    assert "century" not in alice_context
+    assert "century" in bob_context
+    assert "sub-3" not in bob_context and "long run" not in bob_context
+    assert "- **Consultation notes:** none" in bob_context
+
+
 @pytest.mark.intervals_login_step
 def test_intervals_connection_is_per_user(login, http_mock):
     http_mock.get("https://intervals.icu/api/v1/athlete/0").mock(

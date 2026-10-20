@@ -1,6 +1,7 @@
 """Unit tests for the guidance tools: start_consultation (the single entry point) and get_current_date."""
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -33,7 +34,7 @@ async def test_start_consultation_points_at_the_context_tools(training_repo):
     output = text_of(await start_consultation_handler({}, _intervals(), _intervals()))
 
     assert output.startswith("🏃 Training Consultation")
-    for tool in ("get_current_date", "read_goals", "list_consultation_notes", "read_consultation_notes",
+    for tool in ("read_goals", "list_consultation_notes", "read_consultation_notes",
                  "search_consultation_notes", "get_activities", "save_goals", "save_consultation_notes"):
         assert tool in output
     assert "coach" in output.lower()
@@ -86,7 +87,7 @@ async def test_start_consultation_only_references_registered_tools(data, wellnes
     output = text_of(await start_consultation_handler({}, data(), wellness()))
 
     referenced = referenced_tool_names(output)
-    assert {"get_activities", "read_goals"} <= referenced
+    assert {"get_activities", "read_consultation_notes"} <= referenced
     assert referenced <= await _registered_tool_names()
 
 
@@ -361,7 +362,8 @@ async def test_without_storage_the_guidance_never_suggests_goals_or_notes_tools(
 
 
 async def test_with_storage_the_guidance_uses_the_goals_and_notes_tools(training_repo):
-    assert STORAGE_TOOLS <= referenced_tool_names(await _start())
+    # read_goals and list_consultation_notes aren't suggested: their content is already included.
+    assert STORAGE_TOOLS - {"read_goals", "list_consultation_notes"} <= referenced_tool_names(await _start())
 
 
 # --- the sync summary never leaks other users' files ----------------------------------
@@ -525,7 +527,7 @@ async def test_a_failed_sync_qualifies_the_included_profile(training_repo, git_r
     output = await _start()
 
     assert "Made-up runner" in output  # still shown, from the local copy
-    assert "the profile text above) come from a possibly out-of-date copy" in output
+    assert "the profile, goals and notes index above) come from a possibly out-of-date copy" in output
     assert "Don't build or save an athlete profile in this chat" in output
 
 
@@ -540,3 +542,179 @@ async def test_a_failed_sync_never_offers_to_build_a_profile(training_repo, git_
     assert "- **Athlete profile:** none" in output
     assert "No athlete profile yet" not in output
     assert "Don't build or save an athlete profile in this chat" in output
+
+
+# --- saved context: goals in full and the notes index --------------------------------
+
+def _note(day: str, body: str) -> str:
+    return f"# Consultation Notes\nDate: {day}\n\n{body}\n"
+
+
+def _days_ago(days: int) -> str:
+    from datetime import date, timedelta
+    return (date.today() - timedelta(days=days)).isoformat()
+
+
+async def test_today_is_in_the_facts(training_repo):
+    before = datetime.now()
+    output = await _start()
+    after = datetime.now()
+
+    assert any(f"- **Today:** {_formatted(moment)}, by the server's clock" in output for moment in (before, after))
+
+
+async def test_today_is_in_the_facts_without_storage_or_an_intervals_key(monkeypatch):
+    from train_with_gpt.config import config
+    monkeypatch.setattr(config, "intervals_api_key", None)
+
+    output = text_of(await start_consultation_handler({}, IntervalsClient(), IntervalsClient()))
+
+    assert "- **Today:** " in output
+
+
+async def test_saved_goals_are_included_in_full(training_repo, git_remote):
+    long_goals = "# Training Goals\n" + "".join(f"Synthetic goal line {i}.\n" for i in range(400))
+    push_files(git_remote, {"goals.md": long_goals})
+
+    output = await _start()
+
+    assert "- **Saved goals:** yes (below)" in output
+    assert "## Goals (saved)" in output
+    assert long_goals.strip() in output  # never cut
+    assert output.index("Synthetic goal line 0.") < output.index("## Step 1: Choose the path")
+
+
+async def test_the_index_lists_every_note_newest_first_without_their_text(training_repo, git_remote):
+    push_files(git_remote, {
+        f"notes/{_days_ago(day)}-07-00-00.md": _note(str(day), f"Synthetic headline {day}.\n\nSynthetic body {day}.")
+        for day in range(1, 401)
+    })
+
+    output = await _start()
+    index = output.split("## Consultation notes (index, newest first)")[1].split("## Step 1")[0]
+    lines = index.strip().splitlines()
+
+    assert "- **Consultation notes:** 400, most recent " + _days_ago(1) + " (index below)" in output
+    assert len(lines) == 400
+    assert lines[0] == f"- {_days_ago(1)} — Synthetic headline 1. Synthetic body 1."
+    assert lines[-1].startswith(f"- {_days_ago(400)} — Synthetic headline 400.")
+    assert output.index("## Consultation notes (index") < output.index("## Step 1: Choose the path")
+
+
+async def test_index_headlines_are_short_and_only_the_start_of_a_note_is_read(training_repo, git_remote, monkeypatch):
+    from train_with_gpt.tools import start_consultation as module
+    push_files(git_remote, {
+        f"notes/{_days_ago(1)}-07-00-00.md": _note("a", "Synthetic long note. " + "u " * 50_000 + "SYNTHETIC-TAIL"),
+    })
+    sizes = []
+    real_open = Path.open
+
+    def tracking_open(self, *args, **kwargs):
+        handle = real_open(self, *args, **kwargs)
+        if self.suffix == ".md" and self.parent.name == "notes":
+            real_read = handle.read
+            handle = _Recording(handle, real_read, sizes)
+        return handle
+    monkeypatch.setattr(Path, "open", tracking_open)
+
+    output = await _start()
+    line = output.split("## Consultation notes (index, newest first)")[1].strip().splitlines()[0]
+
+    assert line.startswith(f"- {_days_ago(1)} — Synthetic long note.")
+    assert len(line) < 140
+    assert "SYNTHETIC-TAIL" not in output
+    assert sizes and max(sizes) <= module.NOTE_START_CHARS
+
+
+class _Recording:
+    """A file handle whose reads record how much was read."""
+    def __init__(self, handle, read, sizes):
+        self._handle, self._read, self._sizes = handle, read, sizes
+
+    def read(self, *args):
+        data = self._read(*args)
+        self._sizes.append(len(data))
+        return data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return self._handle.__exit__(*exc)
+
+    def __getattr__(self, name):
+        return getattr(self._handle, name)
+
+
+async def test_goals_and_notes_are_per_oauth_user(training_repo, git_remote):
+    push_files(git_remote, {
+        "goals/1001.md": "# Training Goals\nOwn synthetic goal\n",
+        "notes/1001/2026-04-01-08-00-00.md": _note("a", "Own synthetic note."),
+        "goals/1002.md": "# Training Goals\nOther synthetic goal\n",
+        "notes/1002/2026-04-02-08-00-00.md": _note("b", "Other synthetic note."),
+        "goals.md": "# Training Goals\nPersonal synthetic goal\n",
+        "notes/2026-04-03-08-00-00.md": _note("c", "Personal synthetic note."),
+    })
+
+    with as_oauth_user("1001"):
+        output = await _start(_strava, _strava)
+
+    assert "Own synthetic goal" in output and "Own synthetic note." in output
+    for other in ("Other synthetic", "Personal synthetic", "1002"):
+        assert other not in output
+
+
+async def test_returning_athletes_choose_the_notes_and_open_with_a_read_back(training_repo, git_remote):
+    push_files(git_remote, {"goals.md": "# Training Goals\nSub-50 10k\n", "notes/2026-01-05-07-00-00.md": NOTE})
+
+    output = await _start()
+    path_b = output.split("## Path B")[1].split("## Important Reminders")[0]
+
+    assert "Don't call read_goals or\nlist_consultation_notes to get them again" in path_b
+    assert "**read_consultation_notes** for the notes you choose" in path_b
+    assert "**search_consultation_notes**" in path_b
+    assert "**Then open with a read-back** (3-5 short lines), before any advice" in path_b
+    assert "If something couldn't be loaded" in path_b
+    assert "60 days" not in output
+
+
+async def test_the_tool_description_says_to_call_it_first():
+    tool = next(tool for tool in await list_tools() if tool.name == "start_consultation")
+
+    assert tool.description.startswith("Call this first in any training conversation, before answering")
+    assert len(tool.description) < 500
+
+
+def test_the_server_tells_clients_to_start_with_start_consultation():
+    from train_with_gpt.server import app
+
+    instructions = app.create_initialization_options().instructions
+    assert instructions and "call start_consultation before answering" in instructions
+
+
+async def test_the_saved_context_costs_one_sync(training_repo, git_remote, monkeypatch):
+    from train_with_gpt.tools import start_consultation as module
+    push_files(git_remote, {"goals.md": "# Training Goals\nSub-50 10k\n", "notes/2026-01-05-07-00-00.md": NOTE,
+                            "athlete-profile.md": PROFILE})
+    real, calls = module.git_pull_and_read, []
+
+    def counting(repo_path, read):
+        calls.append(repo_path)
+        return real(repo_path, read)
+    monkeypatch.setattr(module, "git_pull_and_read", counting)
+
+    output = await _start()
+
+    assert len(calls) == 1
+    assert "Sub-50 10k" in output and "Easy week." in output and "Made-up runner" in output
+
+
+async def test_without_storage_a_returning_athlete_hears_first_that_nothing_could_be_loaded():
+    stdio = await _start()
+    with as_oauth_user("1005"):
+        hosted = await _start(_strava, _strava)
+
+    for output in (stdio, hosted):
+        path_b = output.split("## Path B")[1].split("## Important Reminders")[0]
+        assert "**Open by saying** that their saved goals and past notes couldn't be loaded" in path_b
+        assert "read-back" in path_b

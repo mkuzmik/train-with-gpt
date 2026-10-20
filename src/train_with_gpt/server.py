@@ -58,7 +58,15 @@ from .tools import (
 from .tools.self_test import SELF_TEST_PROMPT_NAME, self_test_prompt, self_test_prompt_result
 
 
-app = Server("train-with-gpt")
+# Sent to the client in `initialize`. Claude Code loads it; claude.ai doesn't
+# document it, so the start_consultation description says the same thing.
+SERVER_INSTRUCTIONS = (
+    "Endurance training coach. At the start of any conversation about the athlete's "
+    "training, call start_consultation before answering: it loads their profile, goals and "
+    "recent consultation notes, and says how to proceed."
+)
+
+app = Server("train-with-gpt", instructions=SERVER_INSTRUCTIONS)
 intervals = IntervalsClient()
 
 # One lock per user, shared by every StravaClient built for them, so
