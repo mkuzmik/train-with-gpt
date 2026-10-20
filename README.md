@@ -542,7 +542,7 @@ configuration.
 
 | Tool | What it's for |
 |---|---|
-| `start_consultation` | The one entry point for every training chat. Reports today's date, what's saved for this athlete, which data sources are connected and whether notes storage works, and includes the saved context itself: the full athlete profile and goals, the most recent consultation notes in full (at least the last 3) and an index of the older ones from the last 90 days, kept to roughly 32,000 characters with anything cut clearly marked. Then guides Claude through onboarding a new athlete, or a consultation with a returning one that opens with a short read-back of what it knows. |
+| `start_consultation` | The one entry point for every training chat. Reports today's date, what's saved for this athlete, which data sources are connected and whether notes storage works, and includes the saved context itself: the full athlete profile and goals, and an index of every consultation note (date and a short headline). Claude chooses which notes to read in full. Then guides Claude through onboarding a new athlete, or a consultation with a returning one that opens with a short read-back of what it knows. |
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. |
