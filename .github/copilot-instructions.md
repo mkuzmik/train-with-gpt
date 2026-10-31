@@ -30,11 +30,13 @@ description.
 
 ## 2. What a good description looks like
 
-Written for the maintainer, in terms of **functionality**, not implementation:
-what changes for users and operators, compatibility and migration risk,
-decisions for the maintainer, and how to verify. It should **not** be a
-file-by-file or class-by-class changelog ("added class X", "modified file Y");
-if the description is mostly that, say so and suggest a functional summary.
+Written for the maintainer, short and simple, in terms of **functionality**,
+not implementation: what changes for users and operators, compatibility and
+migration risk, and how to verify. A "⚠️ Decision needed" section appears only
+for critical decisions the maintainer must make; don't ask for a list of
+non-critical choices or alternatives. It should **not** be a file-by-file or
+class-by-class changelog ("added class X", "modified file Y"); if the
+description is mostly that, say so and suggest a functional summary.
 
 ## 3. Then the code
 

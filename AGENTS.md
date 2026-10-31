@@ -54,8 +54,9 @@ rules and working conventions that the README doesn't cover.
 ### PR descriptions
 
 The maintainer reviews mainly the description (and Copilot checks the diff
-against it, see `.github/copilot-instructions.md`), so it must be an accurate,
-complete account of the change:
+against it, see `.github/copilot-instructions.md`), so it must be an accurate
+account of the change, and **short and simple**: a few bullets per section, no
+walkthrough of every detail.
 
 - **Describe functionality, not implementation**: what changes for users,
   operators and AI clients calling the tools; compatibility and migration risk
@@ -70,13 +71,17 @@ complete account of the change:
   (e.g. `gh pr create --label release:minor`, or `gh pr edit <N> --add-label ...`).
   Docs-only proposals and changes that shouldn't ship on their own use
   `release:skip`. Revisit the label when a PR's scope changes.
-- **"Decisions for the owner"** section at the top: for every non-critical
-  choice you made, say what you chose and the alternatives.
-- **Critical decisions** (any reasonable implementation would be thrown away;
-  legal/policy, security-sensitive or irreversible; no sensible default):
-  stop, push what's useful, keep the PR as a draft, and put a
-  "⚠️ Decision needed" section at the top.
-- Also: summary, how to verify, and conflicts/dependencies with other open PRs.
+- **No "decisions" section for choices you could make yourself.** Pick a
+  sensible default and move on; don't list non-critical choices or their
+  alternatives, and drop a decision from the description once the maintainer
+  has made it.
+- **Critical decisions only** (any reasonable implementation would be thrown
+  away; legal/policy, security-sensitive or irreversible; no sensible default),
+  i.e. ones you can't proceed without: stop, push what's useful, keep the PR as
+  a draft, and put a short "⚠️ Decision needed" section at the top.
+- Sections: summary, compatibility (only if something changes for existing
+  users or deployments), how to verify, and conflicts/dependencies with other
+  open PRs.
 
 ### Review loop (poll → evaluate → fix)
 
