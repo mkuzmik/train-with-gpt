@@ -540,3 +540,113 @@ async def test_a_failed_sync_never_offers_to_build_a_profile(training_repo, git_
     assert "- **Athlete profile:** none" in output
     assert "No athlete profile yet" not in output
     assert "Don't build or save an athlete profile in this chat" in output
+
+
+# --- coach memory -----------------------------------------------------------------------
+
+def _memory(category: str, description: str) -> str:
+    return f"---\ncategory: {category}\ndescription: {description}\n---\n\nSynthetic body\n"
+
+
+async def test_the_memory_index_is_included_but_not_the_bodies(training_repo, git_remote):
+    push_files(git_remote, {
+        "memory/rest-days.md": _memory("Coaching approach", "Pushes back on rest days"),
+        "memory/hr-drift.md": _memory("Open threads", "HR drifts on long runs; check fueling"),
+    })
+
+    output = await _start()
+
+    assert "- **Coach memory:** 2 memories (index below)" in output
+    assert "## Your coach memory" in output
+    index = output.split("----- coach memory index -----")[1].split("----- end of coach memory index -----")[0]
+    assert "## Coaching approach (1)\n- rest-days: Pushes back on rest days" in index
+    assert "## Open threads (1)\n- hr-drift: HR drifts on long runs; check fueling" in index
+    assert "Synthetic body" not in output
+    assert "trimmed" not in output
+
+
+async def test_memory_guidance_says_save_silently_and_answer_honestly(training_repo):
+    output = await _start()
+
+    assert "- **Coach memory:** none yet" in output
+    assert "No memories saved yet." in output
+    memory = " ".join(output.split("## Your coach memory")[1].split("## Step 1")[0].split())
+    assert "Save often, silently" in memory and "don't mention it" in memory
+    assert "Update rather than duplicate" in memory
+    assert "Health** stays in the profile" in memory
+    assert "Never deny having a memory" in memory
+    assert "save_memory / update_memory" in output  # in the reminders too
+
+
+async def test_a_large_memory_is_trimmed_in_the_consultation_with_a_notice(training_repo, git_remote):
+    push_files(git_remote, {
+        f"memory/science-{i:03d}.md": _memory("Science", f"Paper {i}") for i in range(120)
+    })
+
+    output = await _start()
+
+    assert "- **Coach memory:** 120 memories" in output
+    assert "⚠️ Index trimmed: showing 100 of 120 memories; 20 left out (Science: 20)" in output
+    assert "**read_memory_index** returns them all" in output
+    assert "Paper 99" in output and "Paper 100" not in output
+
+
+async def test_notes_without_a_backfill_record_get_the_one_time_offer(training_repo, git_remote):
+    push_files(git_remote, {
+        "notes/2026-01-05-07-00-00.md": NOTE,
+        "memory/rest-days.md": _memory("Coaching approach", "Pushes back on rest days"),
+    })
+
+    output = await _start()
+
+    assert "Backfill from past notes (offer it once)" in output
+    assert "**build_memory_from_notes**" in output
+    assert 'description "Notes backfill: declined"' in output
+
+
+async def test_no_backfill_offer_without_notes(training_repo):
+    assert "Backfill from past notes" not in await _start()
+
+
+async def test_a_recorded_backfill_is_shown_instead_of_the_offer(training_repo, git_remote):
+    push_files(git_remote, {
+        "notes/2026-01-05-07-00-00.md": NOTE,
+        "memory/notes-backfill.md": _memory("Other", "Notes backfill: reviewed up to 2025-11 (in progress)"),
+    })
+
+    output = await _start()
+
+    assert "offer it once" not in output
+    assert 'the `notes-backfill` memory says: "Notes backfill: reviewed up to 2025-11 (in progress)"' in output
+    assert "offer to continue" in output
+
+
+async def test_a_failed_sync_makes_no_backfill_offer(training_repo, git_remote, tmp_path):
+    from tests.support import git
+    push_files(git_remote, {"notes/2026-01-05-07-00-00.md": NOTE})
+    git(training_repo, "pull", "--quiet")
+    git(training_repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    output = await _start()
+
+    assert "## Your coach memory" in output
+    assert "Backfill from past notes" not in output
+
+
+async def test_no_memory_section_without_notes_storage():
+    output = await _start()
+
+    assert "## Your coach memory" not in output
+    assert "save_memory" not in output
+
+
+async def test_memory_is_per_oauth_user(training_repo, git_remote):
+    push_files(git_remote, {"memory/1001/alice.md": _memory("Science", "Alice's science memory")})
+
+    with as_oauth_user("1001"):
+        alice = await _start(_strava, _strava)
+    with as_oauth_user("1002"):
+        bob = await _start(_strava, _strava)
+
+    assert "Alice's science memory" in alice
+    assert "Alice's science memory" not in bob and "- **Coach memory:** none yet" in bob

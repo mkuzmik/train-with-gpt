@@ -1,9 +1,9 @@
-"""Per-user isolation of notes, goals and athlete profiles, black box over HTTP.
+"""Per-user isolation of notes, goals, athlete profiles and coach memory, black box over HTTP.
 
 Two real OAuth logins (Alice and Bob) against one server and one shared
 training repo: each must only ever see their own `notes/<user_id>/`,
-`goals/<user_id>.md` and `athlete/<user_id>.md`, and the personal (no-OAuth)
-path sees none of them.
+`goals/<user_id>.md`, `athlete/<user_id>.md` and `memory/<user_id>/`, and the
+personal (no-OAuth) path sees none of them.
 """
 
 import pytest
@@ -85,6 +85,28 @@ def test_notes_are_isolated_per_user(login, git_remote):
     assert "calf" in listed and "knee" not in listed
     assert "calf tightness" in own
     assert "sore knee" not in other
+
+
+def test_coach_memory_is_isolated_per_user(login, git_remote):
+    alice, bob = login(ALICE), login(BOB)
+
+    saved = alice.call_tool("save_memory", {
+        "name": "rest-days", "category": "Coaching approach",
+        "description": "Alice pushes back on rest days", "content": "Frame recovery as performance",
+    })
+
+    assert f"memory/{ALICE}/rest-days.md" in saved
+    files = remote_files(git_remote)
+    assert f"memory/{ALICE}/rest-days.md" in files
+    assert not any(path.startswith(f"memory/{BOB}/") for path in files)
+
+    assert "Alice pushes back" in alice.call_tool("read_memory_index")
+    assert "Alice pushes back" in alice.call_tool("start_consultation")
+    assert "No memories saved yet" in bob.call_tool("read_memory_index")
+    assert "No memory named `rest-days`" in bob.call_tool("read_memory", {"names": ["rest-days"]})
+    assert "no memory named `rest-days`" in bob.call_tool("delete_memory", {"name": "rest-days"})
+    assert "Alice pushes back" not in bob.call_tool("start_consultation")
+    assert f"memory/{ALICE}/rest-days.md" in remote_files(git_remote)
 
 
 @pytest.mark.intervals_login_step

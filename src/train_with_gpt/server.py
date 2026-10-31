@@ -52,6 +52,18 @@ from .tools import (
     list_consultation_notes_handler,
     search_consultation_notes_tool,
     search_consultation_notes_handler,
+    read_memory_index_tool,
+    read_memory_index_handler,
+    read_memory_tool,
+    read_memory_handler,
+    save_memory_tool,
+    save_memory_handler,
+    update_memory_tool,
+    update_memory_handler,
+    delete_memory_tool,
+    delete_memory_handler,
+    build_memory_from_notes_tool,
+    build_memory_from_notes_handler,
     self_test_tool,
     self_test_handler,
 )
@@ -160,6 +172,12 @@ async def list_tools() -> list[Tool]:
         read_consultation_notes_tool(),
         list_consultation_notes_tool(),
         search_consultation_notes_tool(),
+        read_memory_index_tool(),
+        read_memory_tool(),
+        save_memory_tool(),
+        update_memory_tool(),
+        delete_memory_tool(),
+        build_memory_from_notes_tool(),
         self_test_tool(),
     ]
     # For OAuth'd users the training repo is server configuration (the handler
@@ -213,6 +231,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await list_consultation_notes_handler(arguments)
     elif name == "search_consultation_notes":
         return await search_consultation_notes_handler(arguments)
+    elif name == "read_memory_index":
+        return await read_memory_index_handler(arguments)
+    elif name == "read_memory":
+        return await read_memory_handler(arguments)
+    elif name == "save_memory":
+        return await save_memory_handler(arguments)
+    elif name == "update_memory":
+        return await update_memory_handler(arguments)
+    elif name == "delete_memory":
+        return await delete_memory_handler(arguments)
+    elif name == "build_memory_from_notes":
+        return await build_memory_from_notes_handler(arguments)
     elif name == "self_test":
         return await self_test_handler(arguments)
 

@@ -39,7 +39,8 @@ HOSTED_TOOLS = {
     "get_resting_heart_rate", "get_weight_data", "analyze_activity", "analyze_lap", "save_goals",
     "read_goals", "build_athlete_profile", "get_training_science", "read_athlete_profile", "save_athlete_profile",
     "save_consultation_notes", "read_consultation_notes", "list_consultation_notes",
-    "search_consultation_notes", "self_test",
+    "search_consultation_notes", "read_memory_index", "read_memory", "save_memory", "update_memory",
+    "delete_memory", "build_memory_from_notes", "self_test",
 }
 
 
