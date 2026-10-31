@@ -45,6 +45,16 @@ from ..memory import (
 _SUGGESTED = ", ".join(SUGGESTED_CATEGORIES)
 _SILENT = "Carry on with the conversation; there's no need to mention this to the athlete."
 _NAME_HELP = "Lowercase words joined by hyphens, e.g. `polarized-base`."
+_HOSTED_READ_FAILED = "❌ Error: the notes storage couldn't be read just now. Please try again in a moment."
+
+
+def _error_for_caller(detail: str) -> str:
+    """A read error for the caller: on the hosted server the detail (server
+    paths, git output) stays in the log and the user gets a generic line."""
+    if current_user_id():
+        print(f"[memory] storage error: {detail}", file=sys.stderr)
+        return _HOSTED_READ_FAILED
+    return f"❌ Error: {detail}"
 
 
 def _repo_or_error() -> tuple[Optional[Path], Optional[str]]:
@@ -52,7 +62,7 @@ def _repo_or_error() -> tuple[Optional[Path], Optional[str]]:
         return None, training_repo_not_configured_message()
     repo_path = Path(config.training_repo_path)
     if not repo_path.exists():
-        return None, f"❌ Error: Training repository path no longer exists: {repo_path}"
+        return None, _error_for_caller(f"Training repository path no longer exists: {repo_path}")
     return repo_path, None
 
 
@@ -132,7 +142,7 @@ async def read_memory_index_handler(arguments: dict) -> list[TextContent]:
 
     except Exception as e:
         print(f"Error reading memory index: {e}", file=sys.stderr)
-        return _text(f"❌ Error: {e}")
+        return _text(_error_for_caller(str(e)))
 
 
 # --- read_memory ----------------------------------------------------------------------
@@ -193,7 +203,7 @@ async def read_memory_handler(arguments: dict) -> list[TextContent]:
 
     except Exception as e:
         print(f"Error reading memories: {e}", file=sys.stderr)
-        return _text(f"❌ Error: {e}")
+        return _text(_error_for_caller(str(e)))
 
 
 # --- writes ---------------------------------------------------------------------------

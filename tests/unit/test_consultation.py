@@ -650,3 +650,17 @@ async def test_memory_is_per_oauth_user(training_repo, git_remote):
 
     assert "Alice's science memory" in alice
     assert "Alice's science memory" not in bob and "- **Coach memory:** none yet" in bob
+
+
+async def test_an_unreadable_memory_does_not_hide_goals_profile_and_notes(training_repo, git_remote):
+    push_files(git_remote, {"goals.md": "# Training Goals\nSub-50 10k\n", "notes/2026-01-05-07-00-00.md": NOTE})
+    from tests.support import git
+    git(training_repo, "pull", "--quiet")
+    (training_repo / "memory").mkdir()
+    (training_repo / "memory" / "broken.md").write_bytes(b"\xff\xfe not utf-8\n")
+
+    output = await _start()
+
+    assert "- **Notes storage:** set up" in output
+    assert "- **Saved goals:** yes" in output
+    assert "- **Consultation notes:** 1" in output

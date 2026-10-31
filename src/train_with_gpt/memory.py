@@ -151,7 +151,9 @@ def read_memories(memory_dir: Path) -> list[Memory]:
     memories = []
     for path in sorted(memory_dir.glob("*.md")):
         if _NAME_RE.match(path.stem) and path.is_file():
-            memories.append(parse_memory(path.stem, path.read_text()))
+            # A file edited by hand may not be valid UTF-8: show it with
+            # replacement characters rather than failing every read.
+            memories.append(parse_memory(path.stem, path.read_text(encoding="utf-8", errors="replace")))
     return memories
 
 

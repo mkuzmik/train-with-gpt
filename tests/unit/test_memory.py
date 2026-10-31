@@ -417,3 +417,22 @@ async def test_build_guidance_tracks_progress_by_exact_date_and_reads_the_goals(
     assert "after that date" in output
     assert "**read_goals**" in output
     assert "start_consultation showed them" not in output
+
+
+async def test_hosted_errors_do_not_show_server_paths(tmp_path, monkeypatch):
+    missing = tmp_path / "deleted"
+    monkeypatch.setattr(config, "training_repo_path", str(missing))
+
+    with as_oauth_user("1001"):
+        outputs = [await _index(), await _read("a"), await _save(), await _delete("a")]
+
+    for output in outputs:
+        assert output.startswith("❌")
+        assert str(tmp_path) not in output
+
+
+async def test_a_memory_with_invalid_text_encoding_is_still_indexed(training_repo, git_remote):
+    (training_repo / "memory").mkdir()
+    (training_repo / "memory" / "broken.md").write_bytes(b"---\ncategory: Science\ndescription: Bad \xff bytes\n---\n\nx\n")
+
+    assert "- broken: Bad" in await _index()
