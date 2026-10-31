@@ -7,7 +7,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, TypeVar
+from typing import Callable, Optional, TypeVar, Union
 
 T = TypeVar("T")
 
@@ -46,6 +46,13 @@ def user_scoped_profile_file(repo_path: Path, user_id: Optional[str]) -> tuple[P
     if user_id:
         return repo_path / "athlete" / f"{user_id}.md", f"athlete/{user_id}.md"
     return repo_path / "athlete-profile.md", "athlete-profile.md"
+
+
+def user_scoped_memory_dir(repo_path: Path, user_id: Optional[str]) -> tuple[Path, str]:
+    """Returns (memory_dir, relative_dir_prefix_for_git) for the coach memory of the given user, if any."""
+    if user_id:
+        return repo_path / "memory" / user_id, f"memory/{user_id}"
+    return repo_path / "memory", "memory"
 
 
 def training_repo_not_configured_message() -> str:
@@ -370,7 +377,10 @@ def _unpushed_count(repo_path: Path) -> int:
     return int(result.stdout.strip()) if result.returncode == 0 else 0
 
 
-def git_save_file(repo_path: Path, file_path: str, content: str, commit_message: str) -> str:
+FileUpdate = Union[str, None, Callable[[Optional[str]], Optional[str]]]
+
+
+def git_save_file(repo_path: Path, file_path: str, content: FileUpdate, commit_message: str) -> str:
     """
     Write `content` to `file_path`, commit it and push it, safely under
     concurrent writers.
@@ -385,7 +395,12 @@ def git_save_file(repo_path: Path, file_path: str, content: str, commit_message:
     Args:
         repo_path: Path to git repository
         file_path: Path to file relative to repo (e.g., "goals.md" or "notes/file.md")
-        content: The file's full new content
+        content: The file's full new content; None to delete the file; or a
+            function from the file's current text (None if it doesn't exist)
+            to its new content (or None to delete it). A function is called
+            under the lock after every sync, so it sees the latest version
+            (an append or an existence check can't race another writer); an
+            exception it raises aborts the save, with nothing written.
         commit_message: Git commit message
 
     Returns:
@@ -406,11 +421,20 @@ def git_save_file(repo_path: Path, file_path: str, content: str, commit_message:
             notes = "".join(f"\n\n{w}" for w in warnings)
 
             base = _head(repo_path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content)
-            add = _git(repo_path, "add", file_path)
-            if add.returncode != 0:
-                raise GitSyncError(f"Could not stage {file_path}: {_output(add)}")
+            new_content = content(read_file_if_exists(target)) if callable(content) else content
+            if new_content is None:
+                # Delete: remove a tracked file even with local edits (the
+                # deletion was asked for; a no-op if it isn't tracked), then
+                # drop an untracked leftover - only once staging worked.
+                stage = _git(repo_path, "rm", "--force", "--quiet", "--ignore-unmatch", "--", file_path)
+                if stage.returncode == 0:
+                    target.unlink(missing_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(new_content)
+                stage = _git(repo_path, "add", file_path)
+            if stage.returncode != 0:
+                raise GitSyncError(f"Could not stage {file_path}: {_output(stage)}")
             if _git(repo_path, "diff", "--cached", "--quiet", "HEAD", "--", file_path).returncode == 0:
                 if _unpushed_count(repo_path) == 0:
                     return f"{SAVE_UNCHANGED}{notes}"

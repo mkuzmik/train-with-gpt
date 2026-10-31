@@ -63,7 +63,7 @@ async def test_stdio_lists_all_tools(stdio_env):
     async with StdioServer(stdio_env) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 21
+    assert len(tools) == 27
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -84,7 +84,7 @@ async def test_console_script_serves_stdio(stdio_env):
     async with StdioServer(stdio_env, command=[CONSOLE_SCRIPT]) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 21
+    assert len(tools) == 27
     assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
 
 
@@ -100,6 +100,12 @@ async def test_stdio_notes_and_goals_round_trip_through_the_remote(stdio_env, tr
         goals = _text(await session.call_tool("read_goals", {}))
         await session.call_tool("save_athlete_profile", {"content": "## Background\n- Synthetic club runner"})
         profile = _text(await session.call_tool("read_athlete_profile", {}))
+        await session.call_tool("save_memory", {
+            "name": "tuesday-club", "category": "Data and vocabulary",
+            "description": "'Tuesday club' means 6x1k at threshold", "content": "Synthetic vocabulary note",
+        })
+        await session.call_tool("update_memory", {"name": "tuesday-club", "append": "Usually on a track"})
+        memory = _text(await session.call_tool("read_memory", {"names": ["tuesday-club"]}))
         started = _text(await session.call_tool("start_consultation", {}))
 
     assert "saved, committed and pushed to remote" in saved
@@ -114,6 +120,10 @@ async def test_stdio_notes_and_goals_round_trip_through_the_remote(stdio_env, tr
     assert "Synthetic club runner" in profile
     assert "Synthetic club runner" in remote_file(git_remote, "athlete-profile.md")
     assert "- **Athlete profile:** yes" in started and "Synthetic club runner" in started
+    # Personal path: memories live under memory/ at the repo root.
+    assert "Synthetic vocabulary note\n\nUsually on a track" in remote_file(git_remote, "memory/tuesday-club.md")
+    assert "Usually on a track" in memory
+    assert "- tuesday-club: 'Tuesday club' means 6x1k at threshold" in started
 
 
 async def test_stdio_setup_training_repo_persists_across_restarts(stdio_env, tmp_path, hermetic):

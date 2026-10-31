@@ -9,7 +9,7 @@ model, which also sees the athlete's message.
 
 import asyncio
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -25,8 +25,12 @@ from ..helpers import (
     git_pull_and_read,
     read_file_if_exists,
     user_scoped_goals_file,
+    user_scoped_memory_dir,
     user_scoped_notes_dir,
     user_scoped_profile_file,
+)
+from ..memory import (
+    BACKFILL_MEMORY_NAME, INDEX_LOAD_LIMIT, SUGGESTED_CATEGORIES, Memory, count_memories, format_index, read_memories,
 )
 from ..intervals_client import IntervalsClient
 from ..strava_client import StravaClient
@@ -41,9 +45,9 @@ def start_consultation_tool() -> Tool:
             "(introduces the tool, builds their athlete profile, sets up their goals) and for a "
             "returning one (a coaching consultation). Returns what the server knows about this "
             "athlete - whether goals, an athlete profile and consultation notes are saved, which "
-            "data sources are connected - the full athlete profile when one is saved, and "
-            "guidance for both paths; decide which one fits from those facts and the athlete's "
-            "message."
+            "data sources are connected - the full athlete profile when one is saved, the index "
+            "of your coach memory, and guidance for both paths; decide which one fits from those "
+            "facts and the athlete's message."
         ),
         inputSchema={
             "type": "object",
@@ -65,6 +69,7 @@ class TrainingHistory:
     latest_note: Optional[str] = None  # YYYY-MM-DD
     note: Optional[str] = None  # sync note or error detail for the model
     synced: bool = True  # False: the facts come from a clone that couldn't be synced
+    memories: list[Memory] = field(default_factory=list)  # the coach memory (index fields and bodies)
 
     @property
     def has_profile(self) -> bool:
@@ -78,12 +83,17 @@ def _sync_failed(sync_note: Optional[str]) -> bool:
     return bool(sync_note) and any(part.startswith("(Note:") for part in sync_note.split("\n\n"))
 
 
-def _saved_history(goals_file: Path, profile_file: Path, notes_dir: Path) -> tuple[bool, Optional[str], list[str]]:
+def _saved_history(
+    goals_file: Path, profile_file: Path, notes_dir: Path, memory_dir: Path
+) -> tuple[bool, Optional[str], list[str], list[Memory]]:
     """Whether the goals file exists, the athlete profile's text (None if not
-    saved), and the notes' dates (newest first), from file names only - no note
-    is read."""
+    saved), the notes' dates (newest first), from file names only - no note
+    is read - and the coach memories."""
     stems = sorted((p.stem for p in notes_dir.glob("*.md")), reverse=True) if notes_dir.exists() else []
-    return goals_file.exists(), read_file_if_exists(profile_file), [stem[:10] for stem in stems]
+    return (
+        goals_file.exists(), read_file_if_exists(profile_file), [stem[:10] for stem in stems],
+        read_memories(memory_dir),
+    )
 
 
 def read_training_history(user_id: Optional[str]) -> TrainingHistory:
@@ -100,8 +110,9 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
         goals_file, _ = user_scoped_goals_file(repo_path, user_id)
         profile_file, _ = user_scoped_profile_file(repo_path, user_id)
         notes_dir, _ = user_scoped_notes_dir(repo_path, user_id)
-        sync_note, (has_goals, profile, dates) = git_pull_and_read(
-            repo_path, lambda: _saved_history(goals_file, profile_file, notes_dir)
+        memory_dir, _ = user_scoped_memory_dir(repo_path, user_id)
+        sync_note, (has_goals, profile, dates, memories) = git_pull_and_read(
+            repo_path, lambda: _saved_history(goals_file, profile_file, notes_dir, memory_dir)
         )
     except Exception as e:  # never let a storage problem block the conversation
         print(f"Error reading training history: {e}", file=sys.stderr)
@@ -114,6 +125,7 @@ def read_training_history(user_id: Optional[str]) -> TrainingHistory:
         latest_note=dates[0] if dates else None,
         note=sync_note,
         synced=not _sync_failed(sync_note),
+        memories=memories,
     )
 
 
@@ -167,6 +179,10 @@ def _facts_section(data_client, wellness_client, history: TrainingHistory, hoste
             )
         else:
             lines.append("- **Consultation notes:** none")
+        lines.append(
+            f"- **Coach memory:** {count_memories(len(history.memories))} (index below)" if history.memories
+            else "- **Coach memory:** none yet"
+        )
         sync = _sync_fact(history.note, hosted)
         if sync:
             lines.append(f"- **Sync:** {sync}")
@@ -206,6 +222,77 @@ whole profile with **save_athlete_profile** once they confirm.
 ----- athlete profile -----
 {history.profile.strip()}
 ----- end of athlete profile -----
+
+"""
+
+
+def _backfill_memory(history: TrainingHistory) -> Optional[Memory]:
+    return next((memory for memory in history.memories if memory.name == BACKFILL_MEMORY_NAME), None)
+
+
+def _memory_section(history: TrainingHistory) -> str:
+    """How to use the coach memory, its index (capped), and the one-time
+    backfill offer. Only when notes storage works: otherwise nothing can be
+    read or saved."""
+    if history.storage != "ok":
+        return ""
+    suggested = ", ".join(SUGGESTED_CATEGORIES)
+    if history.memories:
+        index = f"""----- coach memory index -----
+{format_index(history.memories, limit=INDEX_LOAD_LIMIT)}
+----- end of coach memory index -----"""
+    else:
+        index = "No memories saved yet."
+
+    backfill = ""
+    marker = _backfill_memory(history)
+    if history.synced and marker:
+        backfill = f"""
+**Backfill from past notes:** the `{BACKFILL_MEMORY_NAME}` memory says: "{marker.description}". If
+it's still in progress, offer to continue at a natural moment (**build_memory_from_notes**);
+if it's done or was declined, don't offer it again (the athlete can still ask for it).
+"""
+    elif history.synced and history.notes_count:
+        backfill = f"""
+**Backfill from past notes (offer it once):** this athlete has consultation notes, and
+there's no record of moving what they hold into your memory yet (no `{BACKFILL_MEMORY_NAME}`
+memory). Once the athlete's first question is dealt with,
+offer a one-time pass that moves what's still useful from past notes into your memory
+(**build_memory_from_notes**). If you're also offering to build the athlete profile, do
+that first and leave this offer for a later chat. Whatever they answer, record it: if they
+agree, follow build_memory_from_notes (it saves the progress); if they decline, save the
+memory `{BACKFILL_MEMORY_NAME}` (category Other, description "Notes backfill: declined") so
+it isn't offered again. They can ask for it anytime.
+"""
+
+    return f"""## Your coach memory
+
+Your own working knowledge about this athlete, kept between chats: what you've learned that
+changes how you coach, but isn't a confirmed fact for the profile or tied to one
+consultation. The index below lists every memory in one line; **read_memory** gives the full
+text of what's relevant today.
+
+{index}
+{backfill}
+**How to use it (both paths):**
+- **Save often, silently.** Whenever you learn something worth keeping - the science behind
+  an approach and how it's working for this athlete, how to coach them, an open thread or
+  hypothesis to check, a data quirk or their vocabulary - save it right then with
+  **save_memory**, mid-conversation. Don't wait for the end of the chat, don't ask, and don't
+  mention it. Write candidly ("pushes back on rest days"): it's for you, not the athlete.
+- **Update rather than duplicate:** when a memory on the topic exists, **update_memory**
+  (append new evidence, or replace the text). **delete_memory** when one is wrong, resolved,
+  or moved to the profile.
+- **Categories:** reuse the ones in the index; start a new one only when nothing fits
+  (suggested starting points: {suggested}).
+- **Memory vs profile:** the profile holds conclusions the athlete confirmed; memory holds
+  working knowledge, including unconfirmed hypotheses. Once the athlete confirms one, propose
+  it for the profile and, once saved there, delete the memory.
+- **Health** stays in the profile, which needs the athlete's OK; a memory may only point to
+  it ("see profile: Health").
+- **If the athlete asks** what you remember about them, answer honestly: show the index or
+  the memories (**read_memory_index**, **read_memory**) and delete any they want gone.
+  Never deny having a memory.
 
 """
 
@@ -507,6 +594,8 @@ _PATH_B = """## Path B: Consultation with a Returning Athlete
 2. **The athlete profile** - if one is saved, it's included above in full: it's your
    baseline for who they are (no need to read it again). If none is saved, offer to
    build one (**build_athlete_profile**) at a natural moment, without forcing it.
+   **Your coach memory** - its index is above: **read_memory** the memories that matter
+   for today (open threads first).
 
 3. **read_goals** - their objectives, timeline and current block; reference them
    throughout. If no goals are saved, offer the goal-setting conversation above.
@@ -544,6 +633,7 @@ _PATH_B = """## Path B: Consultation with a Returning Athlete
 _REMINDERS = """## Important Reminders (both paths)
 - ONE question at a time - let them answer before moving on
 - Save consultation notes at the END of meaningful conversations
+- Save to your coach memory as you go, silently (save_memory / update_memory)
 - Update goals when they evolve (save_goals)
 - When a durable fact about the athlete changes (a race result, an injury, availability,
   a new conclusion about what works), propose the updated profile and save it after they
@@ -577,6 +667,7 @@ async def start_consultation_handler(arguments: dict, data_client, wellness_clie
         "🏃 Training Consultation\n\n"
         + _facts_section(data_client, wellness_client, history, hosted=bool(user_id))
         + _profile_section(history)
+        + _memory_section(history)
         + _choose_path_section(history)
         + _COACHING_APPROACH
         + _data_sources_section(data_client, wellness_client)

@@ -9,6 +9,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 - **Goal Tracking**: Set training goals and have them persist across conversations
 - **Athlete Profile**: Claude builds a short profile of you with you (background, race results, health patterns, constraints, what works), checks it against your data, and starts every consultation from it
 - **Consultation History**: Claude remembers past conversations and provides continuity
+- **Coach memory**: Claude keeps its own working memory about you (the science behind an approach and how it's working for you, how to coach you, open questions it's checking, your vocabulary), saved as it goes and loaded at the start of every consultation. See [Coach memory](#coach-memory)
 - **Smart Coaching**: Claude acts as an experienced coach who asks thoughtful questions and provides data-informed guidance
 - **Science-based advice**: a guidance tool tells Claude to research current sport science on the web, check each source before citing it, say how sure the evidence is, and refer you to a professional for red flags. It is general information, not medical advice.
 
@@ -172,9 +173,9 @@ anything. `train-with-gpt-purge-user <user_id>`, run next to the server's
 `su app -c 'train-with-gpt-purge-user <user_id>'`), removes their Strava
 tokens and name, intervals.icu key, and the server's tokens and codes for
 them. It first asks Strava to revoke the app's access (skip with
-`--no-deauthorize`). Their notes, goals and athlete profile in the training repo
-(`notes/<user_id>/`, `goals/<user_id>.md`, `athlete/<user_id>.md`) aren't
-touched; delete them there in a normal commit if needed. Git history keeps them until it's rewritten.
+`--no-deauthorize`). Their notes, goals, athlete profile and coach memory in the
+training repo (`notes/<user_id>/`, `goals/<user_id>.md`, `athlete/<user_id>.md`,
+`memory/<user_id>/`) aren't touched; delete them there in a normal commit if needed. Git history keeps them until it's rewritten.
 
 ### Running the HTTP server in Docker
 
@@ -212,9 +213,9 @@ clients, kept at mode `600`) survives `docker compose restart`/rebuilds;
 `config.json` is re-copied from the host file on every start.
 `docker compose down -v` clears the store (not the host file).
 
-**Notes/goals repo in Docker.** OAuth'd users' notes, goals and athlete
-profiles are stored per user (`notes/<user_id>/`, `goals/<user_id>.md`,
-`athlete/<user_id>.md`) in a separate, *private* git
+**Notes/goals repo in Docker.** OAuth'd users' notes, goals, athlete
+profiles and coach memory are stored per user (`notes/<user_id>/`, `goals/<user_id>.md`,
+`athlete/<user_id>.md`, `memory/<user_id>/`) in a separate, *private* git
 repo, cloned by the container on first start (`docker-entrypoint.sh`) and
 pushed to on every save. Set it up once:
 
@@ -361,8 +362,8 @@ for one user and prints a PASS/WARN/FAIL table:
 self-test"*. Claude calls the `self_test` tool and shows the table. Clients
 that support MCP prompts also offer a **self-test** prompt: it runs
 `self_test`, then calls each read-only tool once and lists the tools the
-client couldn't find. It never calls a tool that changes notes, goals or
-configuration (`self_test` itself only saves its marker file).
+client couldn't find. It never calls a tool that changes notes, goals, the
+profile, coach memory or configuration (`self_test` itself only saves its marker file).
 
 **From a terminal**, without Claude (exits non-zero if any check fails), in
 a shell inside the running container (`docker exec -it <container> sh`, or
@@ -469,7 +470,7 @@ Say: **"Start a training consultation"**
 
 Best practice: **"Start a consultation"**
 
-This single entry point tells Claude what's saved for you (goals, athlete profile, how many consultation notes) and which data sources are connected, and includes your full athlete profile when you have one; Claude decides from that and your message whether to onboard you or run a consultation. For a returning athlete it will:
+This single entry point tells Claude what's saved for you (goals, athlete profile, how many consultation notes, its coach memory) and which data sources are connected, and includes your full athlete profile when you have one and the index of its coach memory; Claude decides from that and your message whether to onboard you or run a consultation. For a returning athlete it will:
 1. Check today's date
 2. Start from your athlete profile (or offer to build one if you don't have it yet)
 3. Review your goals
@@ -504,6 +505,37 @@ At the end of a session:
 
 Your goals and consultation notes persist across conversations, giving Claude full context.
 
+### Coach memory
+
+Besides your goals, profile and notes, the coach keeps **its own memory** about
+you: working knowledge that changes how it coaches but isn't a confirmed fact
+for your profile or tied to one consultation. For example, the papers behind an
+approach and how it's working for you, "pushes back on rest days; frame recovery
+as performance", "HR drifts on runs over 2h; check fueling after the next long
+run", or what you mean by "Tuesday club".
+
+- **It's the coach's, and it's implicit.** Claude saves and updates memories on
+  its own during the chat, without asking or announcing it, and writes them
+  candidly. Memories have no dates: they're updated in place and deleted when
+  they're wrong or resolved.
+- **Memory vs profile:** the profile holds conclusions you confirmed; memory
+  can hold unconfirmed hypotheses. Once you confirm one, it moves to the
+  profile. Health details stay in the profile (which needs your OK).
+- **Each consultation starts from its index** (one line per memory, grouped
+  by category, capped at 100 entries in that view), not the full text; Claude
+  reads the memories it needs.
+- **You can always ask** "what do you remember about me?": Claude shows the
+  index or the memories and deletes any you want gone.
+- **Where it's stored:** one Markdown file per memory in your training
+  repository, `memory/<name>.md` (on a hosted server, `memory/<user_id>/<name>.md`
+  in the server's notes repository). Each file starts with its category and
+  one-line description; you can read or edit them there.
+- **Past notes:** if you already have consultation notes, the first
+  consultation offers a one-time pass that reads them a month at a time and moves
+  what's still useful into memory. Its progress is kept in a `notes-backfill`
+  memory, so a pass that ends partway continues in a later chat. You can ask for
+  it anytime.
+
 ---
 
 ### Example Workflow
@@ -536,13 +568,13 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Tools
 
-The local stdio server offers 21 tools; the hosted server offers the same
-minus `setup_training_repo` (20), because its notes storage is server
+The local stdio server offers 27 tools; the hosted server offers the same
+minus `setup_training_repo` (26), because its notes storage is server
 configuration.
 
 | Tool | What it's for |
 |---|---|
-| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one, and guides Claude through onboarding a new athlete or a consultation with a returning one. |
+| `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes, coach memory), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one and the coach memory index (capped at 100 entries, with a notice saying what was left out), and guides Claude through onboarding a new athlete or a consultation with a returning one. |
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. |
@@ -550,6 +582,8 @@ configuration.
 | `build_athlete_profile`, `read_athlete_profile`, `save_athlete_profile` | The athlete profile: the coach's confirmed conclusions about the athlete (background, race results and PBs, tests, health patterns, constraints, strengths and limiters, what works, preferences), no weekly stats. `build_athlete_profile` is guidance for building it (interview, check against 12 months of data with the existing tools, discussion); saving replaces the whole profile (`athlete-profile.md`, or `athlete/<user_id>.md` on a hosted server) and is refused over 8,000 characters. |
 | `get_training_science` | Guidance for basing advice on sport science: how to find and check research on the web, how to present it with a confidence level, safety referrals, and a list of reviewed papers to start from (not a limit). |
 | `save_consultation_notes`, `list_consultation_notes`, `read_consultation_notes`, `search_consultation_notes` | Consultation notes, one timestamped file per save. |
+| `read_memory_index`, `read_memory`, `save_memory`, `update_memory`, `delete_memory` | The coach memory (see [Coach memory](#coach-memory)): the index grouped by category (or one category), the full text of named memories, creating one (refused if the name exists), replacing or appending to one or changing its description or category, and deleting one. |
+| `build_memory_from_notes` | Guidance for the one-time backfill of the coach memory from past consultation notes, a month at a time, with progress kept in a `notes-backfill` memory. |
 | `setup_training_repo` | Local only: point the server at the notes repository that stores goals, the athlete profile and notes. |
 | `self_test` | Health check of the connector (see "Post-deploy smoke test"). |
 
@@ -742,10 +776,11 @@ uv run pytest --pdb     # drop into the debugger on failure
   operations, headlines, zones), the HTTP clients (`test_intervals_client.py`,
   `test_strava_client.py`), OAuth (`test_oauth_provider.py`,
   `test_strava_oauth.py`, `test_intervals_connect.py` for the optional
-  intervals.icu login step and `secret_box`) and one file per tool.
+  intervals.icu login step and `secret_box`) and one file per tool
+  (`test_memory.py` covers all the coach memory tools).
 - `tests/integration/`: `test_oauth_flow.py` (full OAuth round trip, then
   MCP tool calls), `test_http_auth.py` (the /mcp auth boundary),
-  `test_user_isolation.py` (per-user notes, goals and athlete profiles) and
+  `test_user_isolation.py` (per-user notes, goals, athlete profiles and coach memory) and
   `test_personal_server.py` (the stdio server).
 
 ## Extending

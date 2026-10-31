@@ -305,6 +305,62 @@ def test_save_racing_a_write_to_the_same_file_is_last_writer_wins(training_repo,
     assert_clean_and_in_sync(training_repo)
 
 
+def test_save_with_none_deletes_the_file(training_repo, git_remote):
+    git_save_file(training_repo, "memory/a.md", "a\n", "Add a")
+    (training_repo / "scratch.txt").write_text("not for commit\n")
+
+    status = git_save_file(training_repo, "memory/a.md", None, "Delete a")
+
+    assert status == " and pushed to remote"
+    assert "memory/a.md" not in remote_files(git_remote)
+    assert not (training_repo / "memory" / "a.md").exists()
+    assert "scratch.txt" not in remote_files(git_remote)
+    assert git(git_remote, "log", "-1", "--format=%s", "main").strip() == "Delete a"
+    assert_clean_and_in_sync(training_repo)
+
+
+def test_deleting_a_file_that_does_not_exist_is_unchanged(training_repo):
+    assert git_save_file(training_repo, "memory/none.md", None, "Delete") == "\n\n(No changes to commit - content unchanged)"
+
+
+def test_an_update_function_sees_the_latest_remote_version(training_repo, git_remote):
+    git_save_file(training_repo, "log.md", "one\n", "Add log")
+    push_files(git_remote, {"log.md": "one\ntwo\n"})
+    seen = []
+
+    def append(current):
+        seen.append(current)
+        return current + "three\n"
+
+    git_save_file(training_repo, "log.md", append, "Append")
+
+    assert seen == ["one\ntwo\n"]
+    assert remote_file(git_remote, "log.md") == "one\ntwo\nthree\n"
+
+
+def test_an_update_function_is_reapplied_after_losing_a_push_race(training_repo, git_remote, no_backoff):
+    git_save_file(training_repo, "log.md", "one\n", "Add log")
+    race_on_commit(training_repo, git_remote, {"log.md": "one\nfrom another device\n"})
+
+    git_save_file(training_repo, "log.md", lambda current: current + "mine\n", "Append")
+
+    assert race_runs(training_repo) == 1
+    remote = remote_file(git_remote, "log.md")
+    assert "from another device" in remote and remote.endswith("mine\n")
+    assert_clean_and_in_sync(training_repo)
+
+
+def test_an_update_function_that_raises_saves_nothing(training_repo, git_remote):
+    def refuse(current):
+        raise ValueError("exists")
+
+    with pytest.raises(ValueError, match="exists"):
+        git_save_file(training_repo, "memory/x.md", refuse, "Add x")
+
+    assert "memory/x.md" not in remote_files(git_remote)
+    assert_clean_and_in_sync(training_repo)
+
+
 def test_save_gives_up_after_bounded_retries_and_says_so(training_repo, git_remote, no_backoff):
     race_on_commit(training_repo, git_remote, {"notes/other.md": "Racing writer"}, times=100)
 
@@ -357,3 +413,14 @@ def test_concurrent_saves_and_pulls_share_the_lock(training_repo, git_remote):
 
     git(other, "pull", "--quiet")
     assert sorted(p.name for p in (other / "notes").glob("*.md")) == [f"n{i}.md" for i in range(4)]
+
+
+def test_deleting_a_locally_edited_file_deletes_it_and_commits(local_repo):
+    git_save_file(local_repo, "memory/a.md", "a\n", "Add a")
+    (local_repo / "memory" / "a.md").write_text("edited by hand, not committed\n")
+
+    git_save_file(local_repo, "memory/a.md", None, "Delete a")
+
+    assert not (local_repo / "memory" / "a.md").exists()
+    assert "memory/a.md" not in git(local_repo, "ls-tree", "-r", "--name-only", "HEAD")
+    assert git(local_repo, "status", "--porcelain") == ""
