@@ -262,7 +262,7 @@ def save_memory_tool() -> Tool:
                 },
                 "content": {"type": "string", "description": "The memory itself, in Markdown."},
             },
-            "required": ["name", "category", "description", "content"],
+            "required": ["name", "description", "content"],
         },
     )
 
@@ -313,7 +313,10 @@ def update_memory_tool() -> Tool:
                     "type": "string",
                     "description": f"New one-line description (at most {DESCRIPTION_MAX_CHARS} characters).",
                 },
-                "category": {"type": "string", "description": "Move the memory to this category."},
+                "category": {
+                    "type": "string",
+                    "description": "Move the memory to this category (\"Other\" for no category). Leave out to keep it.",
+                },
             },
             "required": ["name"],
         },
@@ -415,17 +418,17 @@ every batch so nothing is lost if the chat ends.
 
 **Before you start**
 1. **read_memory_index** for what's already saved. If there is a `{BACKFILL_MEMORY_NAME}` memory,
-   **read_memory** it: it says how far an earlier pass got. Continue with the month after the
-   last one reviewed; if it says the pass was declined, or there is none, start from the
-   oldest month.
+   **read_memory** it: it says the date an earlier pass reviewed up to. Continue with the notes
+   after that date; if it says the pass was declined, or there is none, start from the
+   oldest note.
 2. **list_consultation_notes** for the dated index of every note. Work from the oldest
    month to the newest.
 
 **For each batch (a month; a couple of weeks if a month has many notes)**
 1. **read_consultation_notes** with since/until covering the batch.
 2. Pick out what is still useful for coaching. Skip:
-   - what's already in the athlete profile or the goals (start_consultation showed them;
-     otherwise **read_athlete_profile** / **read_goals**)
+   - what's already in the athlete profile or the goals: **read_goals** once before the
+     first batch, and **read_athlete_profile** unless start_consultation included the profile
    - what's no longer true or was settled later (newer notes tell; check with
      **search_consultation_notes** when in doubt)
    - health details: they belong in the profile, with the athlete's OK. A memory may only
@@ -436,10 +439,11 @@ every batch so nothing is lost if the chat ends.
    (reuse the index's categories; suggested: {_SUGGESTED}). Write candidly; it's for you.
 4. Record progress before the next batch: **save_memory** the first time, then
    **update_memory**, `{BACKFILL_MEMORY_NAME}` in category Other, with the description
-   "Notes backfill: reviewed up to YYYY-MM (in progress)".
+   "Notes backfill: reviewed up to YYYY-MM-DD (in progress)", with the batch's last day (the
+   `until` date you read up to), so the next batch starts after that date.
 
 **When every month is done:** set the `{BACKFILL_MEMORY_NAME}` description to "Notes backfill:
-done, reviewed through YYYY-MM". The athlete asked for this pass, so tell them briefly that
+done, reviewed through YYYY-MM-DD". The athlete asked for this pass, so tell them briefly that
 it's done; don't list every memory unless they ask.
 
 **Keep the athlete first:** the pass takes many tool calls. If they want to talk about

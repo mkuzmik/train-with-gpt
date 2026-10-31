@@ -381,7 +381,7 @@ async def test_build_guidance_works_in_batches_and_keeps_progress():
 
     assert "a month" in output
     assert "`notes-backfill`" in output
-    assert "reviewed up to YYYY-MM (in progress)" in output
+    assert "reviewed up to YYYY-MM-DD (in progress)" in output
     assert "already in the athlete profile or the goals" in output
     assert "no longer true" in output
     assert "health details" in output.lower()
@@ -399,3 +399,21 @@ async def test_counts_read_naturally(training_repo):
     await _save()
 
     assert (await _index()).startswith("Coach memory: 1 memory in 1 category.")
+
+
+async def test_save_without_a_category_is_allowed_by_the_schema_and_goes_under_other(training_repo, git_remote):
+    from train_with_gpt.tools import save_memory_tool
+
+    assert "category" not in save_memory_tool().inputSchema["required"]
+    output = text_of(await save_memory_handler({"name": "loose", "description": "d", "content": "c"}))
+
+    assert "saved in Other" in output
+
+
+async def test_build_guidance_tracks_progress_by_exact_date_and_reads_the_goals():
+    output = text_of(await build_memory_from_notes_handler({}))
+
+    assert "reviewed up to YYYY-MM-DD (in progress)" in output
+    assert "after that date" in output
+    assert "**read_goals**" in output
+    assert "start_consultation showed them" not in output

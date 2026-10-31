@@ -611,13 +611,13 @@ async def test_no_backfill_offer_without_notes(training_repo):
 async def test_a_recorded_backfill_is_shown_instead_of_the_offer(training_repo, git_remote):
     push_files(git_remote, {
         "notes/2026-01-05-07-00-00.md": NOTE,
-        "memory/notes-backfill.md": _memory("Other", "Notes backfill: reviewed up to 2025-11 (in progress)"),
+        "memory/notes-backfill.md": _memory("Other", "Notes backfill: reviewed up to 2025-11-15 (in progress)"),
     })
 
     output = await _start()
 
     assert "offer it once" not in output
-    assert 'the `notes-backfill` memory says: "Notes backfill: reviewed up to 2025-11 (in progress)"' in output
+    assert 'the `notes-backfill` memory says: "Notes backfill: reviewed up to 2025-11-15 (in progress)"' in output
     assert "offer to continue" in output
 
 

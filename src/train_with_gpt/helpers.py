@@ -423,10 +423,12 @@ def git_save_file(repo_path: Path, file_path: str, content: FileUpdate, commit_m
             base = _head(repo_path)
             new_content = content(read_file_if_exists(target)) if callable(content) else content
             if new_content is None:
-                # Delete: unstage and remove a tracked file (a no-op if it isn't
-                # tracked), and drop an untracked leftover.
-                stage = _git(repo_path, "rm", "--quiet", "--ignore-unmatch", "--", file_path)
-                target.unlink(missing_ok=True)
+                # Delete: remove a tracked file even with local edits (the
+                # deletion was asked for; a no-op if it isn't tracked), then
+                # drop an untracked leftover - only once staging worked.
+                stage = _git(repo_path, "rm", "--force", "--quiet", "--ignore-unmatch", "--", file_path)
+                if stage.returncode == 0:
+                    target.unlink(missing_ok=True)
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(new_content)

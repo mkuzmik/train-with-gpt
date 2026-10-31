@@ -413,3 +413,14 @@ def test_concurrent_saves_and_pulls_share_the_lock(training_repo, git_remote):
 
     git(other, "pull", "--quiet")
     assert sorted(p.name for p in (other / "notes").glob("*.md")) == [f"n{i}.md" for i in range(4)]
+
+
+def test_deleting_a_locally_edited_file_deletes_it_and_commits(local_repo):
+    git_save_file(local_repo, "memory/a.md", "a\n", "Add a")
+    (local_repo / "memory" / "a.md").write_text("edited by hand, not committed\n")
+
+    git_save_file(local_repo, "memory/a.md", None, "Delete a")
+
+    assert not (local_repo / "memory" / "a.md").exists()
+    assert "memory/a.md" not in git(local_repo, "ls-tree", "-r", "--name-only", "HEAD")
+    assert git(local_repo, "status", "--porcelain") == ""
