@@ -247,7 +247,7 @@ async def test_save_description_allows_health_patterns_but_not_raw_panels():
 async def test_build_guidance_respects_the_wellness_range_limit():
     output = text_of(await build_athlete_profile_handler({}))
 
-    assert "at most 30 days per call" in output
+    assert "at most 366 days per call" in output
     assert "over the same period" not in output
 
 
