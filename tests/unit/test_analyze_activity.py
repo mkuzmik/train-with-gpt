@@ -139,3 +139,11 @@ async def test_strava_path_without_time_stream(http_mock):
     output = text_of(await analyze_activity_handler({"activity_id": 78}, StravaClient(access_token="t")))
 
     assert output == "❌ No time stream data available for this activity"
+
+
+async def test_strava_path_rejects_an_intervals_icu_id_without_a_request(http_mock):
+    output = text_of(await analyze_activity_handler({"activity_id": "i123"}, StravaClient(access_token="t")))
+
+    assert "isn't a Strava activity id" in output
+    assert "source='intervals_icu'" in output
+    assert not http_mock.calls

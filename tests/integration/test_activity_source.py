@@ -1,0 +1,162 @@
+"""Hosted users choose where activities come from: Strava (default) or intervals.icu.
+
+Black box over HTTP with real OAuth logins; Strava (FakeStrava) and
+intervals.icu (respx) are the only stand-ins.
+"""
+
+import base64
+
+import pytest
+from httpx import Response
+from mcp.shared.memory import create_connected_server_and_client_session
+
+from train_with_gpt.activity_source import INTERVALS_NOT_CONNECTED_MESSAGE, INTERVALS_NOT_OFFERED_MESSAGE
+from train_with_gpt.server import app as mcp_server
+
+INTERVALS = "https://intervals.icu/api/v1"
+DAY = {"start_date": "2024-01-15", "end_date": "2024-01-15"}
+ACTIVITY_TOOLS = {"get_activities", "analyze_activity", "analyze_lap"}
+
+INTERVALS_RUN = {
+    "id": "i555", "type": "Run", "distance": 8000, "moving_time": 2400,
+    "start_date": "2024-01-15T07:30:00Z", "average_heartrate": 140,
+}
+
+
+def _basic_auth_key(request) -> str:
+    return base64.b64decode(request.headers["authorization"].split()[1]).decode().split(":", 1)[1]
+
+
+def _connect_intervals(http_mock):
+    http_mock.get(f"{INTERVALS}/athlete/0").mock(return_value=Response(200, json={"id": "i1", "name": "Test"}))
+
+
+def test_hosted_activity_tools_offer_a_source_argument_defaulting_to_strava(login):
+    tools = {tool["name"]: tool for tool in login(9).list_tools()}
+
+    for name in ACTIVITY_TOOLS:
+        source = tools[name]["inputSchema"]["properties"]["source"]
+        assert source["type"] == ["string", "null"]
+        assert source["enum"] == ["strava", "intervals_icu", None]
+        assert source["default"] == "strava"
+    assert "source" not in tools["get_sleep_data"]["inputSchema"]["properties"]
+
+
+async def test_personal_path_offers_no_source_argument():
+    async with create_connected_server_and_client_session(mcp_server) as personal:
+        tools = {tool.name: tool for tool in (await personal.list_tools()).tools}
+
+    for name in ACTIVITY_TOOLS:
+        assert "source" not in tools[name].inputSchema["properties"]
+
+
+@pytest.mark.intervals_login_step
+def test_source_intervals_icu_reads_the_users_own_intervals_account(login, strava, http_mock):
+    _connect_intervals(http_mock)
+    listed = http_mock.get(f"{INTERVALS}/athlete/0/activities").mock(
+        return_value=Response(200, json=[INTERVALS_RUN])
+    )
+    mcp = login(31, intervals_api_key="users-own-key")
+    strava_calls_before = strava.activities_route.call_count
+
+    output = mcp.call_tool("get_activities", {**DAY, "source": "intervals_icu"})
+
+    assert "Found 1 activities for 2024-01-15" in output
+    assert "🔗 ID: i555" in output
+    assert _basic_auth_key(listed.calls.last.request) == "users-own-key"
+    assert strava.activities_route.call_count == strava_calls_before
+
+
+@pytest.mark.intervals_login_step
+def test_analysis_with_source_intervals_icu_uses_its_own_laps(login, http_mock):
+    """intervals.icu keeps the athlete's own lap edits (icu_intervals): here an
+    uneven 10 min warm-up + 30 min tempo split, with a different HR in each."""
+    _connect_intervals(http_mock)
+    detail = http_mock.get(f"{INTERVALS}/activity/i555").mock(return_value=Response(200, json={
+        **INTERVALS_RUN,
+        "icu_intervals": [
+            {"distance": 2000, "elapsed_time": 600, "moving_time": 600, "average_heartrate": 130,
+             "min_heartrate": 130, "max_heartrate": 130, "start_time": 0, "end_time": 600},
+            {"distance": 6000, "elapsed_time": 1800, "moving_time": 1800, "average_heartrate": 160,
+             "min_heartrate": 160, "max_heartrate": 160, "start_time": 600, "end_time": 2400},
+        ],
+    }))
+    http_mock.get(f"{INTERVALS}/activity/i555/streams").mock(return_value=Response(200, json=[
+        {"type": "time", "data": list(range(2400))},
+        {"type": "distance", "data": [i * 3.33 for i in range(2400)]},
+        {"type": "heartrate", "data": [130] * 600 + [160] * 1800},
+    ]))
+    mcp = login(32, intervals_api_key="users-own-key")
+
+    analysis = mcp.call_tool("analyze_activity", {"activity_id": "i555", "source": "intervals_icu"})
+    lap = mcp.call_tool("analyze_lap", {
+        "activity_id": "i555", "lap_number": 2, "num_splits": 2, "source": "intervals_icu",
+    })
+
+    assert "Lap 1: 2.00km | 10m00s | ❤️ min:130/avg:130/max:130 bpm" in analysis
+    assert "Lap 2: 6.00km | 30m00s | ❤️ min:160/avg:160/max:160 bpm" in analysis
+    # analyze_lap splits the edited 30 min lap, not the warm-up: HR 160 only.
+    assert "Lap duration: 30m00s  |  Split into 2 segments" in lap
+    rows = lap.split("-" * 80 + "\n", 1)[1].splitlines()
+    assert [row.split()[3:6] for row in rows] == [["15m00s", "5:00/km", "160/160/160"]] * 2
+    assert {_basic_auth_key(call.request) for call in detail.calls} == {"users-own-key"}
+
+
+def test_default_source_is_strava(login, strava):
+    strava.activities[42] = []
+    mcp = login(42)
+    mcp.list_tools()  # like a real client: the SDK then validates arguments against the schema
+
+    assert mcp.call_tool("get_activities", DAY) == "No activities found for 2024-01-15."
+    assert mcp.call_tool("get_activities", {**DAY, "source": "strava"}) == "No activities found for 2024-01-15."
+    # Some clients send null for an optional argument they leave unset.
+    assert mcp.call_tool("get_activities", {**DAY, "source": None}) == "No activities found for 2024-01-15."
+    assert strava.activities_route.call_count == 3
+
+
+@pytest.mark.intervals_login_step
+def test_source_intervals_icu_without_a_connection_explains_how_to_add_it(login, http_mock):
+    activities = http_mock.get(f"{INTERVALS}/athlete/0/activities")
+    mcp = login(43)  # skipped the intervals.icu step
+
+    for name, args in (
+        ("get_activities", DAY),
+        ("analyze_activity", {"activity_id": "i555"}),
+        ("analyze_lap", {"activity_id": "i555", "lap_number": 1, "num_splits": 2}),
+    ):
+        assert mcp.call_tool(name, {**args, "source": "intervals_icu"}) == INTERVALS_NOT_CONNECTED_MESSAGE
+    assert not activities.called
+
+
+def test_source_intervals_icu_when_the_server_does_not_offer_it(login):
+    assert login(44).call_tool("get_activities", {**DAY, "source": "intervals_icu"}) == INTERVALS_NOT_OFFERED_MESSAGE
+
+
+@pytest.mark.parametrize("source", ["garmin", ""])
+def test_unknown_source_is_rejected(login, strava, source):
+    """Only a missing or null source means the default; anything else must be valid."""
+    mcp = login(77)
+    mcp.list_tools()  # the SDK then validates arguments against the schema
+
+    result = mcp.request("tools/call", {"name": "get_activities", "arguments": {**DAY, "source": source}})
+
+    assert result.get("isError"), result
+    assert "Input validation error" in result["content"][0]["text"]
+    assert not strava.activities_route.called
+
+
+def test_unknown_source_is_rejected_by_the_handler_too(monkeypatch):
+    """Without schema validation (e.g. a client that skipped tools/list) the handler still refuses."""
+    from train_with_gpt import server
+
+    monkeypatch.setattr(server, "current_user_id", lambda: "77")
+
+    for source in ("garmin", ""):
+        client, error = server._activity_client({"source": source})
+        assert client is None
+        assert error.startswith(f"❌ Error: unknown source {source!r}")
+
+
+def test_not_connected_message_works_for_any_client():
+    """Hosted clients include mcp-remote, which has no connector to reconnect in Claude's settings."""
+    assert "sign in to this server again" in INTERVALS_NOT_CONNECTED_MESSAGE

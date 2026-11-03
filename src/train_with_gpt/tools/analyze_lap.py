@@ -4,6 +4,7 @@ import sys
 from mcp.types import Tool, TextContent
 
 from ..intervals_client import IntervalsClient
+from ..activity_source import strava_id_error
 from ..strava_client import StravaClient
 
 _STREAM_TYPES = ['time', 'distance', 'heartrate', 'velocity_smooth', 'cadence', 'watts']
@@ -213,6 +214,9 @@ async def analyze_lap_handler(arguments: dict, intervals) -> list[TextContent]:
             return [TextContent(type="text", text="❌ Error: num_splits must be >= 2")]
 
         if isinstance(intervals, StravaClient):
+            id_error = strava_id_error(activity_id_raw)
+            if id_error:
+                return [TextContent(type="text", text=id_error)]
             activity_id = int(activity_id_raw)
             resolved, error = await _resolve_strava_lap(activity_id, lap_number, intervals)
         else:
