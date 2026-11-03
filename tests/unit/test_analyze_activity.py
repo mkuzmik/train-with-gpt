@@ -62,33 +62,87 @@ async def test_multiple_fast_running_laps_use_pace_not_speed(intervals, http_moc
     assert "rpm" not in output
 
 
+def _power_zone_times(*seconds, sweet_spot=0):
+    """icu_zone_times as intervals.icu returns it: {"id", "secs"} per zone, plus a sweet-spot entry."""
+    return [{"id": f"Z{i}", "secs": secs} for i, secs in enumerate(seconds, 1)] + [{"id": "SS", "secs": sweet_spot}]
+
+
 async def test_ride_laps_show_speed_power_and_rpm(intervals, http_mock):
+    """Regression: icu_zone_times holds objects, not plain seconds (it used to crash the whole analysis)."""
     lap = {"distance": 10000, "moving_time": 1200, "average_speed": 8.33, "average_watts": 250, "average_cadence": 88}
     _stub_activity(http_mock, "i2", {
-        "id": "i2", "type": "Ride", "icu_intervals": [lap, lap],
-        "icu_power_zones": [150, 200, 999], "icu_zone_times": [600, 1200, 600],
+        "id": "i2", "type": "Ride", "icu_intervals": [lap, lap], "icu_ftp": 250,
+        "icu_hr_zones": [130, 150, 999], "icu_hr_zone_times": [600, 1200, 600],
+        # % of FTP, not watts
+        "icu_power_zones": [55, 75, 90, 999],
+        "icu_zone_times": _power_zone_times(600, 1200, 0, 600, sweet_spot=300),
     })
 
     output = text_of(await analyze_activity_handler({"activity_id": "i2"}, intervals))
 
     assert "⏱️ 30.0km/h | ⚡ 250W | 🔄 88 rpm" in output
+    assert "Heart Rate Zone Distribution" in output
     assert "Power Analysis" in output
-    assert "Zone 3 (201+ W): 10m00s (25.0%)" in output
+    assert "Zone 1 (0-55% FTP, 0-138 W): 10m00s (25.0%)" in output
+    assert "Zone 2 (56-75% FTP, 139-188 W): 20m00s (50.0%)" in output
+    assert "Zone 3" not in output.split("Power Analysis", 1)[1]  # no time there
+    assert "Zone 4 (91%+ FTP, 226+ W): 10m00s (25.0%)" in output
+
+
+async def test_power_zones_without_ftp_are_shown_as_percentages(intervals, http_mock):
+    _stub_activity(http_mock, "i4", {
+        "id": "i4", "type": "Ride",
+        "icu_power_zones": [55, 75, 999], "icu_zone_times": _power_zone_times(600, 600, 0),
+    })
+
+    output = text_of(await analyze_activity_handler({"activity_id": "i4"}, intervals))
+
+    assert "Zone 1 (0-55% FTP): 10m00s (50.0%)" in output
+    assert "Zone 2 (56-75% FTP): 10m00s (50.0%)" in output
 
 
 async def test_power_zones_fall_back_to_stream_when_not_precomputed(intervals, http_mock):
-    _stub_activity(http_mock, "i3", {"id": "i3", "type": "Ride", "icu_power_zones": [100, 200, 999]})
+    """The stream is bucketed in watts, so the %-of-FTP limits are converted first."""
+    _stub_activity(http_mock, "i3", {"id": "i3", "type": "Ride", "icu_ftp": 200, "icu_power_zones": [50, 100, 999]})
     streams = http_mock.get(f"{INTERVALS}/activity/i3/streams").mock(
-        return_value=Response(200, json=[{"type": "watts", "data": [50] * 60 + [150] * 120 + [300] * 60}])
+        return_value=Response(200, json=[{"type": "watts", "data": [90] * 60 + [150] * 120 + [300] * 60}])
     )
 
     output = text_of(await analyze_activity_handler({"activity_id": "i3"}, intervals))
 
     assert streams.calls.last.request.url.params["types"] == "watts"
     assert "No lap data available" in output
-    assert "Zone 1 (0-100 W): 1m00s (25.0%)" in output
-    assert "Zone 2 (101-200 W): 2m00s (50.0%)" in output
-    assert "Zone 3 (201+ W): 1m00s (25.0%)" in output
+    assert "Zone 1 (0-50% FTP, 0-100 W): 1m00s (25.0%)" in output
+    assert "Zone 2 (51-100% FTP, 101-200 W): 2m00s (50.0%)" in output
+    assert "Zone 3 (101%+ FTP, 201+ W): 1m00s (25.0%)" in output
+
+
+async def test_power_stream_fallback_skipped_without_ftp(intervals, http_mock):
+    """Without FTP the %-of-FTP limits can't be turned into watts, so there's nothing to bucket."""
+    _stub_activity(http_mock, "i5", {"id": "i5", "type": "Ride", "icu_power_zones": [50, 100, 999]})
+    streams = http_mock.get(f"{INTERVALS}/activity/i5/streams")
+
+    output = text_of(await analyze_activity_handler({"activity_id": "i5"}, intervals))
+
+    assert "Detailed Analysis for Activity i5" in output
+    assert "Power Analysis" not in output
+    assert not streams.called
+
+
+async def test_unreadable_power_zones_do_not_hide_the_rest(intervals, http_mock):
+    lap = {"distance": 10000, "moving_time": 1200, "average_speed": 8.33}
+    _stub_activity(http_mock, "i6", {
+        "id": "i6", "type": "Ride", "icu_intervals": [lap, lap], "icu_ftp": 250,
+        "icu_hr_zones": [130, 999], "icu_hr_zone_times": [600, 600],
+        "icu_power_zones": ["not-a-number", 999], "icu_zone_times": _power_zone_times(600, 600),
+    })
+
+    output = text_of(await analyze_activity_handler({"activity_id": "i6"}, intervals))
+
+    assert "Lap 2:" in output
+    assert "Heart Rate Zone Distribution" in output
+    assert "Couldn't read the power zones" in output
+    assert "❌" not in output
 
 
 async def test_activity_not_found(intervals, http_mock):
