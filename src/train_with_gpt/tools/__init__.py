@@ -8,6 +8,7 @@ from .get_sleep_data import get_sleep_data_tool, get_sleep_data_handler
 from .get_hrv_data import get_hrv_data_tool, get_hrv_data_handler
 from .get_resting_heart_rate import get_resting_heart_rate_tool, get_resting_heart_rate_handler
 from .get_weight_data import get_weight_data_tool, get_weight_data_handler
+from .get_wellness import get_wellness_tool, get_wellness_handler
 from .analyze_activity import analyze_activity_tool, analyze_activity_handler
 from .analyze_lap import analyze_lap_tool, analyze_lap_handler
 from .save_goals import save_goals_tool, save_goals_handler
@@ -53,6 +54,8 @@ __all__ = [
     "get_resting_heart_rate_handler",
     "get_weight_data_tool",
     "get_weight_data_handler",
+    "get_wellness_tool",
+    "get_wellness_handler",
     "analyze_activity_tool",
     "analyze_activity_handler",
     "analyze_lap_tool",

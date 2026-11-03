@@ -77,6 +77,7 @@ READ_ONLY_TOOLS = {
     "get_hrv_data": "the last 3 days (start_date/end_date)",
     "get_resting_heart_rate": "the last 3 days (start_date/end_date)",
     "get_weight_data": "the last 3 days (start_date/end_date)",
+    "get_wellness": "the last 3 days (start_date/end_date)",
 }
 READ_ONLY_TOOLS_NOT_IN_PROMPT = ("analyze_activity", "analyze_lap")
 WRITE_TOOLS = (

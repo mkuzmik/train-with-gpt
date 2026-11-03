@@ -117,7 +117,9 @@ class IntervalsClient:
             raw = response.json()
             return {item["type"]: {"data": item.get("data", [])} for item in raw}
 
-    async def get_wellness(self, oldest: str, newest: str) -> list[dict]:
+    async def get_wellness(
+        self, oldest: str, newest: str, fields: Optional[list[str]] = None
+    ) -> list[dict]:
         """
         Fetch daily wellness records (sleep, HRV, resting HR, weight, etc.)
         within a date range.
@@ -125,15 +127,19 @@ class IntervalsClient:
         Args:
             oldest: ISO date (YYYY-MM-DD), inclusive
             newest: ISO date (YYYY-MM-DD), inclusive
+            fields: Only return these fields (keeps long ranges small); all if None
 
         Returns:
             List of daily wellness dictionaries, each keyed by date via "id"
         """
+        params = {"oldest": oldest, "newest": newest}
+        if fields:
+            params["fields"] = ",".join(fields)
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.BASE_URL}/athlete/0/wellness",
                 auth=self._auth(),
-                params={"oldest": oldest, "newest": newest},
+                params=params,
                 timeout=30.0,
             )
             response.raise_for_status()
