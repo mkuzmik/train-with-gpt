@@ -36,7 +36,8 @@ def test_hosted_activity_tools_offer_a_source_argument_defaulting_to_strava(logi
 
     for name in ACTIVITY_TOOLS:
         source = tools[name]["inputSchema"]["properties"]["source"]
-        assert source["enum"] == ["strava", "intervals_icu"]
+        assert source["type"] == ["string", "null"]
+        assert source["enum"] == ["strava", "intervals_icu", None]
         assert source["default"] == "strava"
     assert "source" not in tools["get_sleep_data"]["inputSchema"]["properties"]
 
@@ -98,10 +99,13 @@ def test_analysis_with_source_intervals_icu_uses_its_own_laps(login, http_mock):
 def test_default_source_is_strava(login, strava):
     strava.activities[42] = []
     mcp = login(42)
+    mcp.list_tools()  # like a real client: the SDK then validates arguments against the schema
 
     assert mcp.call_tool("get_activities", DAY) == "No activities found for 2024-01-15."
     assert mcp.call_tool("get_activities", {**DAY, "source": "strava"}) == "No activities found for 2024-01-15."
-    assert strava.activities_route.call_count == 2
+    # Some clients send null for an optional argument they leave unset.
+    assert mcp.call_tool("get_activities", {**DAY, "source": None}) == "No activities found for 2024-01-15."
+    assert strava.activities_route.call_count == 3
 
 
 @pytest.mark.intervals_login_step
@@ -122,8 +126,26 @@ def test_source_intervals_icu_when_the_server_does_not_offer_it(login):
     assert login(44).call_tool("get_activities", {**DAY, "source": "intervals_icu"}) == INTERVALS_NOT_OFFERED_MESSAGE
 
 
-def test_unknown_source_is_rejected(login, strava):
-    output = login(77).call_tool("get_activities", {**DAY, "source": "garmin"})
+@pytest.mark.parametrize("source", ["garmin", ""])
+def test_unknown_source_is_rejected(login, strava, source):
+    """Only a missing or null source means the default; anything else must be valid."""
+    mcp = login(77)
+    mcp.list_tools()  # the SDK then validates arguments against the schema
 
-    assert output.startswith("❌ Error: unknown source 'garmin'")
+    result = mcp.request("tools/call", {"name": "get_activities", "arguments": {**DAY, "source": source}})
+
+    assert result.get("isError"), result
+    assert "Input validation error" in result["content"][0]["text"]
     assert not strava.activities_route.called
+
+
+def test_unknown_source_is_rejected_by_the_handler_too(monkeypatch):
+    """Without schema validation (e.g. a client that skipped tools/list) the handler still refuses."""
+    from train_with_gpt import server
+
+    monkeypatch.setattr(server, "current_user_id", lambda: "77")
+
+    for source in ("garmin", ""):
+        client, error = server._activity_client({"source": source})
+        assert client is None
+        assert error.startswith(f"❌ Error: unknown source {source!r}")

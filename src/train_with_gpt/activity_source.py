@@ -17,11 +17,13 @@ DEFAULT_SOURCE = STRAVA
 ACTIVITY_TOOLS = frozenset({"get_activities", "analyze_activity", "analyze_lap"})
 
 SOURCE_PARAM = {
-    "type": "string",
-    "enum": list(SOURCES),
+    # Nullable: some clients send null for an optional argument they leave unset.
+    "type": ["string", "null"],
+    "enum": [*SOURCES, None],
     "default": DEFAULT_SOURCE,
     "description": (
-        "Where to read activities from: 'strava' (default) or 'intervals_icu' (only if the athlete "
+        "Where to read activities from: 'strava' (default, also when omitted or null) or "
+        "'intervals_icu' (only if the athlete "
         "connected intervals.icu at login). intervals.icu has precomputed zones and the athlete's "
         "own lap/interval edits, so prefer it when they say they fixed or redefined laps there "
         "(e.g. a mis-pressed lap button), or when Strava's laps don't match the workout. Activity "

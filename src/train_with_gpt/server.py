@@ -173,7 +173,10 @@ def _activity_client(arguments: dict):
     if not user_id:
         return intervals, None
 
-    source = arguments.get("source") or DEFAULT_SOURCE
+    # Only a missing (or null) source means the default; any other value must be valid.
+    source = arguments.get("source")
+    if source is None:
+        source = DEFAULT_SOURCE
     if source == STRAVA:
         return data_client_for(user_id), None
     if source != INTERVALS_ICU:
