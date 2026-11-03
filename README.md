@@ -1,6 +1,6 @@
 # Train With GPT
 
-A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. It reads your training data and keeps context about your goals and training history across conversations. Where the data comes from depends on how you use it: a **hosted server** reads activities from Strava (sleep, HRV, resting heart rate and body weight only if you also connect intervals.icu), and a **local (stdio) install** reads everything from [intervals.icu](https://intervals.icu).
+A Model Context Protocol (MCP) server that turns Claude into your personal endurance training coach. It reads your training data and keeps context about your goals and training history across conversations. Where the data comes from depends on how you use it: a **hosted server** reads activities from Strava by default (if you also connect intervals.icu, it adds sleep, HRV, resting heart rate and body weight, and Claude can read activities from intervals.icu instead), and a **local (stdio) install** reads everything from [intervals.icu](https://intervals.icu).
 
 ## What This Does
 
@@ -15,14 +15,14 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 
 On a local install, all training and health data comes from a single source: your [intervals.icu](https://intervals.icu) account. intervals.icu already syncs from Strava, Garmin, and most other platforms, so if your watch/app already feeds it, no separate connection is needed here.
 
-There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Self-hosting"). Hosted users get Strava activity data only; sleep/HRV/resting HR/weight need the intervals.icu path.
+There are two ways to run it: **locally over stdio** (single user, intervals.icu API key — the Quick Start below), or as a **hosted HTTP server** (multi-user, Strava OAuth, works from the Claude mobile app — see "Self-hosting"). Hosted users get Strava activity data unless they also connect intervals.icu, which adds sleep/HRV/resting HR/weight and an alternative activity source.
 
 ## Using the hosted server
 
 If someone runs a hosted server for you, there's nothing to install. You need its connector URL, `https://<server>/mcp`.
 
 1. **Add it on claude.ai** (in a browser): Settings → Connectors → Add custom connector, and paste the URL. Custom connectors can't be added from the mobile app, but once added on claude.ai the connector syncs to Claude Desktop and mobile too. If its tools don't show up in a chat, turn the connector on from the chat's "+" / tools menu.
-2. **Sign in with Strava** and approve access. The server only lets in athletes its operator has put on its allowlist; anyone else sees a "This server is private" page after the Strava consent (see [Who can sign in](#who-can-sign-in-allowlist)). Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV, resting heart rate and body weight; you can skip it and add it later by disconnecting and reconnecting the connector.
+2. **Sign in with Strava** and approve access. The server only lets in athletes its operator has put on its allowlist; anyone else sees a "This server is private" page after the Strava consent (see [Who can sign in](#who-can-sign-in-allowlist)). Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV, resting heart rate and body weight, and for reading activities from intervals.icu; you can skip it and add it later by disconnecting and reconnecting the connector.
 3. **Type this first, in a new chat:** "Start a training consultation". It's the one entry point: the server tells Claude whether you're new (no goals, profile or notes saved yet) or returning, so the first time Claude introduces itself, builds your athlete profile and sets your goals with you, and after that it picks up from your profile, goals and past notes. Start each chat the same way; say "Save notes" at the end of a useful one.
 
 Hosted users skip the local setup below; there's no training repository to configure. To run your own hosted server, see "Self-hosting".
@@ -412,6 +412,15 @@ stored encrypted.
 - Personal intervals.icu keys have full access to the account. To cut the
   server off, regenerate your key on intervals.icu.
 
+**Activities from intervals.icu (optional).** With intervals.icu connected,
+`get_activities`, `analyze_activity` and `analyze_lap` take a `source` argument:
+`strava` (the default) or `intervals_icu`. Claude picks intervals.icu when that
+fits better, for example when you fixed or redefined laps there after a
+mis-pressed lap button, or when you ask for it. Activity ids differ between the
+two, so an activity is analysed from the source it was listed from. Without a
+connected key, `source: "intervals_icu"` answers with how to connect one. Local
+(stdio) installs don't have the argument: they always read intervals.icu.
+
 ### Operations
 
 - **Upgrading:** build and deploy the next release tag. The volume (and
@@ -433,8 +442,9 @@ stored encrypted.
 - **`mcp-remote` cache:** clients cache OAuth registrations per server URL in
   `~/.mcp-auth`. If you wipe the server's store, clear that folder too or you
   will get `400` on `/authorize`.
-- **Limitations:** OAuth'd users' activities always come from Strava.
-  Wellness (sleep/HRV/resting HR/weight) needs the optional intervals.icu key.
+- **Limitations:** OAuth'd users' activities come from Strava unless Claude
+  passes `source: "intervals_icu"`. That, and wellness (sleep/HRV/resting
+  HR/weight), needs the optional intervals.icu key.
 
 ## Usage
 
@@ -576,7 +586,7 @@ configuration.
 |---|---|
 | `start_consultation` | The one entry point for every training chat. Reports what's saved for this athlete (goals, athlete profile, number and date of consultation notes, coach memory), which data sources are connected and whether notes storage works, includes the full athlete profile when there is one and the coach memory index (capped at 100 entries, with a notice saying what was left out), and guides Claude through onboarding a new athlete or a consultation with a returning one. |
 | `get_current_date` | Today's date and weekday. |
-| `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally, Strava on the hosted server) and single-workout analysis. |
+| `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally; Strava on the hosted server, or intervals.icu with `source: "intervals_icu"` when connected) and single-workout analysis. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. |
 | `read_goals`, `save_goals` | The athlete's goals: target, date, milestones, current block (saving replaces them). |
 | `build_athlete_profile`, `read_athlete_profile`, `save_athlete_profile` | The athlete profile: the coach's confirmed conclusions about the athlete (background, race results and PBs, tests, health patterns, constraints, strengths and limiters, what works, preferences), no weekly stats. `build_athlete_profile` is guidance for building it (interview, check against 12 months of data with the existing tools, discussion); saving replaces the whole profile (`athlete-profile.md`, or `athlete/<user_id>.md` on a hosted server) and is refused over 8,000 characters. |
