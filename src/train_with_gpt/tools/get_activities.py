@@ -154,8 +154,8 @@ async def get_activities_handler(arguments: dict, intervals) -> list[TextContent
                 hr_str += " bpm"
                 stats.append(hr_str)
             
-            # Power (for cycling)
-            avg_watts = activity.get('average_watts')
+            # Power (for cycling): Strava's field, or intervals.icu's
+            avg_watts = activity.get('average_watts') or activity.get('icu_average_watts')
             if avg_watts:
                 stats.append(f"⚡ {avg_watts:.0f}W")
             
