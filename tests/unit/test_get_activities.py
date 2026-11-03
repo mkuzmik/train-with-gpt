@@ -169,15 +169,15 @@ async def test_intervals_activities_show_load_normalized_power_and_intensity(int
     assert output.splitlines()[-2].endswith("| 📈 Load 85")
 
 
-async def test_intensity_already_given_as_a_ratio_is_not_rescaled(intervals, activities_api):
+async def test_low_intensity_percentage_is_still_converted_to_a_ratio(intervals, activities_api):
     activities_api.mock(return_value=Response(200, json=[{
-        "id": "i556", "type": "Run", "distance": 10000, "moving_time": 3000, "icu_intensity": 0.91,
+        "id": "i556", "type": "Run", "distance": 10000, "moving_time": 3000, "icu_intensity": 2.0,
         "icu_training_load": 70.4, "start_date": "2024-01-12T09:00:00Z",
     }]))
 
     output = text_of(await get_activities_handler({"start_date": "2024-01-12", "end_date": "2024-01-12"}, intervals))
 
-    assert "IF 0.91" in output
+    assert "IF 0.02" in output
     assert "📈 Load 70" in output
     assert "NP" not in output
 

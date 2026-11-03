@@ -171,3 +171,23 @@ def test_schema():
     assert properties["daily"]["type"] == "boolean"
     assert "up to 366 days" in tool.description
     assert "fitness" in tool.description and "fatigue" in tool.description and "form" in tool.description
+
+
+async def test_missing_load_is_reported_as_unavailable_not_zero(intervals, wellness):
+    records = [_day(f"2024-01-{d:02d}", 40.0, 45.0) for d in range(1, 22)]
+    records[-1]["ctlLoad"] = 0  # an explicit zero in a later week stays a zero
+    wellness.mock(return_value=Response(200, json=records))
+
+    output = text_of(await get_wellness_handler({"start_date": "2024-01-01", "end_date": "2024-01-21"}, intervals))
+
+    assert "📅 2024-W01 (2024-01-01 → 2024-01-07): fitness 40 | fatigue 45 | form -5 (-12%) | week load n/a" in output
+    assert "📅 2024-W03 (2024-01-15 → 2024-01-21): fitness 40 | fatigue 45 | form -5 (-12%) | week load 0" in output
+    assert "Total load: 0" in output
+
+
+async def test_total_load_without_any_load_values_is_unavailable(intervals, wellness):
+    wellness.mock(return_value=Response(200, json=[_day("2024-01-15", 50.0, 60.0)]))
+
+    output = text_of(await get_wellness_handler({"start_date": "2024-01-15", "end_date": "2024-01-15"}, intervals))
+
+    assert "Total load: not available from intervals.icu for this period" in output

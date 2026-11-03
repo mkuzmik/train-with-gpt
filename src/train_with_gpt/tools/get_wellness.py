@@ -55,6 +55,13 @@ def get_wellness_tool() -> Tool:
     )
 
 
+def _total_load(days: list[dict]):
+    """Sum of the days' load, or None when intervals.icu returned no load at all
+    (so missing data isn't shown as a zero-load period)."""
+    loads = [d["ctlLoad"] for d in days if d.get("ctlLoad") is not None]
+    return sum(loads) if loads else None
+
+
 def _form(fitness: float, fatigue: float) -> str:
     form = fitness - fatigue
     text = f"{form:+.0f}"
@@ -94,10 +101,10 @@ def _weekly_lines(days: list[dict], start: date, end: date) -> list[str]:
         monday = date.fromisocalendar(year, week, 1)
         first, last = max(monday, start), min(monday + timedelta(days=6), end)
         partial = ", partial week" if first != monday or last != monday + timedelta(days=6) else ""
-        week_load = sum(d["ctlLoad"] for d in week_days if d.get("ctlLoad") is not None)
+        week_load = _total_load(week_days)
         lines.append(
             f"📅 {year}-W{week:02d} ({first} → {last}{partial}): "
-            f"{_values(week_days[-1])} | week load {week_load:.0f}"
+            f"{_values(week_days[-1])} | week load {'n/a' if week_load is None else f'{week_load:.0f}'}"
         )
     return lines
 
@@ -107,7 +114,7 @@ def _summary_lines(days: list[dict]) -> list[str]:
     peak = max(days, key=lambda d: d["ctl"])
     lowest_form = min(days, key=lambda d: d["ctl"] - d["atl"])
     highest_form = max(days, key=lambda d: d["ctl"] - d["atl"])
-    total_load = sum(d["ctlLoad"] for d in days if d.get("ctlLoad") is not None)
+    total_load = _total_load(days)
 
     latest_line = (
         f"   Latest ({latest['id']}): fitness {latest['ctl']:.0f}, fatigue {latest['atl']:.0f}, "
@@ -123,7 +130,8 @@ def _summary_lines(days: list[dict]) -> list[str]:
         f"   Peak fitness: {peak['ctl']:.0f} on {peak['id']}",
         f"   Lowest form: {_form(lowest_form['ctl'], lowest_form['atl'])} on {lowest_form['id']}",
         f"   Highest form: {_form(highest_form['ctl'], highest_form['atl'])} on {highest_form['id']}",
-        f"   Total load: {total_load:.0f}",
+        "   Total load: "
+        + ("not available from intervals.icu for this period" if total_load is None else f"{total_load:.0f}"),
     ]
 
 

@@ -36,11 +36,10 @@ def get_activities_tool() -> Tool:
 
 
 def _intensity_factor(value):
-    """intervals.icu reports intensity as NP / FTP * 100; show the usual ratio
-    (0.82). Values that already look like a ratio are kept as they are."""
+    """intervals.icu reports intensity as NP / FTP * 100; show the usual ratio (0.82)."""
     if value is None:
         return None
-    return value / 100 if value > 3 else value
+    return value / 100
 
 
 async def get_activities_handler(arguments: dict, intervals) -> list[TextContent]:
