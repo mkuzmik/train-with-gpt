@@ -150,8 +150,15 @@ def _intervals_key_missing(data_client) -> bool:
     return isinstance(data_client, IntervalsClient) and not data_client.api_key
 
 
+def _intervals_activities_available(data_client, wellness_client) -> bool:
+    """A hosted user who connected intervals.icu can read activities from it too."""
+    return isinstance(data_client, StravaClient) and isinstance(wellness_client, IntervalsClient)
+
+
 def _facts_section(data_client, wellness_client, history: TrainingHistory, hosted: bool) -> str:
     activities = "Strava" if isinstance(data_client, StravaClient) else "intervals.icu"
+    if _intervals_activities_available(data_client, wellness_client):
+        activities = "Strava (default); intervals.icu also connected (source='intervals_icu')"
     wellness = (
         "not connected" if isinstance(wellness_client, StravaClient)
         else "connected (intervals.icu)"
@@ -391,6 +398,15 @@ about their recent training instead, and remind them to set INTERVALS_API_KEY.
 **Training Activities ({activities_source}):**
 - **get_activities** - Recent training patterns and trends
 - **analyze_activity** - Deep dive on specific workouts with zones, intervals, splits
+
+"""
+    if _intervals_activities_available(data_client, wellness_client):
+        section += """**Activities from intervals.icu too:** get_activities, analyze_activity and
+analyze_lap read Strava by default; pass source="intervals_icu" to read the
+athlete's intervals.icu account instead. Prefer it when they say they fixed or
+redefined laps on intervals.icu (e.g. a mis-pressed lap button) or Strava's laps
+don't match the workout. Ids differ between sources: analyze with the same
+source you listed the activity from.
 
 """
     if isinstance(wellness_client, StravaClient):

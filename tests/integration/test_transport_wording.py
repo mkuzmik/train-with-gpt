@@ -96,6 +96,7 @@ def test_hosted_start_consultation_names_strava_and_no_wellness(login):
     assert "**Training Activities (Strava):**" in output
     assert "**Recovery Metrics: not connected.**" in output
     assert "intervals.icu wellness data" not in output
+    assert "source=" not in output
 
 
 @pytest.mark.intervals_login_step
@@ -107,6 +108,8 @@ def test_hosted_start_consultation_with_intervals_connected(login, http_mock):
     assert "**Training Activities (Strava):**" in output
     assert "**Recovery Metrics (intervals.icu wellness data):**" in output
     assert "not connected" not in output
+    assert "**Activities from intervals.icu too:**" in output
+    assert "intervals.icu also connected (source='intervals_icu')" in output
 
 
 async def test_stdio_start_consultation_names_intervals(stdio_env):

@@ -4,6 +4,7 @@ import sys
 from mcp.types import Tool, TextContent
 
 from ..intervals_client import IntervalsClient
+from ..activity_source import strava_id_error
 from ..strava_client import StravaClient
 from ..helpers import calculate_zone_distribution
 
@@ -347,6 +348,9 @@ async def analyze_activity_handler(arguments: dict, intervals) -> list[TextConte
             return [TextContent(type="text", text="❌ Error: activity_id is required")]
 
         if isinstance(intervals, StravaClient):
+            id_error = strava_id_error(activity_id_raw)
+            if id_error:
+                return [TextContent(type="text", text=id_error)]
             text = await _analyze_activity_strava(int(activity_id_raw), intervals)
         else:
             text = await _analyze_activity_intervals(str(activity_id_raw), intervals)

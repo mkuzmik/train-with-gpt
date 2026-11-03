@@ -182,3 +182,13 @@ async def test_strava_path_derives_lap_window_from_elapsed_times(http_mock):
     assert "Lap 2 Analysis — Activity 8" in output
     assert "Lap duration: 6m40s" in output
     assert [row.split()[3] for row in _rows(output)] == ["3m20s", "3m20s"]
+
+
+async def test_strava_path_rejects_an_intervals_icu_id_without_a_request(http_mock):
+    output = text_of(await analyze_lap_handler(
+        {"activity_id": "i123", "lap_number": 1, "num_splits": 2}, StravaClient(access_token="t"),
+    ))
+
+    assert "isn't a Strava activity id" in output
+    assert "source='intervals_icu'" in output
+    assert not http_mock.calls

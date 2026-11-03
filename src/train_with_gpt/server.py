@@ -8,6 +8,16 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import GetPromptResult, Prompt, Tool, TextContent
 
+from .activity_source import (
+    ACTIVITY_TOOLS,
+    DEFAULT_SOURCE,
+    INTERVALS_ICU,
+    INTERVALS_NOT_CONNECTED_MESSAGE,
+    INTERVALS_NOT_OFFERED_MESSAGE,
+    STRAVA,
+    invalid_source_message,
+    with_source_param,
+)
 from .helpers import current_user_id
 from .intervals_client import IntervalsClient
 from .strava_client import StravaClient
@@ -139,7 +149,11 @@ def wellness_client_for(user_id: Optional[str]):
     """
     if not user_id:
         return intervals
+    return intervals_client_for(user_id) or data_client_for(user_id)
 
+
+def intervals_client_for(user_id: str) -> Optional[IntervalsClient]:
+    """An OAuth'd user's own intervals.icu client, or None if they didn't connect one."""
     from . import secret_box, store
 
     connection = store.get_intervals_connection(user_id)
@@ -147,7 +161,37 @@ def wellness_client_for(user_id: Optional[str]):
         api_key = secret_box.decrypt(connection["encrypted_api_key"])
         if api_key:
             return IntervalsClient(api_key=api_key)
-    return data_client_for(user_id)
+    return None
+
+
+def _activity_client(arguments: dict):
+    """
+    The client for get_activities/analyze_activity/analyze_lap, or an error text.
+
+    Hosted users pick it with `source` (Strava by default, see
+    activity_source.py); stdio/personal paths always use intervals.icu.
+    """
+    user_id = current_user_id()
+    if not user_id:
+        return intervals, None
+
+    # Only a missing (or null) source means the default; any other value must be valid.
+    source = arguments.get("source")
+    if source is None:
+        source = DEFAULT_SOURCE
+    if source == STRAVA:
+        return data_client_for(user_id), None
+    if source != INTERVALS_ICU:
+        return None, invalid_source_message(source)
+
+    from . import secret_box
+
+    client = intervals_client_for(user_id)
+    if client:
+        return client, None
+    if not secret_box.is_configured():
+        return None, INTERVALS_NOT_OFFERED_MESSAGE
+    return None, INTERVALS_NOT_CONNECTED_MESSAGE
 
 
 @app.list_tools()
@@ -188,20 +232,30 @@ async def list_tools() -> list[Tool]:
     # for tools/list too. Clients with a cached tool list still get the refusal.
     if current_user_id():
         tools = [tool for tool in tools if tool.name != "setup_training_repo"]
+        # Hosted users choose where activities come from (activity_source.py).
+        tools = [with_source_param(tool) if tool.name in ACTIVITY_TOOLS else tool for tool in tools]
     return tools
 
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls."""
+    if name in ACTIVITY_TOOLS:
+        client, error = _activity_client(arguments)
+        if error:
+            return [TextContent(type="text", text=error)]
+        if name == "get_activities":
+            return await get_activities_handler(arguments, client)
+        if name == "analyze_activity":
+            return await analyze_activity_handler(arguments, client)
+        return await analyze_lap_handler(arguments, client)
+
     if name == "setup_training_repo":
         return await setup_training_repo_handler(arguments)
     elif name == "start_consultation":
         return await start_consultation_handler(arguments, _get_active_data_client(), _get_wellness_client())
     elif name == "get_current_date":
         return await get_current_date_handler(arguments)
-    elif name == "get_activities":
-        return await get_activities_handler(arguments, _get_active_data_client())
     elif name == "get_sleep_data":
         return await get_sleep_data_handler(arguments, _get_wellness_client())
     elif name == "get_hrv_data":
@@ -212,10 +266,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await get_weight_data_handler(arguments, _get_wellness_client())
     elif name == "get_wellness":
         return await get_wellness_handler(arguments, _get_wellness_client())
-    elif name == "analyze_activity":
-        return await analyze_activity_handler(arguments, _get_active_data_client())
-    elif name == "analyze_lap":
-        return await analyze_lap_handler(arguments, _get_active_data_client())
     elif name == "save_goals":
         return await save_goals_handler(arguments)
     elif name == "read_goals":
