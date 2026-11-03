@@ -158,7 +158,7 @@ async def test_strava_client_gets_all_pages_for_the_range(http_mock):
 async def test_intervals_activities_show_load_normalized_power_and_intensity(intervals, activities_api):
     activities_api.mock(return_value=Response(200, json=[{
         "id": "i555", "type": "Ride", "distance": 40000, "moving_time": 3600, "average_speed": 11.1,
-        "average_watts": 210, "icu_weighted_avg_watts": 245, "icu_intensity": 82.0,
+        "icu_average_watts": 210, "icu_weighted_avg_watts": 245, "icu_intensity": 82.0,
         "icu_training_load": 85, "start_date": "2024-01-12T09:00:00Z",
     }]))
 

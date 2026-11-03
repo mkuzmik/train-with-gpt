@@ -4,11 +4,10 @@ import sys
 from datetime import date, datetime, timedelta
 from mcp.types import Tool, TextContent
 
-from ..helpers import NO_WELLNESS_DATA_MESSAGE
+from ..helpers import NO_WELLNESS_DATA_MESSAGE, WELLNESS_MAX_RANGE_DAYS
 from ..strava_client import StravaClient
 
-# A full year covers a season or a build-up; intervals.icu returns it in one request.
-MAX_RANGE_DAYS = 366
+MAX_RANGE_DAYS = WELLNESS_MAX_RANGE_DAYS
 # Longer ranges get one row per ISO week unless daily rows are asked for.
 DAILY_ROWS_MAX_DAYS = 14
 METRICS = ("load",)
