@@ -34,9 +34,9 @@ SOURCE_PARAM = {
 
 INTERVALS_NOT_CONNECTED_MESSAGE = (
     "ℹ️ intervals.icu isn't connected for this athlete, so activities can only come from Strava "
-    "(call again without `source`, or with source='strava'). To add intervals.icu, disconnect and "
-    "reconnect this connector in Claude's settings and paste your intervals.icu API key on the "
-    "page shown after the Strava login."
+    "(call again without `source`, or with source='strava'). To add intervals.icu, sign in to this "
+    "server again (e.g. disconnect and reconnect this connector in Claude's settings) and paste "
+    "your intervals.icu API key on the page shown after the Strava login."
 )
 
 INTERVALS_NOT_OFFERED_MESSAGE = (

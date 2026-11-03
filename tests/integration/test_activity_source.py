@@ -69,20 +69,22 @@ def test_source_intervals_icu_reads_the_users_own_intervals_account(login, strav
 
 @pytest.mark.intervals_login_step
 def test_analysis_with_source_intervals_icu_uses_its_own_laps(login, http_mock):
-    """intervals.icu keeps the athlete's own lap edits (icu_intervals)."""
+    """intervals.icu keeps the athlete's own lap edits (icu_intervals): here an
+    uneven 10 min warm-up + 30 min tempo split, with a different HR in each."""
     _connect_intervals(http_mock)
     detail = http_mock.get(f"{INTERVALS}/activity/i555").mock(return_value=Response(200, json={
         **INTERVALS_RUN,
         "icu_intervals": [
-            {"distance": 4000, "elapsed_time": 1200, "moving_time": 1200, "average_heartrate": 135,
-             "start_time": 0, "end_time": 1200},
-            {"distance": 4000, "elapsed_time": 1200, "moving_time": 1200, "average_heartrate": 145,
-             "start_time": 1200, "end_time": 2400},
+            {"distance": 2000, "elapsed_time": 600, "moving_time": 600, "average_heartrate": 130,
+             "min_heartrate": 130, "max_heartrate": 130, "start_time": 0, "end_time": 600},
+            {"distance": 6000, "elapsed_time": 1800, "moving_time": 1800, "average_heartrate": 160,
+             "min_heartrate": 160, "max_heartrate": 160, "start_time": 600, "end_time": 2400},
         ],
     }))
     http_mock.get(f"{INTERVALS}/activity/i555/streams").mock(return_value=Response(200, json=[
         {"type": "time", "data": list(range(2400))},
         {"type": "distance", "data": [i * 3.33 for i in range(2400)]},
+        {"type": "heartrate", "data": [130] * 600 + [160] * 1800},
     ]))
     mcp = login(32, intervals_api_key="users-own-key")
 
@@ -91,8 +93,12 @@ def test_analysis_with_source_intervals_icu_uses_its_own_laps(login, http_mock):
         "activity_id": "i555", "lap_number": 2, "num_splits": 2, "source": "intervals_icu",
     })
 
-    assert "Detailed Analysis for Activity i555" in analysis
-    assert "Lap 2 Analysis — Activity i555" in lap
+    assert "Lap 1: 2.00km | 10m00s | ❤️ min:130/avg:130/max:130 bpm" in analysis
+    assert "Lap 2: 6.00km | 30m00s | ❤️ min:160/avg:160/max:160 bpm" in analysis
+    # analyze_lap splits the edited 30 min lap, not the warm-up: HR 160 only.
+    assert "Lap duration: 30m00s  |  Split into 2 segments" in lap
+    rows = lap.split("-" * 80 + "\n", 1)[1].splitlines()
+    assert [row.split()[3:6] for row in rows] == [["15m00s", "5:00/km", "160/160/160"]] * 2
     assert {_basic_auth_key(call.request) for call in detail.calls} == {"users-own-key"}
 
 
@@ -149,3 +155,8 @@ def test_unknown_source_is_rejected_by_the_handler_too(monkeypatch):
         client, error = server._activity_client({"source": source})
         assert client is None
         assert error.startswith(f"❌ Error: unknown source {source!r}")
+
+
+def test_not_connected_message_works_for_any_client():
+    """Hosted clients include mcp-remote, which has no connector to reconnect in Claude's settings."""
+    assert "sign in to this server again" in INTERVALS_NOT_CONNECTED_MESSAGE
