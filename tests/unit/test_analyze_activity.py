@@ -10,6 +10,7 @@ from tests.support import text_of
 from train_with_gpt.intervals_client import IntervalsClient
 from train_with_gpt.strava_client import StravaClient
 from train_with_gpt.tools import analyze_activity_handler
+from train_with_gpt.tools.analyze_activity import analyze_activity_tool
 
 INTERVALS = "https://intervals.icu/api/v1"
 STRAVA = "https://www.strava.com/api/v3"
@@ -213,3 +214,129 @@ async def test_power_stream_fallback_uses_the_displayed_watt_limits(intervals, h
     output = text_of(await analyze_activity_handler({"activity_id": "i7"}, intervals))
 
     assert "Zone 1 (0-55% FTP, 0-138 W): 1m00s (100.0%)" in output
+
+
+BALANCE_ZONES = {"icu_ftp": 200, "icu_power_zones": [50, 100, 999], "icu_zone_times": _power_zone_times(120, 120, 0)}
+
+
+def _stub_balance(http_mock, activity_id, watts, balance, time=None, activity=None):
+    _stub_activity(http_mock, activity_id, {"id": activity_id, "type": "Ride", **(BALANCE_ZONES if activity is None else activity)})
+    return http_mock.get(f"{INTERVALS}/activity/{activity_id}/streams").mock(return_value=Response(200, json=[
+        {"type": "time", "data": time if time is not None else list(range(len(watts)))},
+        {"type": "watts", "data": watts},
+        {"type": "left_right_balance", "data": balance},
+    ]))
+
+
+async def _balance_output(intervals, activity_id):
+    return text_of(await analyze_activity_handler({"activity_id": activity_id, "include_power_balance": True}, intervals))
+
+
+def test_tool_schema_offers_power_balance():
+    assert analyze_activity_tool().inputSchema["properties"]["include_power_balance"]["type"] == "boolean"
+
+
+async def test_power_balance_is_not_fetched_unless_requested(intervals, http_mock):
+    _stub_activity(http_mock, "i20", {"id": "i20", "type": "Ride", **BALANCE_ZONES})
+    streams = http_mock.get(f"{INTERVALS}/activity/i20/streams")
+
+    output = text_of(await analyze_activity_handler({"activity_id": "i20"}, intervals))
+
+    assert "Power Balance" not in output
+    assert not streams.called
+
+
+async def test_power_balance_overall_and_per_zone_are_weighted_by_power(intervals, http_mock):
+    """Equal time at 60 (100 W) and 50 (200 W) is 53.3 by power; a plain average would say 55."""
+    streams = _stub_balance(http_mock, "i21", [100] * 120 + [200] * 120, [60] * 120 + [50] * 120)
+
+    output = await _balance_output(intervals, "i21")
+
+    assert streams.calls.last.request.url.params["types"] == "time,watts,left_right_balance"
+    assert "Power Analysis" in output  # the existing zone distribution stays
+    assert "**Overall:** 46.7% left / 53.3% right" in output
+    assert "Zone 1 (0-50% FTP, 0-100 W): 40.0% left / 60.0% right (2m00s)" in output
+    assert "Zone 2 (51-100% FTP, 101-200 W): 50.0% left / 50.0% right (2m00s)" in output
+
+
+async def test_power_balance_ignores_coasting_missing_and_extreme_readings(intervals, http_mock):
+    _stub_balance(
+        http_mock, "i22",
+        [0] * 60 + [100] * 60 + [100] * 60 + [100] * 60 + [100] * 120,
+        [90] * 60 + [None] * 60 + [0] * 60 + [100] * 60 + [55] * 120,
+    )
+
+    output = await _balance_output(intervals, "i22")
+
+    assert "**Overall:** 45.0% left / 55.0% right" in output
+    assert "Zone 1 (0-50% FTP, 0-100 W): 45.0% left / 55.0% right (2m00s)" in output
+
+
+async def test_power_balance_caps_recording_gaps(intervals, http_mock):
+    """A sample after a long pause counts for 5 s, not the whole pause."""
+    _stub_balance(http_mock, "i23", [100] * 61, [50] * 60 + [90], time=list(range(60)) + [1059])
+
+    output = await _balance_output(intervals, "i23")
+
+    assert "**Overall:** 46.9% left / 53.1% right" in output
+
+
+async def test_power_balance_flags_zones_with_too_little_time(intervals, http_mock):
+    """Short zones get no figure of their own, but still count towards the overall one."""
+    _stub_balance(http_mock, "i24", [100] * 120 + [200] * 30, [50] * 120 + [80] * 30)
+
+    output = await _balance_output(intervals, "i24")
+
+    assert "Zone 1 (0-50% FTP, 0-100 W): 50.0% left / 50.0% right (2m00s)" in output
+    assert "Zone 2 (51-100% FTP, 101-200 W): too little data (0m30s)" in output
+    assert "**Overall:** 40.0% left / 60.0% right" in output
+
+
+async def test_power_balance_without_ftp_shows_only_the_overall_figure(intervals, http_mock):
+    _stub_balance(http_mock, "i25", [100] * 120, [55] * 120, activity={"icu_power_zones": [50, 100, 999]})
+
+    output = await _balance_output(intervals, "i25")
+
+    assert "**Overall:** 45.0% left / 55.0% right" in output
+    assert "By power zone" not in output
+    assert "needs the athlete's FTP and power zones" in output
+
+
+async def test_power_balance_without_data_says_so(intervals, http_mock):
+    _stub_activity(http_mock, "i26", {"id": "i26", "type": "Ride", **BALANCE_ZONES})
+    http_mock.get(f"{INTERVALS}/activity/i26/streams").mock(return_value=Response(200, json=[
+        {"type": "time", "data": [0, 1]}, {"type": "watts", "data": [100, 100]},
+    ]))
+
+    output = await _balance_output(intervals, "i26")
+
+    assert "No left/right balance data" in output
+    assert "Overall" not in output
+
+
+async def test_unreadable_power_balance_does_not_hide_the_rest(intervals, http_mock):
+    _stub_activity(http_mock, "i27", {"id": "i27", "type": "Ride", **BALANCE_ZONES})
+    http_mock.get(f"{INTERVALS}/activity/i27/streams").mock(return_value=Response(500))
+
+    output = await _balance_output(intervals, "i27")
+
+    assert "Zone 1 (0-50% FTP, 0-100 W): 2m00s (50.0%)" in output
+    assert "Couldn't read the power balance" in output
+    assert "❌" not in output
+
+
+async def test_strava_path_does_not_process_power_balance(http_mock):
+    """Strava API policy: new data features stay on the intervals.icu path."""
+    http_mock.get(f"{STRAVA}/athlete/zones").mock(return_value=Response(200, json={}))
+    http_mock.get(f"{STRAVA}/activities/79").mock(return_value=Response(200, json={"id": 79, "type": "Ride"}))
+    streams = http_mock.get(f"{STRAVA}/activities/79/streams").mock(return_value=Response(200, json={
+        "time": {"data": [0, 1]},
+    }))
+    http_mock.get(f"{STRAVA}/activities/79/laps").mock(return_value=Response(200, json=[]))
+
+    output = text_of(await analyze_activity_handler(
+        {"activity_id": "79", "include_power_balance": True}, StravaClient(access_token="t"),
+    ))
+
+    assert "only available for intervals.icu activities" in output
+    assert "left_right_balance" not in str(streams.calls.last.request.url)

@@ -8,6 +8,11 @@ from ..activity_source import strava_id_error
 from ..strava_client import StravaClient
 from ..helpers import calculate_zone_distribution
 
+# Longest time one stream sample counts for, so a recording gap doesn't count as riding.
+_MAX_SAMPLE_SECONDS = 5
+# Below this a zone's balance is mostly noise.
+_MIN_BALANCE_ZONE_SECONDS = 60
+
 
 def analyze_activity_tool() -> Tool:
     """Return the analyze_activity tool definition."""
@@ -20,6 +25,10 @@ def analyze_activity_tool() -> Tool:
                 "activity_id": {
                     "type": "string",
                     "description": "The activity ID to analyze (from get_activities).",
+                },
+                "include_power_balance": {
+                    "type": "boolean",
+                    "description": "Also show the left/right power balance, overall and per power zone. Only for intervals.icu activities, and only meaningful with a power meter that measures each leg.",
                 },
             },
             "required": ["activity_id"],
@@ -65,21 +74,27 @@ def _zone_watts(percent_of_ftp, ftp) -> int:
     return round(percent_of_ftp * ftp / 100)
 
 
+def _power_zone_range(zone_percents: list, i: int, ftp) -> str:
+    """A zone's limits for display: icu_power_zones are % of FTP, so show both % and watts."""
+    pct_min = 0 if i == 0 else zone_percents[i - 1] + 1
+    pct_max = zone_percents[i]
+    is_top = pct_max >= 999
+    zone_range = f"{pct_min}%+ FTP" if is_top else f"{pct_min}-{pct_max}% FTP"
+    if ftp:
+        watts_min = 0 if i == 0 else _zone_watts(zone_percents[i - 1], ftp) + 1
+        watts_max = _zone_watts(pct_max, ftp)
+        zone_range += f", {watts_min}+ W" if is_top else f", {watts_min}-{watts_max} W"
+    return zone_range
+
+
 def _format_power_zone_times(zone_percents: list, zone_times: list, ftp) -> list[str]:
-    """Like _format_zone_times, but icu_power_zones are % of FTP: show both % and watts."""
+    """Like _format_zone_times, for power zones."""
     total = sum(zone_times) or 1
     lines = []
     for i, seconds in enumerate(zone_times):
         if not seconds or seconds <= 0:
             continue
-        pct_min = 0 if i == 0 else zone_percents[i - 1] + 1
-        pct_max = zone_percents[i]
-        is_top = pct_max >= 999
-        zone_range = f"{pct_min}%+ FTP" if is_top else f"{pct_min}-{pct_max}% FTP"
-        if ftp:
-            watts_min = 0 if i == 0 else _zone_watts(zone_percents[i - 1], ftp) + 1
-            watts_max = _zone_watts(pct_max, ftp)
-            zone_range += f", {watts_min}+ W" if is_top else f", {watts_min}-{watts_max} W"
+        zone_range = _power_zone_range(zone_percents, i, ftp)
         percent = seconds / total * 100
         lines.append(f"  Zone {i + 1} ({zone_range}): {seconds // 60}m{seconds % 60:02d}s ({percent:.1f}%)")
     return lines
@@ -114,7 +129,71 @@ async def _power_zone_lines(activity: dict, activity_id: str, intervals: Interva
     return ["## ⚡ Power Analysis\n", "**Zone Distribution:**", *zone_lines, ""]
 
 
-async def _analyze_activity_intervals(activity_id: str, intervals: IntervalsClient) -> str:
+def _format_balance(right_percent: float) -> str:
+    return f"{100 - right_percent:.1f}% left / {right_percent:.1f}% right"
+
+
+async def _power_balance_lines(activity: dict, activity_id: str, intervals: IntervalsClient) -> list[str]:
+    """Left/right power balance, overall and per power zone, weighted by power."""
+    streams = await intervals.get_activity_streams(
+        activity_id, stream_types=['time', 'watts', 'left_right_balance']
+    )
+    time_data = streams.get('time', {}).get('data') or []
+    power_data = streams.get('watts', {}).get('data') or []
+    balance_data = streams.get('left_right_balance', {}).get('data') or []
+
+    power_zones = activity.get('icu_power_zones')
+    ftp = activity.get('icu_ftp')
+    has_zones = bool(power_zones and ftp)
+    # The same rounded limits the zone labels show.
+    watt_limits = [_zone_watts(pct, ftp) for pct in power_zones[:-1]] if has_zones else []
+
+    work = right_work = 0.0
+    zones = {}  # zone index -> [seconds, work, right_work]
+    previous_time = None
+    for sample_time, watts, right_percent in zip(time_data, power_data, balance_data):
+        seconds = 1 if previous_time is None else min(sample_time - previous_time, _MAX_SAMPLE_SECONDS)
+        previous_time = sample_time
+        # Exactly 0 or 100 while pedalling isn't a real split: it's a meter artefact.
+        if not watts or watts <= 0 or right_percent is None or right_percent in (0, 100):
+            continue
+        sample_work = watts * seconds
+        work += sample_work
+        right_work += right_percent * sample_work
+        if has_zones:
+            i = next((i for i, limit in enumerate(watt_limits) if watts <= limit), len(watt_limits))
+            zone = zones.setdefault(i, [0, 0.0, 0.0])
+            zone[0] += seconds
+            zone[1] += sample_work
+            zone[2] += right_percent * sample_work
+
+    lines = ["## ⚖️ Power Balance\n"]
+    if not work:
+        lines.append("No left/right balance data for this activity. It needs a power meter that records each leg.\n")
+        return lines
+
+    lines.append(f"**Overall:** {_format_balance(right_work / work)}")
+    lines.append("(Weighted by power; coasting and readings of exactly 0 or 100 are left out.)\n")
+    if not has_zones:
+        lines.append("Per-zone balance needs the athlete's FTP and power zones.\n")
+        return lines
+
+    lines.append("**By power zone:**")
+    for i in sorted(zones):
+        seconds, zone_work, zone_right_work = zones[i]
+        duration = f"{seconds // 60}m{seconds % 60:02d}s"
+        zone_range = _power_zone_range(power_zones, i, ftp)
+        if seconds < _MIN_BALANCE_ZONE_SECONDS:
+            lines.append(f"  Zone {i + 1} ({zone_range}): too little data ({duration})")
+        else:
+            lines.append(f"  Zone {i + 1} ({zone_range}): {_format_balance(zone_right_work / zone_work)} ({duration})")
+    lines.append("")
+    return lines
+
+
+async def _analyze_activity_intervals(
+    activity_id: str, intervals: IntervalsClient, include_power_balance: bool = False
+) -> str:
     """intervals.icu path: zones, per-lap stats, and HR zone-times all come precomputed."""
     activity = await intervals.get_activity(activity_id, intervals=True)
     activity_type = activity.get('type', 'Unknown')
@@ -212,6 +291,14 @@ async def _analyze_activity_intervals(activity_id: str, intervals: IntervalsClie
         print(f"Error reading power zones for {activity_id}: {e}", file=sys.stderr)
         lines.append("## ⚡ Power Analysis\n")
         lines.append("⚠️ Couldn't read the power zones for this activity.\n")
+
+    if include_power_balance:
+        try:
+            lines.extend(await _power_balance_lines(activity, activity_id, intervals))
+        except Exception as e:
+            print(f"Error reading power balance for {activity_id}: {e}", file=sys.stderr)
+            lines.append("## ⚖️ Power Balance\n")
+            lines.append("⚠️ Couldn't read the power balance for this activity.\n")
 
     return "\n".join(lines)
 
@@ -398,6 +485,7 @@ async def analyze_activity_handler(arguments: dict, intervals) -> list[TextConte
     """Handle analyze_activity tool calls."""
     try:
         activity_id_raw = arguments.get("activity_id")
+        include_power_balance = bool(arguments.get("include_power_balance"))
 
         if not activity_id_raw:
             return [TextContent(type="text", text="❌ Error: activity_id is required")]
@@ -407,8 +495,10 @@ async def analyze_activity_handler(arguments: dict, intervals) -> list[TextConte
             if id_error:
                 return [TextContent(type="text", text=id_error)]
             text = await _analyze_activity_strava(int(activity_id_raw), intervals)
+            if include_power_balance:
+                text += "\nPower balance is only available for intervals.icu activities.\n"
         else:
-            text = await _analyze_activity_intervals(str(activity_id_raw), intervals)
+            text = await _analyze_activity_intervals(str(activity_id_raw), intervals, include_power_balance)
 
         return [TextContent(type="text", text=text)]
 
