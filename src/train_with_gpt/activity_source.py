@@ -58,8 +58,11 @@ def with_source_param(tool: Tool) -> Tool:
 
 def strava_id_error(activity_id) -> str | None:
     """Strava ids are numeric; an intervals.icu-style id (e.g. "i123") means the wrong source."""
-    if str(activity_id).isdigit():
+    try:
+        int(activity_id)  # the same conversion the Strava paths use
         return None
+    except (TypeError, ValueError):
+        pass
     return (
         f"❌ Error: '{activity_id}' isn't a Strava activity id (Strava ids are numeric). "
         "If it came from intervals.icu, call again with source='intervals_icu'."
