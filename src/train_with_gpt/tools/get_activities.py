@@ -15,6 +15,8 @@ def get_activities_tool() -> Tool:
         description=(
             "Fetches training activities with flexible date filtering. "
             "Can get activities from last week (default), a specific date, or a date range. "
+            "From intervals.icu, each activity also shows its training load (TSS), "
+            "normalized power (NP) and intensity factor (IF) when intervals.icu has them. "
             "Use get_current_date tool first if you're unsure about current date."
         ),
         inputSchema={
@@ -31,6 +33,13 @@ def get_activities_tool() -> Tool:
             },
         },
     )
+
+
+def _intensity_factor(value):
+    """intervals.icu reports intensity as NP / FTP * 100; show the usual ratio (0.82)."""
+    if value is None:
+        return None
+    return value / 100
 
 
 async def get_activities_handler(arguments: dict, intervals) -> list[TextContent]:
@@ -101,6 +110,9 @@ async def get_activities_handler(arguments: dict, intervals) -> list[TextContent
         if not activities:
             return [TextContent(type="text", text=f"No activities found for {date_range_desc}.")]
         
+        # Load metrics are intervals.icu-only: no new processing of Strava data
+        # (Strava API policy, see AGENTS.md).
+        show_load = not isinstance(intervals, StravaClient)
         lines = [f"Found {len(activities)} activities for {date_range_desc}:\n"]
         
         for activity in activities:
@@ -158,6 +170,13 @@ async def get_activities_handler(arguments: dict, intervals) -> list[TextContent
             avg_watts = activity.get('average_watts') or activity.get('icu_average_watts')
             if avg_watts:
                 stats.append(f"⚡ {avg_watts:.0f}W")
+            if show_load:
+                normalized_watts = activity.get('icu_weighted_avg_watts')
+                if normalized_watts:
+                    stats.append(f"NP {normalized_watts:.0f}W")
+                intensity = _intensity_factor(activity.get('icu_intensity'))
+                if intensity is not None:
+                    stats.append(f"IF {intensity:.2f}")
             
             # Cadence
             avg_cadence = activity.get('average_cadence')
@@ -173,6 +192,10 @@ async def get_activities_handler(arguments: dict, intervals) -> list[TextContent
             avg_temp = activity.get('average_temp')
             if avg_temp is not None:
                 stats.append(f"🌡️ {avg_temp}°C")
+
+            training_load = activity.get('icu_training_load') if show_load else None
+            if training_load is not None:
+                stats.append(f"📈 Load {training_load:.0f}")
             
             # Format output
             activity_id = activity.get('id')

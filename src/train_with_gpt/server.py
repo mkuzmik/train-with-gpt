@@ -38,6 +38,8 @@ from .tools import (
     get_resting_heart_rate_handler,
     get_weight_data_tool,
     get_weight_data_handler,
+    get_wellness_tool,
+    get_wellness_handler,
     analyze_activity_tool,
     analyze_activity_handler,
     analyze_lap_tool,
@@ -138,7 +140,7 @@ def _get_wellness_client():
 
 def wellness_client_for(user_id: Optional[str]):
     """
-    Resolve the client for sleep/HRV/resting-HR/weight tools for `user_id`.
+    Resolve the client for the wellness tools (sleep/HRV/resting-HR/weight/load) for `user_id`.
 
     OAuth'd users get an IntervalsClient on their own intervals.icu key if they
     added one at login (intervals_connect.py); otherwise their StravaClient,
@@ -203,6 +205,7 @@ async def list_tools() -> list[Tool]:
         get_hrv_data_tool(),
         get_resting_heart_rate_tool(),
         get_weight_data_tool(),
+        get_wellness_tool(),
         analyze_activity_tool(),
         analyze_lap_tool(),
         setup_training_repo_tool(),
@@ -261,6 +264,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await get_resting_heart_rate_handler(arguments, _get_wellness_client())
     elif name == "get_weight_data":
         return await get_weight_data_handler(arguments, _get_wellness_client())
+    elif name == "get_wellness":
+        return await get_wellness_handler(arguments, _get_wellness_client())
     elif name == "save_goals":
         return await save_goals_handler(arguments)
     elif name == "read_goals":

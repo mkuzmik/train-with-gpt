@@ -153,3 +153,65 @@ async def test_strava_client_gets_all_pages_for_the_range(http_mock):
     assert int(params["after"]) == int(datetime(2024, 1, 10).timestamp())
     assert int(params["before"]) == int(datetime(2024, 1, 15, 23, 59, 59).timestamp())
     assert params["per_page"] == "200"
+
+
+async def test_intervals_activities_show_load_normalized_power_and_intensity(intervals, activities_api):
+    activities_api.mock(return_value=Response(200, json=[{
+        "id": "i555", "type": "Ride", "distance": 40000, "moving_time": 3600, "average_speed": 11.1,
+        "average_watts": 210, "icu_weighted_avg_watts": 245, "icu_intensity": 82.0,
+        "icu_training_load": 85, "start_date": "2024-01-12T09:00:00Z",
+    }]))
+
+    output = text_of(await get_activities_handler({"start_date": "2024-01-12", "end_date": "2024-01-12"}, intervals))
+
+    # intervals.icu reports intensity as a percentage of FTP; shown as the usual IF ratio.
+    assert "⚡ 210W | NP 245W | IF 0.82" in output
+    assert output.splitlines()[-2].endswith("| 📈 Load 85")
+
+
+async def test_low_intensity_percentage_is_still_converted_to_a_ratio(intervals, activities_api):
+    activities_api.mock(return_value=Response(200, json=[{
+        "id": "i556", "type": "Run", "distance": 10000, "moving_time": 3000, "icu_intensity": 2.0,
+        "icu_training_load": 70.4, "start_date": "2024-01-12T09:00:00Z",
+    }]))
+
+    output = text_of(await get_activities_handler({"start_date": "2024-01-12", "end_date": "2024-01-12"}, intervals))
+
+    assert "IF 0.02" in output
+    assert "📈 Load 70" in output
+    assert "NP" not in output
+
+
+async def test_activities_without_load_data_show_none(intervals, activities_api):
+    activities_api.mock(return_value=Response(200, json=[{
+        "id": "i557", "type": "Run", "distance": 5000, "moving_time": 1500,
+        "icu_training_load": None, "icu_intensity": None, "start_date": "2024-01-12T09:00:00Z",
+    }]))
+
+    output = text_of(await get_activities_handler({"start_date": "2024-01-12", "end_date": "2024-01-12"}, intervals))
+
+    assert "Load" not in output and "IF" not in output and "NP" not in output
+
+
+async def test_strava_activities_get_no_new_load_metrics(http_mock):
+    """Strava data stays as it was (API policy): no load, NP or IF on that path."""
+    http_mock.get(STRAVA_ACTIVITIES_URL).mock(return_value=Response(200, json=[{
+        "id": 98, "sport_type": "Ride", "type": "Ride", "distance": 40000, "moving_time": 3600,
+        "average_speed": 11.1, "average_watts": 210, "weighted_average_watts": 245, "suffer_score": 80,
+        "icu_weighted_avg_watts": 245, "icu_intensity": 82.0, "icu_training_load": 85,
+        "start_date": "2024-01-12T09:00:00Z",
+    }]))
+
+    output = text_of(await get_activities_handler(
+        {"start_date": "2024-01-10", "end_date": "2024-01-15"}, StravaClient(access_token="t"),
+    ))
+
+    assert "⚡ 210W" in output
+    assert "NP" not in output and "IF" not in output and "Load" not in output
+
+
+def test_description_mentions_load_metrics():
+    from train_with_gpt.tools import get_activities_tool
+
+    description = get_activities_tool().description
+    assert "training load" in description and "normalized power" in description
