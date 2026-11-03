@@ -4,12 +4,10 @@ import sys
 from datetime import datetime
 from mcp.types import Tool, TextContent
 
-from ..helpers import NO_WELLNESS_DATA_MESSAGE
+from ..helpers import NO_WELLNESS_DATA_MESSAGE, WELLNESS_MAX_RANGE_DAYS
 from ..strava_client import StravaClient
 
-# Weight moves slowly, so allow a much longer window than the daily recovery
-# metrics: a full year covers a season or a build-up.
-MAX_RANGE_DAYS = 366
+MAX_RANGE_DAYS = WELLNESS_MAX_RANGE_DAYS
 MODES = ("datapoints", "summary")
 
 

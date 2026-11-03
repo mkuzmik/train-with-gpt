@@ -82,9 +82,10 @@ goals only, and mark the rest as "not in the data".
    the biggest weeks and blocks, gaps of a week or more (often injury or illness), longest
    sessions, and activities that look like races.
 2. If recovery data is connected (see start_consultation's facts): **get_resting_heart_rate**,
-   **get_hrv_data** and **get_sleep_data**. These accept at most 30 days per call, so
-   don't ask for the whole year: pick a few windows that matter (the last 30 days, and
-   the weeks around a race, a gap or a hard block), for bands and trends.
+   **get_hrv_data** and **get_sleep_data**. These accept at most 366 days per call and
+   list every day, so rather than the whole year, pick a few windows that matter (the
+   last 30-60 days, and the weeks around a race, a gap or a hard block), for bands and
+   trends.
 3. For an athlete with history: **read_goals**, and **search_consultation_notes** per topic
    (race, PB, injury, pain, illness, availability, taper, fuelling) instead of reading
    every note.

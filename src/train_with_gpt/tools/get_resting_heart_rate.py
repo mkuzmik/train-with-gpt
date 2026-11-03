@@ -4,7 +4,7 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
-from ..helpers import NO_WELLNESS_DATA_MESSAGE
+from ..helpers import NO_WELLNESS_DATA_MESSAGE, WELLNESS_MAX_RANGE_DAYS
 from ..strava_client import StravaClient
 
 
@@ -12,7 +12,7 @@ def get_resting_heart_rate_tool() -> Tool:
     """Return the get_resting_heart_rate tool definition."""
     return Tool(
         name="get_resting_heart_rate",
-        description="Get resting heart rate (RHR) data from intervals.icu for a date range. RHR is a recovery metric best read against the athlete's own baseline and normal range; a sustained rise above it can mean fatigue or illness. An unusually high or low resting rate, or one with symptoms such as dizziness, fainting or palpitations, is worth a medical check regardless of baseline.",
+        description=f"Get resting heart rate (RHR) data from intervals.icu for a date range (up to {WELLNESS_MAX_RANGE_DAYS} days). RHR is a recovery metric best read against the athlete's own baseline and normal range; a sustained rise above it can mean fatigue or illness. An unusually high or low resting rate, or one with symptoms such as dizziness, fainting or palpitations, is worth a medical check regardless of baseline.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -62,12 +62,12 @@ async def get_resting_heart_rate_handler(arguments: dict, intervals) -> list[Tex
                 text=f"❌ start_date ({start_date_str}) cannot be after end_date ({end_date_str})"
             )]
 
-        # Limit to reasonable range (30 days)
-        delta = (end_date - start_date).days
-        if delta > 30:
+        # Both ends are inclusive, so count calendar days, not the difference.
+        days = (end_date - start_date).days + 1
+        if days > WELLNESS_MAX_RANGE_DAYS:
             return [TextContent(
                 type="text",
-                text=f"❌ Date range too large ({delta} days). Maximum is 30 days."
+                text=f"❌ Date range too large ({days} days). Maximum is {WELLNESS_MAX_RANGE_DAYS} days."
             )]
 
         lines = [f"Resting Heart Rate from {start_date_str} to {end_date_str}\n"]
