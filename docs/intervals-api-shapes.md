@@ -10,10 +10,12 @@ Structure only. Every value is a fixed placeholder showing its type, never
 real data: `1` integer, `1.5` float, `true` boolean, `"text"` string,
 `"2000-01-01"` date, `"2000-01-01T00:00:00"` date-time, `null`. A position
 seen with several types shows a label such as `"<float|null>"`, and `<also>`
-marks an object or array that sometimes holds another type. Arrays show one
-merged item whatever their real length. `<unlisted field>` and
-`<unlisted stream>` stand for names the public spec doesn't list, which
-includes user-defined custom fields and streams.
+or `<also array>` marks an object that sometimes holds another type. Arrays
+show one merged item whatever their real length. Names are kept only if the
+public spec or the script's short lists of built-in fields and stream types
+have them. `<unlisted field>` and `<unlisted stream>` stand for all others,
+which includes user-defined custom fields and streams. Strava-sourced
+activities are left out.
 
 Streams are shown keyed by stream type, but the API returns a list of these
 entries. An invalid name in `types` makes the whole request fail with HTTP 422.

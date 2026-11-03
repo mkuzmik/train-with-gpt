@@ -228,3 +228,22 @@ def test_committed_reference_holds_structure_only():
         assert is_label or any(type(leaf) is type(a) and leaf == a for a in allowed), leaf
     assert set(re.findall(r"\d{4}-\d{2}-\d{2}", text)) <= {"2000-01-01"}
     assert not re.search(r"\bi\d{4,}\b", text)
+
+
+def test_strava_rows_are_left_out_of_the_list_shape(tmp_path, monkeypatch, http_mock):
+    stub_api(http_mock)
+    http_mock.get(f"{cap.BASE_URL}/athlete/0/activities").mock(return_value=httpx.Response(200, json=[
+        {"id": ACTIVITY_ID, "source": "GARMIN", "moving_time": 1},
+        {"id": "1", "source": "STRAVA", "name": "SENTINEL_ACTIVITY_NAME", "_note": "SENTINEL_NOTE"},
+    ]))
+    code, output = run(tmp_path, monkeypatch)
+    assert code == 0
+    assert set(blocks(output.read_text())[0][0]) == {"id", "source", "moving_time"}
+
+
+def test_object_and_array_at_one_position_keep_both_structures():
+    shape = cap.Shape()
+    known = {"a", "b"}
+    shape.observe({"a": 1}, known)
+    shape.observe([{"b": 1.5}], known)
+    assert shape.render() == {"a": 1, "<also array>": [{"b": 1.5}]}

@@ -682,9 +682,11 @@ uv run python test_tools.py setup_training_repo '{"repo_path": "/path/to/repo"}'
 intervals.icu API returns for the endpoints this project uses, so new features
 don't start with looking up field names and types. It holds structure only:
 real field names, nesting and types, with every value replaced by a fixed
-placeholder (`1`, `1.5`, `"text"`, ...). Field names the
-[public API spec](https://intervals.icu/api-docs.html) doesn't list, such as
-custom fields, are hidden, so no athlete data ends up in this public repo.
+placeholder (`1`, `1.5`, `"text"`, ...). Only names from the
+[public API spec](https://intervals.icu/api-docs.html), plus short lists of
+built-in fields and stream types in the script, are kept. All others, such as
+custom fields, are hidden, and Strava-sourced activities are left out, so no
+athlete data ends up in this public repo.
 
 To refresh it from your own account (nothing else is written locally):
 

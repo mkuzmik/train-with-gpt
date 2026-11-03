@@ -3,8 +3,9 @@
 
 The reference (docs/intervals-api-shapes.md) keeps the structure of each
 response and drops all data: every value becomes a fixed placeholder of the
-same type (PLACEHOLDERS), and a field name appears only if the public OpenAPI spec (or EXTRA_FIELDS) lists it,
-so user-defined custom field and stream names can't get out.
+same type (PLACEHOLDERS). Only names from the public OpenAPI spec, EXTRA_FIELDS
+and STREAM_TYPES are kept, so user-defined custom field and stream names can't
+get out.
 
     INTERVALS_API_KEY=... uv run python scripts/capture_intervals_shapes.py
     uv run python scripts/capture_intervals_shapes.py --from-spec   # no key needed
@@ -34,8 +35,8 @@ DETAIL = "GET /activity/{id}?intervals=true"
 STREAMS = "GET /activity/{id}/streams?types=..."
 WELLNESS = "GET /athlete/0/wellness"
 
-# Returned by the real API but missing from the OpenAPI spec.
-EXTRA_FIELDS = {"_note", "valueType"}
+# Built-in fields the real API returns but the OpenAPI spec leaves out.
+EXTRA_FIELDS = {"valueType"}
 # The spec doesn't enumerate stream types. Anything else is reported as unlisted.
 STREAM_TYPES = {
     "altitude", "cadence", "distance", "heartrate", "latlng", "respiration",
@@ -105,9 +106,10 @@ class Shape:
         # A position seen with several types has no single stand-in: it gets a label.
         if self.fields is not None:
             rendered = {name: self.fields[name].render() for name in sorted(self.fields)}
-            also = self.scalars | ({"array"} if self.items is not None else set())
-            if also:
-                rendered["<also>"] = _label(also)
+            if self.scalars:
+                rendered["<also>"] = _label(self.scalars)
+            if self.items is not None:
+                rendered["<also array>"] = [self.items.render()] if _seen(self.items) else []
             return rendered
         if self.items is not None:
             rendered = [self.items.render()] if _seen(self.items) else []
@@ -180,10 +182,12 @@ def render_reference(samples: dict[str, list], known: set[str], source: str) -> 
         "real data: `1` integer, `1.5` float, `true` boolean, `\"text\"` string,",
         "`\"2000-01-01\"` date, `\"2000-01-01T00:00:00\"` date-time, `null`. A position",
         "seen with several types shows a label such as `\"<float|null>\"`, and `<also>`",
-        "marks an object or array that sometimes holds another type. Arrays show one",
-        "merged item whatever their real length. `<unlisted field>` and",
-        "`<unlisted stream>` stand for names the public spec doesn't list, which",
-        "includes user-defined custom fields and streams.",
+        "or `<also array>` marks an object that sometimes holds another type. Arrays",
+        "show one merged item whatever their real length. Names are kept only if the",
+        "public spec or the script's short lists of built-in fields and stream types",
+        "have them. `<unlisted field>` and `<unlisted stream>` stand for all others,",
+        "which includes user-defined custom fields and streams. Strava-sourced",
+        "activities are left out.",
         "",
         "Streams are shown keyed by stream type, but the API returns a list of these",
         "entries. An invalid name in `types` makes the whole request fail with HTTP 422.",
@@ -207,11 +211,12 @@ def get_json(client: httpx.Client, endpoint: str, url: str, params: Optional[dic
 
 
 def fetch_samples(client: httpx.Client, days: int, max_activities: int) -> dict[str, list]:
-    """Real responses, held in memory only. Strava-sourced activities are stubs
-    the API won't detail (and Strava data is off limits), so they get no detail."""
+    """Real responses, held in memory only. Strava-sourced activities are left
+    out entirely, since the Strava API Agreement restricts processing that data."""
     today = dt.date.today()
     window = {"oldest": (today - dt.timedelta(days=days)).isoformat(), "newest": today.isoformat()}
-    activities = get_json(client, LIST, f"{BASE_URL}/athlete/0/activities", window)
+    listed = get_json(client, LIST, f"{BASE_URL}/athlete/0/activities", window)
+    activities = [a for a in listed if a.get("source") != "STRAVA"]
     samples = {
         LIST: [activities],
         DETAIL: [],
@@ -219,8 +224,7 @@ def fetch_samples(client: httpx.Client, days: int, max_activities: int) -> dict[
         WELLNESS: [get_json(client, WELLNESS, f"{BASE_URL}/athlete/0/wellness", window)],
     }
 
-    usable = [a for a in activities if a.get("id") and a.get("source") != "STRAVA"]
-    for activity in usable[:max_activities]:
+    for activity in [a for a in activities if a.get("id")][:max_activities]:
         # One bad activity shouldn't stop a refresh; a missing endpoint still does.
         try:
             detail = get_json(
