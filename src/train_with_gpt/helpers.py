@@ -77,6 +77,10 @@ def training_repo_not_configured_message() -> str:
     )
 
 
+# Longest date range (inclusive, in days) a wellness tool accepts in one call: a full
+# year covers a season or a build-up, and intervals.icu returns it in one request.
+WELLNESS_MAX_RANGE_DAYS = 366
+
 NO_WELLNESS_DATA_MESSAGE = (
     "ℹ️ Wellness data (sleep, HRV, resting heart rate, body weight, fitness/fatigue/form) isn't "
     "available: Strava has no "

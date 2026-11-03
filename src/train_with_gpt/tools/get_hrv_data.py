@@ -4,7 +4,7 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
-from ..helpers import NO_WELLNESS_DATA_MESSAGE
+from ..helpers import NO_WELLNESS_DATA_MESSAGE, WELLNESS_MAX_RANGE_DAYS
 from ..strava_client import StravaClient
 
 
@@ -12,7 +12,7 @@ def get_hrv_data_tool() -> Tool:
     """Return the get_hrv_data tool definition."""
     return Tool(
         name="get_hrv_data",
-        description="Get Heart Rate Variability (HRV) data from intervals.icu for a date range. HRV is a recovery metric best read against the athlete's own baseline and normal range; single nights are noisy and higher is not always better. Returns nightly HRV values and rolling averages.",
+        description=f"Get Heart Rate Variability (HRV) data from intervals.icu for a date range (up to {WELLNESS_MAX_RANGE_DAYS} days). HRV is a recovery metric best read against the athlete's own baseline and normal range; single nights are noisy and higher is not always better. Returns nightly HRV values and rolling averages.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -62,12 +62,12 @@ async def get_hrv_data_handler(arguments: dict, intervals) -> list[TextContent]:
                 text=f"❌ start_date ({start_date_str}) cannot be after end_date ({end_date_str})"
             )]
 
-        # Limit to reasonable range (30 days)
-        delta = (end_date - start_date).days
-        if delta > 30:
+        # Both ends are inclusive, so count calendar days, not the difference.
+        days = (end_date - start_date).days + 1
+        if days > WELLNESS_MAX_RANGE_DAYS:
             return [TextContent(
                 type="text",
-                text=f"❌ Date range too large ({delta} days). Maximum is 30 days."
+                text=f"❌ Date range too large ({days} days). Maximum is {WELLNESS_MAX_RANGE_DAYS} days."
             )]
 
         lines = [f"HRV Data from {start_date_str} to {end_date_str}\n"]

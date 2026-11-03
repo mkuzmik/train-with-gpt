@@ -48,7 +48,7 @@ async def test_default_is_last_seven_days(intervals, activities_api):
             "distance": 25000,
             "moving_time": 4500,
             "average_speed": 5.5,
-            "average_watts": 210,
+            "icu_average_watts": 210,  # intervals.icu's name; Strava's is average_watts
             "average_cadence": 90,
             "start_date": "2024-01-14T18:00:00Z",
         },

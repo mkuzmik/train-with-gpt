@@ -4,7 +4,7 @@ import sys
 from datetime import datetime, timedelta
 from mcp.types import Tool, TextContent
 
-from ..helpers import NO_WELLNESS_DATA_MESSAGE
+from ..helpers import NO_WELLNESS_DATA_MESSAGE, WELLNESS_MAX_RANGE_DAYS
 from ..strava_client import StravaClient
 
 
@@ -12,7 +12,7 @@ def get_sleep_data_tool() -> Tool:
     """Return the get_sleep_data tool definition."""
     return Tool(
         name="get_sleep_data",
-        description="Get sleep data from intervals.icu for a date range (or single date if start=end). Returns sleep duration and quality score for each night. Useful for analyzing sleep patterns and trends.",
+        description=f"Get sleep data from intervals.icu for a date range (up to {WELLNESS_MAX_RANGE_DAYS} days), or a single date if start=end. Returns sleep duration and quality score for each night. Useful for analyzing sleep patterns and trends.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -62,12 +62,12 @@ async def get_sleep_data_handler(arguments: dict, intervals) -> list[TextContent
                 text=f"❌ start_date ({start_date_str}) cannot be after end_date ({end_date_str})"
             )]
 
-        # Limit to reasonable range (30 days)
-        delta = (end_date - start_date).days
-        if delta > 30:
+        # Both ends are inclusive, so count calendar days, not the difference.
+        days = (end_date - start_date).days + 1
+        if days > WELLNESS_MAX_RANGE_DAYS:
             return [TextContent(
                 type="text",
-                text=f"❌ Date range too large ({delta} days). Maximum is 30 days."
+                text=f"❌ Date range too large ({days} days). Maximum is {WELLNESS_MAX_RANGE_DAYS} days."
             )]
 
         lines = [f"Sleep Data from {start_date_str} to {end_date_str}\n"]

@@ -45,6 +45,75 @@ def _format_zone_times(zone_boundaries: list, zone_times: list, unit: str) -> li
     return lines
 
 
+def _power_zone_seconds(zone_times: list, zone_count: int) -> list[int]:
+    """
+    Seconds per power zone from intervals.icu's icu_zone_times.
+
+    Unlike icu_hr_zone_times (plain seconds), it holds {"id": "Z1", "secs": ...}
+    entries, plus extras such as the sweet-spot "SS" that aren't one of the zones.
+    """
+    seconds = [0] * zone_count
+    for entry in zone_times:
+        zone_id = str(entry.get("id", "")) if isinstance(entry, dict) else ""
+        if zone_id[:1] == "Z" and zone_id[1:].isdigit() and 1 <= int(zone_id[1:]) <= zone_count:
+            seconds[int(zone_id[1:]) - 1] = int(entry.get("secs") or 0)
+    return seconds
+
+
+def _zone_watts(percent_of_ftp, ftp) -> int:
+    """A %-of-FTP zone limit in whole watts (used for both bucketing and labels)."""
+    return round(percent_of_ftp * ftp / 100)
+
+
+def _format_power_zone_times(zone_percents: list, zone_times: list, ftp) -> list[str]:
+    """Like _format_zone_times, but icu_power_zones are % of FTP: show both % and watts."""
+    total = sum(zone_times) or 1
+    lines = []
+    for i, seconds in enumerate(zone_times):
+        if not seconds or seconds <= 0:
+            continue
+        pct_min = 0 if i == 0 else zone_percents[i - 1] + 1
+        pct_max = zone_percents[i]
+        is_top = pct_max >= 999
+        zone_range = f"{pct_min}%+ FTP" if is_top else f"{pct_min}-{pct_max}% FTP"
+        if ftp:
+            watts_min = 0 if i == 0 else _zone_watts(zone_percents[i - 1], ftp) + 1
+            watts_max = _zone_watts(pct_max, ftp)
+            zone_range += f", {watts_min}+ W" if is_top else f", {watts_min}-{watts_max} W"
+        percent = seconds / total * 100
+        lines.append(f"  Zone {i + 1} ({zone_range}): {seconds // 60}m{seconds % 60:02d}s ({percent:.1f}%)")
+    return lines
+
+
+async def _power_zone_lines(activity: dict, activity_id: str, intervals: IntervalsClient) -> list[str]:
+    power_zones = activity.get('icu_power_zones')
+    if not power_zones:
+        return []
+    ftp = activity.get('icu_ftp')
+
+    power_zone_times = activity.get('icu_zone_times')
+    if power_zone_times:
+        zone_times = _power_zone_seconds(power_zone_times, len(power_zones))
+    elif ftp:
+        # Not precomputed: bucket the raw power stream ourselves, with the
+        # %-of-FTP limits turned into watts first.
+        streams = await intervals.get_activity_streams(activity_id, stream_types=['watts'])
+        power_data = streams.get('watts', {}).get('data')
+        if not power_data:
+            return []
+        # The same rounded limits the zone labels show, so a reading lands in the zone it's displayed in.
+        watt_boundaries = [_zone_watts(pct, ftp) for pct in power_zones[:-1]]
+        zone_dist = calculate_zone_distribution(power_data, watt_boundaries)
+        zone_times = [zone_dist.get(i + 1, 0) for i in range(len(power_zones))]
+    else:
+        return []
+
+    zone_lines = _format_power_zone_times(power_zones, zone_times, ftp)
+    if not zone_lines:
+        return []
+    return ["## ⚡ Power Analysis\n", "**Zone Distribution:**", *zone_lines, ""]
+
+
 async def _analyze_activity_intervals(activity_id: str, intervals: IntervalsClient) -> str:
     """intervals.icu path: zones, per-lap stats, and HR zone-times all come precomputed."""
     activity = await intervals.get_activity(activity_id, intervals=True)
@@ -135,28 +204,14 @@ async def _analyze_activity_intervals(activity_id: str, intervals: IntervalsClie
         lines.extend(_format_zone_times(hr_zones, hr_zone_times, "bpm"))
         lines.append("")
 
-    # Power Zone Distribution (for cycling, or running with a power meter)
-    power_zones = activity.get('icu_power_zones')
-    power_zone_times = activity.get('icu_zone_times')
-    if power_zones and power_zone_times:
+    # Power Zone Distribution (for cycling, or running with a power meter).
+    # Read on its own: an unexpected power field must not hide laps and HR zones.
+    try:
+        lines.extend(await _power_zone_lines(activity, activity_id, intervals))
+    except Exception as e:
+        print(f"Error reading power zones for {activity_id}: {e}", file=sys.stderr)
         lines.append("## ⚡ Power Analysis\n")
-        lines.append("**Zone Distribution:**")
-        lines.extend(_format_zone_times(power_zones, power_zone_times, "W"))
-        lines.append("")
-    elif power_zones:
-        # Fallback: intervals.icu hasn't precomputed power zone times for this
-        # activity - bucket the raw power stream ourselves.
-        streams = await intervals.get_activity_streams(activity_id, stream_types=['watts'])
-        power_data = streams.get('watts', {}).get('data')
-        if power_data:
-            zone_boundaries = power_zones[:-1]
-            zone_dist = calculate_zone_distribution(power_data, zone_boundaries)
-            zone_times = [zone_dist.get(i + 1, 0) for i in range(len(power_zones))]
-
-            lines.append("## ⚡ Power Analysis\n")
-            lines.append("**Zone Distribution:**")
-            lines.extend(_format_zone_times(power_zones, zone_times, "W"))
-            lines.append("")
+        lines.append("⚠️ Couldn't read the power zones for this activity.\n")
 
     return "\n".join(lines)
 
