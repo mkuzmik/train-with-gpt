@@ -201,3 +201,15 @@ async def test_strava_path_rejects_an_intervals_icu_id_without_a_request(http_mo
     assert "isn't a Strava activity id" in output
     assert "source='intervals_icu'" in output
     assert not http_mock.calls
+
+
+async def test_power_stream_fallback_uses_the_displayed_watt_limits(intervals, http_mock):
+    """55% of FTP 250 is 137.5 W: a 138 W stream lands in the zone whose label shows 138 W."""
+    _stub_activity(http_mock, "i7", {"id": "i7", "type": "Ride", "icu_ftp": 250, "icu_power_zones": [55, 75, 999]})
+    http_mock.get(f"{INTERVALS}/activity/i7/streams").mock(
+        return_value=Response(200, json=[{"type": "watts", "data": [138] * 60}])
+    )
+
+    output = text_of(await analyze_activity_handler({"activity_id": "i7"}, intervals))
+
+    assert "Zone 1 (0-55% FTP, 0-138 W): 1m00s (100.0%)" in output
