@@ -676,6 +676,27 @@ uv run python test_tools.py get_activities
 uv run python test_tools.py setup_training_repo '{"repo_path": "/path/to/repo"}'
 ```
 
+### intervals.icu API reference
+
+[docs/intervals-api-shapes.md](docs/intervals-api-shapes.md) records what the
+intervals.icu API returns for the endpoints this project uses, so new features
+don't start with looking up field names and types. It holds structure only:
+real field names, nesting and types, with every value replaced by a fixed
+placeholder (`1`, `1.5`, `"text"`, ...). Field names the
+[public API spec](https://intervals.icu/api-docs.html) doesn't list, such as
+custom fields, are hidden, so no athlete data ends up in this public repo.
+
+To refresh it from your own account (nothing else is written locally):
+
+```bash
+INTERVALS_API_KEY=your-key uv run python scripts/capture_intervals_shapes.py
+```
+
+Review `git diff docs/intervals-api-shapes.md` before committing. The source line
+below the title says whether the file came from live responses. `--from-spec`
+rebuilds it from the public spec alone, without a key. If a real built-in field
+shows up as `<unlisted field>`, add it to `EXTRA_FIELDS` in the script.
+
 ### Continuous Integration
 
 Tests run automatically via GitHub Actions on:
