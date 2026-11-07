@@ -41,6 +41,7 @@ HOSTED_TOOLS = {
     "save_consultation_notes", "read_consultation_notes", "list_consultation_notes",
     "search_consultation_notes", "read_memory_index", "read_memory", "save_memory", "update_memory",
     "delete_memory", "build_memory_from_notes", "self_test",
+    "plan_workout", "get_planned_workouts", "update_planned_workout",
 }
 
 

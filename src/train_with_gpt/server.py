@@ -79,7 +79,8 @@ from .tools import (
     self_test_tool,
     self_test_handler,
     PLANNED_WORKOUT_TOOLS,
-    PLANNED_WORKOUTS_HOSTED_MESSAGE,
+    PLANNING_NOT_CONNECTED_MESSAGE,
+    PLANNING_NOT_OFFERED_MESSAGE,
     plan_workout_tool,
     plan_workout_handler,
     get_planned_workouts_tool,
@@ -202,6 +203,26 @@ def _activity_client(arguments: dict):
     return None, INTERVALS_NOT_CONNECTED_MESSAGE
 
 
+def _planning_client():
+    """The intervals.icu client for the planned-workout tools, or an error text.
+
+    Planned workouts only exist on intervals.icu: stdio/personal paths use the
+    personal client, hosted users their own connected key (never Strava, never
+    the personal key)."""
+    user_id = current_user_id()
+    if not user_id:
+        return intervals, None
+
+    from . import secret_box
+
+    client = intervals_client_for(user_id)
+    if client:
+        return client, None
+    if not secret_box.is_configured():
+        return None, PLANNING_NOT_OFFERED_MESSAGE
+    return None, PLANNING_NOT_CONNECTED_MESSAGE
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available tools."""
@@ -243,9 +264,6 @@ async def list_tools() -> list[Tool]:
     # for tools/list too. Clients with a cached tool list still get the refusal.
     if current_user_id():
         tools = [tool for tool in tools if tool.name != "setup_training_repo"]
-        # Planning writes to intervals.icu, which the hosted connect step
-        # doesn't ask consent for yet (issue #57): personal installs only.
-        tools = [tool for tool in tools if tool.name not in PLANNED_WORKOUT_TOOLS]
         # Hosted users choose where activities come from (activity_source.py).
         tools = [with_source_param(tool) if tool.name in ACTIVITY_TOOLS else tool for tool in tools]
     return tools
@@ -265,14 +283,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return await analyze_lap_handler(arguments, client)
 
     if name in PLANNED_WORKOUT_TOOLS:
-        # Hosted users don't see these tools; refuse clients with a cached list too.
-        if current_user_id():
-            return [TextContent(type="text", text=PLANNED_WORKOUTS_HOSTED_MESSAGE)]
+        client, error = _planning_client()
+        if error:
+            return [TextContent(type="text", text=error)]
         if name == "plan_workout":
-            return await plan_workout_handler(arguments, intervals)
+            return await plan_workout_handler(arguments, client)
         if name == "get_planned_workouts":
-            return await get_planned_workouts_handler(arguments, intervals)
-        return await update_planned_workout_handler(arguments, intervals)
+            return await get_planned_workouts_handler(arguments, client)
+        return await update_planned_workout_handler(arguments, client)
 
     if name == "setup_training_repo":
         return await setup_training_repo_handler(arguments)

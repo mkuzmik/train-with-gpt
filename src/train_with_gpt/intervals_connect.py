@@ -74,12 +74,14 @@ def _render(token: str, connection: dict | None, error: str | None = None, statu
 <h1>Add sleep, HRV, resting HR and body weight (optional)</h1>
 <p>Strava has no wellness data. If your Garmin syncs to intervals.icu, paste your
 intervals.icu API key to use it. Your coach can then also read your activities
-from intervals.icu instead of Strava, e.g. laps you fixed there.</p>
+from intervals.icu instead of Strava, e.g. laps you fixed there, and plan
+workouts on your intervals.icu calendar.</p>
 <p class="muted">Find it on intervals.icu under Settings &rarr; Developer Settings &rarr; API key.</p>
 <p class="muted"><b>This key gives full access to your intervals.icu account</b>, not
-just read access. This server stores it encrypted and only uses it to read your
-wellness data and your activities. You can cut access at any time by regenerating
-the key on intervals.icu.</p>
+just read access. This server stores it encrypted and uses it to read your
+wellness data and your activities, and to plan, read and change workouts on your
+intervals.icu calendar when you ask your coach to. You can cut access at any time
+by regenerating the key on intervals.icu.</p>
 {status}{error_html}
 <form method="post" action="{CONNECT_PATH}" autocomplete="off">
   <input type="hidden" name="token" value="{esc(token)}">

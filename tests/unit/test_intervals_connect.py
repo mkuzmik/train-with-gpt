@@ -55,8 +55,12 @@ def _login_via_strava(client) -> str:
     assert response.status_code == 200
     assert "intervals.icu API key" in response.text
     assert "full access" in response.text
-    # The page discloses every use of the key: wellness data and, on request, activities.
-    assert "only uses it to read your wellness data and your activities" in " ".join(response.text.split())
+    # The page discloses every use of the key: wellness data, activities and, on request,
+    # planning workouts on the calendar (the only writes).
+    page = " ".join(response.text.split())
+    assert "uses it to read your wellness data and your activities, and to plan, read and change " \
+        "workouts on your intervals.icu calendar when you ask your coach to" in page
+    assert "only uses it to read" not in page
     assert "Add sleep, HRV, resting HR and body weight (optional)" in response.text
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-frame-options"] == "DENY"

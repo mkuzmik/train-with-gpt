@@ -7,7 +7,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 - **Training Analysis**: View and analyze your activities with detailed metrics and zone distribution
 - **Sleep & Health Tracking**: Access wellness data - sleep duration/quality, HRV, resting heart rate, body weight
 - **Training Load**: Fitness, fatigue and form (CTL/ATL/TSB) and ramp rate over up to a year, plus training load (TSS), normalized power and intensity factor per activity (intervals.icu)
-- **Planned turbo workouts** (local install): Claude puts an agreed indoor cycling workout on your intervals.icu calendar (steps with duration, target watts or a ramp, optional cadence, repeats), reads back what's planned for a day, and changes it if plans change
+- **Planned turbo workouts** (intervals.icu): Claude puts an agreed indoor cycling workout on your intervals.icu calendar (steps with duration, target watts or a ramp, optional cadence, repeats), reads back what's planned for a day, and changes it if plans change
 - **Goal Tracking**: Set training goals and have them persist across conversations
 - **Athlete Profile**: Claude builds a short profile of you with you (background, race results, health patterns, constraints, what works), checks it against your data, and starts every consultation from it
 - **Consultation History**: Claude remembers past conversations and provides continuity
@@ -24,7 +24,7 @@ There are two ways to run it: **locally over stdio** (single user, intervals.icu
 If someone runs a hosted server for you, there's nothing to install. You need its connector URL, `https://<server>/mcp`.
 
 1. **Add it on claude.ai** (in a browser): Settings → Connectors → Add custom connector, and paste the URL. Custom connectors can't be added from the mobile app, but once added on claude.ai the connector syncs to Claude Desktop and mobile too. If its tools don't show up in a chat, turn the connector on from the chat's "+" / tools menu.
-2. **Sign in with Strava** and approve access. The server only lets in athletes its operator has put on its allowlist; anyone else sees a "This server is private" page after the Strava consent (see [Who can sign in](#who-can-sign-in-allowlist)). Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV, resting heart rate and body weight, and for reading activities from intervals.icu; you can skip it and add it later by disconnecting and reconnecting the connector.
+2. **Sign in with Strava** and approve access. The server only lets in athletes its operator has put on its allowlist; anyone else sees a "This server is private" page after the Strava consent (see [Who can sign in](#who-can-sign-in-allowlist)). Activities come from Strava. If the server offers it, the next page takes an optional intervals.icu API key for sleep, HRV, resting heart rate and body weight, for reading activities from intervals.icu, and for planning workouts on your intervals.icu calendar; you can skip it and add it later by disconnecting and reconnecting the connector.
 3. **Type this first, in a new chat:** "Start a training consultation". It's the one entry point: the server tells Claude whether you're new (no goals, profile or notes saved yet) or returning, so the first time Claude introduces itself, builds your athlete profile and sets your goals with you, and after that it picks up from your profile, goals and past notes. Start each chat the same way; say "Save notes" at the end of a useful one.
 
 Hosted users skip the local setup below; there's no training repository to configure. To run your own hosted server, see "Self-hosting".
@@ -423,6 +423,13 @@ two, so an activity is analysed from the source it was listed from. Without a
 connected key, `source: "intervals_icu"` answers with how to connect one. Local
 (stdio) installs don't have the argument: they always read intervals.icu.
 
+**Planned workouts on intervals.icu (optional).** With intervals.icu connected,
+Claude can also put an agreed indoor cycling workout on your intervals.icu
+calendar, read back what's planned and change it (`plan_workout`,
+`get_planned_workouts`, `update_planned_workout`). These are the only tools that
+write to intervals.icu, and the connect page says so. Without a connected key
+they answer with how to connect one.
+
 ### Operations
 
 - **Upgrading:** build and deploy the next release tag. The volume (and
@@ -445,8 +452,8 @@ connected key, `source: "intervals_icu"` answers with how to connect one. Local
   `~/.mcp-auth`. If you wipe the server's store, clear that folder too or you
   will get `400` on `/authorize`.
 - **Limitations:** OAuth'd users' activities come from Strava unless Claude
-  passes `source: "intervals_icu"`. That, and wellness (sleep/HRV/resting
-  HR/weight), needs the optional intervals.icu key.
+  passes `source: "intervals_icu"`. That, wellness (sleep/HRV/resting
+  HR/weight) and planned workouts need the optional intervals.icu key.
 
 ## Usage
 
@@ -581,10 +588,9 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Tools
 
-The local stdio server offers 31 tools. The hosted server offers the same
-minus `setup_training_repo`, because its notes storage is server
-configuration, and minus the three planned-workout tools, because hosted
-users' intervals.icu keys were only given for reading (27).
+The local stdio server offers 31 tools; the hosted server offers the same
+minus `setup_training_repo` (30), because its notes storage is server
+configuration.
 
 | Tool | What it's for |
 |---|---|
@@ -592,7 +598,7 @@ users' intervals.icu keys were only given for reading (27).
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally; Strava on the hosted server, or intervals.icu with `source: "intervals_icu"` when connected) and single-workout analysis. From intervals.icu, `get_activities` also shows each activity's training load (TSS), normalized power and intensity factor, and `analyze_activity` can add left/right power balance, overall and per power zone, with `include_power_balance`. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data`, `get_wellness` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. `get_wellness` (`metrics: "load"`) returns fitness, fatigue, form, ramp rate and daily load for up to a year: every day for ranges up to 14 days (or with `daily: true`), otherwise one row per ISO week, plus a summary. |
-| `get_planned_workouts`, `plan_workout`, `update_planned_workout` | Local only: indoor cycling workouts on the intervals.icu calendar. `plan_workout` takes a date, a name, optional notes and structured steps (duration in seconds; `watts`, or `watts_low`/`watts_high`, optionally as a `ramp`; optional `cadence` or a cadence range; `{repeat, steps}` blocks, not nested) and creates an indoor ride; if the date already has a planned workout it creates nothing unless `add_another` is true. `get_planned_workouts` lists a date or up to 31 days with each step in watts and cadence, duration and load. `update_planned_workout` moves, renames or replaces the steps of a workout by id. intervals.icu works out duration and load; whether a workout reaches a trainer or head unit depends on your own intervals.icu integrations, and some apps ignore ramps or cadence ranges. |
+| `get_planned_workouts`, `plan_workout`, `update_planned_workout` | Indoor cycling workouts on the intervals.icu calendar (hosted users only if they connected intervals.icu at login). `plan_workout` takes a date, a name, optional notes and structured steps (duration in seconds; `watts`, or `watts_low`/`watts_high`, optionally as a `ramp`; optional `cadence` or a cadence range; `{repeat, steps}` blocks, not nested) and creates an indoor ride; if the date already has a planned workout it creates nothing unless `add_another` is true. `get_planned_workouts` lists a date or up to 31 days with each step in watts and cadence, duration and load. `update_planned_workout` moves, renames or replaces the steps of a workout by id. intervals.icu works out duration and load; whether a workout reaches a trainer or head unit depends on your own intervals.icu integrations, and some apps ignore ramps or cadence ranges. |
 | `read_goals`, `save_goals` | The athlete's goals: target, date, milestones, current block (saving replaces them). |
 | `build_athlete_profile`, `read_athlete_profile`, `save_athlete_profile` | The athlete profile: the coach's confirmed conclusions about the athlete (background, race results and PBs, tests, health patterns, constraints, strengths and limiters, what works, preferences), no weekly stats. `build_athlete_profile` is guidance for building it (interview, check against 12 months of data with the existing tools, discussion); saving replaces the whole profile (`athlete-profile.md`, or `athlete/<user_id>.md` on a hosted server) and is refused over 8,000 characters. |
 | `get_training_science` | Guidance for basing advice on sport science: how to find and check research on the web, how to present it with a confidence level, safety referrals, and a list of reviewed papers to start from (not a limit). |

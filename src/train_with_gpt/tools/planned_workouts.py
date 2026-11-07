@@ -1,9 +1,8 @@
 """Planned indoor cycling workouts on the intervals.icu calendar (issue #57).
 
 plan_workout, get_planned_workouts and update_planned_workout. Personal
-(stdio) installs only for now: the hosted intervals.icu connect page promises
-read-only use, so server.py hides these tools from hosted users and refuses
-calls from them.
+installs use the configured key; hosted users their own connected key (the
+intervals.icu connect page says it's also used for planning workouts).
 """
 
 import sys
@@ -31,9 +30,15 @@ from ..workout_text import (
 )
 
 PLANNED_WORKOUT_TOOLS = ("plan_workout", "get_planned_workouts", "update_planned_workout")
-HOSTED_NOT_AVAILABLE_MESSAGE = (
-    "Planning workouts on the intervals.icu calendar is only available on a personal "
-    "(local) install of this server for now, not on the hosted server."
+INTERVALS_NOT_CONNECTED_MESSAGE = (
+    "ℹ️ Planned workouts live on the intervals.icu calendar, and intervals.icu isn't connected for "
+    "this athlete. To add it, sign in to this server again (e.g. disconnect and reconnect this "
+    "connector in Claude's settings) and paste your intervals.icu API key on the page shown after "
+    "the Strava login."
+)
+INTERVALS_NOT_OFFERED_MESSAGE = (
+    "ℹ️ This server doesn't offer connecting intervals.icu, so workouts can't be planned on an "
+    "intervals.icu calendar here."
 )
 MAX_RANGE_DAYS = 31
 CYCLING_TYPES = ("Ride", "VirtualRide")

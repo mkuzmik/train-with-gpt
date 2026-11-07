@@ -38,7 +38,8 @@ from .memory import (
 from .self_test import self_test_tool, self_test_handler
 from .planned_workouts import (
     PLANNED_WORKOUT_TOOLS,
-    HOSTED_NOT_AVAILABLE_MESSAGE as PLANNED_WORKOUTS_HOSTED_MESSAGE,
+    INTERVALS_NOT_CONNECTED_MESSAGE as PLANNING_NOT_CONNECTED_MESSAGE,
+    INTERVALS_NOT_OFFERED_MESSAGE as PLANNING_NOT_OFFERED_MESSAGE,
     plan_workout_tool,
     plan_workout_handler,
     get_planned_workouts_tool,
@@ -105,7 +106,8 @@ __all__ = [
     "self_test_tool",
     "self_test_handler",
     "PLANNED_WORKOUT_TOOLS",
-    "PLANNED_WORKOUTS_HOSTED_MESSAGE",
+    "PLANNING_NOT_CONNECTED_MESSAGE",
+    "PLANNING_NOT_OFFERED_MESSAGE",
     "plan_workout_tool",
     "plan_workout_handler",
     "get_planned_workouts_tool",

@@ -1,10 +1,12 @@
 """Planned turbo workouts on the intervals.icu calendar, black box over MCP.
 
 Personal server: plan, read back and change a workout over the SDK's
-in-memory transport. Hosted server: the tools aren't offered and a call
-(e.g. from a client with a cached tool list) never reaches intervals.icu.
+in-memory transport. Hosted server (real OAuth logins over HTTP): each user
+plans with their own connected intervals.icu key, and users without one are
+told how to connect it.
 """
 
+import base64
 import json
 
 import pytest
@@ -12,7 +14,11 @@ from httpx import Response
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from train_with_gpt.server import app as mcp_server
-from train_with_gpt.tools import PLANNED_WORKOUT_TOOLS, PLANNED_WORKOUTS_HOSTED_MESSAGE
+from train_with_gpt.tools import (
+    PLANNED_WORKOUT_TOOLS,
+    PLANNING_NOT_CONNECTED_MESSAGE,
+    PLANNING_NOT_OFFERED_MESSAGE,
+)
 
 INTERVALS = "https://intervals.icu/api/v1"
 EVENTS = f"{INTERVALS}/athlete/0/events"
@@ -99,9 +105,32 @@ async def test_personal_server_validates_steps_against_the_schema(http_mock, int
     assert not created.called
 
 
-def test_hosted_users_are_not_offered_the_planning_tools(login):
+def test_hosted_users_are_offered_the_planning_tools(login):
     names = {tool["name"] for tool in login(9).list_tools()}
-    assert not names & set(PLANNED_WORKOUT_TOOLS)
+    assert set(PLANNED_WORKOUT_TOOLS) <= names
+
+
+def _basic_auth_key(request) -> str:
+    return base64.b64decode(request.headers["authorization"].split()[1]).decode().split(":", 1)[1]
+
+
+@pytest.mark.intervals_login_step
+def test_hosted_users_plan_on_their_own_calendar_with_their_own_key(login, http_mock, intervals_api_key):
+    """Each hosted user's calls carry their own connected key: never another
+    user's, and never the server's personal INTERVALS_API_KEY."""
+    http_mock.get(f"{INTERVALS}/athlete/0").mock(return_value=Response(200, json={"id": "i1", "name": "Test"}))
+    listed = http_mock.get(EVENTS).mock(return_value=Response(200, json=[]))
+    created = http_mock.post(EVENTS).mock(return_value=Response(200, json=_event()))
+    first = login(31, intervals_api_key="first-users-key")
+    second = login(32, intervals_api_key="second-users-key")
+
+    planned = first.call_tool("plan_workout", PLAN)
+    read = second.call_tool("get_planned_workouts", {"start_date": "2030-03-05"})
+
+    assert "✅ Planned on intervals.icu" in planned
+    assert read == "No planned workouts for 2030-03-05."
+    assert _basic_auth_key(created.calls.last.request) == "first-users-key"
+    assert [_basic_auth_key(call.request) for call in listed.calls] == ["first-users-key", "second-users-key"]
 
 
 @pytest.mark.intervals_login_step
@@ -110,12 +139,15 @@ def test_hosted_users_are_not_offered_the_planning_tools(login):
     ("get_planned_workouts", {"start_date": "2030-03-05"}),
     ("update_planned_workout", {"workout_id": 501, "name": "x"}),
 ])
-def test_hosted_calls_are_refused_without_touching_intervals(login, http_mock, tool, arguments):
-    """Even with their own intervals.icu key connected: the hosted connect step
-    only asked for read access to wellness and activities."""
-    http_mock.get(f"{INTERVALS}/athlete/0").mock(return_value=Response(200, json={"id": "i1", "name": "Test"}))
+def test_hosted_users_without_intervals_are_told_how_to_connect(login, http_mock, intervals_api_key, tool, arguments):
     events = http_mock.route(url__startswith=EVENTS)
-    mcp = login(31, intervals_api_key="users-own-key")
+    mcp = login(43)  # skipped the intervals.icu step
 
-    assert mcp.call_tool(tool, arguments) == PLANNED_WORKOUTS_HOSTED_MESSAGE
+    assert mcp.call_tool(tool, arguments) == PLANNING_NOT_CONNECTED_MESSAGE
+    assert not events.called  # in particular, not with the server's personal key
+
+
+def test_hosted_planning_when_the_server_does_not_offer_intervals(login, http_mock):
+    events = http_mock.route(url__startswith=EVENTS)
+    assert login(44).call_tool("get_planned_workouts", {"start_date": "2030-03-05"}) == PLANNING_NOT_OFFERED_MESSAGE
     assert not events.called
