@@ -709,15 +709,6 @@ The CI pipeline tests against Python 3.10 through 3.14, running the unit and int
 
 **⚠️ IMPORTANT: All tests must pass before merging PRs.**
 
-**Claude review** (`.github/workflows/claude-review.yml`) comments on every
-non-draft PR when it's opened, marked ready for review, and on each push. Its
-instructions are in `.github/claude-review-prompt.md`, read from the base
-branch, so a change to the prompt takes effect once it's merged. To enable it
-on your fork, install the [Claude GitHub App](https://github.com/apps/claude)
-on the repo and add a `CLAUDE_CODE_OAUTH_TOKEN` repository secret (create it
-with `claude setup-token`). PRs from forks get no review, because GitHub
-doesn't give their workflows access to secrets.
-
 ### Releasing
 
 Merging a PR into `main` releases it: the tests run, then the commit gets the

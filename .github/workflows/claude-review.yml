@@ -2,8 +2,9 @@ name: Claude review
 
 # Reviews every non-draft PR: when it's opened or reopened, marked ready for
 # review, and on every push to it. The prompt lives in
-# .github/claude-review-prompt.md. Needs the Claude GitHub App installed on the
-# repo and a CLAUDE_CODE_OAUTH_TOKEN secret (see README → Continuous Integration).
+# .github/claude-review-prompt.md. Maintainer-only: it runs only in
+# mkuzmik/train-with-gpt (not in forks or copies of this template) and needs the
+# Claude GitHub App plus a CLAUDE_CODE_OAUTH_TOKEN secret.
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
@@ -15,7 +16,7 @@ concurrency:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: github.repository == 'mkuzmik/train-with-gpt' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
       contents: read
