@@ -95,7 +95,8 @@ walkthrough of every detail.
 
 After pushing a PR that's ready for review:
 
-1. Request a Copilot review (`gh pr edit <N> --add-reviewer @copilot`).
+1. **Never request or re-request a Copilot review yourself**; the maintainer
+   does that. Tell them the PR is ready for review.
 2. Poll every few minutes for a review on the latest head commit.
 3. Evaluate **every** finding — inline comments *and* items that appear only in
    the review body (e.g. "Previously missed" / low-confidence notes):
@@ -104,6 +105,7 @@ After pushing a PR that's ready for review:
    - description mismatch → update the PR description.
 4. Reply on each inline thread with the fixing commit or the reasoning;
    answer body-only items with a PR comment.
-5. Push without force, re-request the review, repeat. Stop when a round has
-   no new valid findings, or after 4 rounds (then list what's left in the PR).
+5. Push without force, tell the maintainer it's ready for another review, and
+   repeat when one arrives. Stop when a round has no new valid findings, or
+   after 4 rounds (then list what's left in the PR).
 6. Confirm CI is green.
