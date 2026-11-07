@@ -144,3 +144,66 @@ class IntervalsClient:
             )
             response.raise_for_status()
             return response.json()
+
+    # --- calendar events (planned workouts) ---------------------------------
+    # OpenAPI: listEvents, showEvent, createEvent, updateEvent under
+    # /api/v1/athlete/{id}/events. Structure goes in `description` as
+    # workout-builder text; intervals.icu parses it into `workout_doc`.
+
+    async def list_events(
+        self, oldest: str, newest: str, category: str = "WORKOUT", resolve: bool = True
+    ) -> list[dict]:
+        """Calendar events from `oldest` to `newest` (local dates, inclusive).
+        resolve=True adds watts (`_power`) for targets given as % of FTP etc."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.BASE_URL}/athlete/0/events",
+                auth=self._auth(),
+                params={"oldest": oldest, "newest": newest, "category": category,
+                        "resolve": str(resolve).lower()},
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def get_event(self, event_id: int) -> Optional[dict]:
+        """One calendar event, or None if it doesn't exist (HTTP 404)."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.BASE_URL}/athlete/0/events/{event_id}",
+                auth=self._auth(),
+                params={"resolve": "true"},
+                timeout=30.0,
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
+    async def create_event(self, event: dict) -> dict:
+        """Create a calendar event and return it as intervals.icu saved it."""
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.BASE_URL}/athlete/0/events",
+                auth=self._auth(),
+                # The spec marks upsertOnUid as required; false = always create.
+                params={"upsertOnUid": "false"},
+                json=event,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def update_event(self, event_id: int, event: dict) -> Optional[dict]:
+        """Update a calendar event and return it, or None if it doesn't exist."""
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{self.BASE_URL}/athlete/0/events/{event_id}",
+                auth=self._auth(),
+                json=event,
+                timeout=30.0,
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()

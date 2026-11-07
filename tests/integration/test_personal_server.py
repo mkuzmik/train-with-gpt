@@ -63,8 +63,9 @@ async def test_stdio_lists_all_tools(stdio_env):
     async with StdioServer(stdio_env) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 28
-    assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
+    assert len(tools) == 31
+    assert {"get_activities", "save_consultation_notes", "setup_training_repo",
+            "plan_workout", "get_planned_workouts", "update_planned_workout"} <= {tool.name for tool in tools}
 
 
 async def test_stdio_ignores_the_hosted_allowlist(stdio_env):
@@ -84,8 +85,9 @@ async def test_console_script_serves_stdio(stdio_env):
     async with StdioServer(stdio_env, command=[CONSOLE_SCRIPT]) as session:
         tools = (await session.list_tools()).tools
 
-    assert len(tools) == 28
-    assert {"get_activities", "save_consultation_notes", "setup_training_repo"} <= {tool.name for tool in tools}
+    assert len(tools) == 31
+    assert {"get_activities", "save_consultation_notes", "setup_training_repo",
+            "plan_workout", "get_planned_workouts", "update_planned_workout"} <= {tool.name for tool in tools}
 
 
 async def test_stdio_notes_and_goals_round_trip_through_the_remote(stdio_env, training_repo, git_remote):

@@ -1099,3 +1099,89 @@ entries. An invalid name in `types` makes the whole request fail with HTTP 422.
   }
 ]
 ```
+
+## `GET /athlete/0/events?category=WORKOUT&resolve=true`
+
+```json
+[
+  {
+    "athlete_cannot_edit": true,
+    "athlete_id": "text",
+    "atl_days": 1,
+    "attachments": [
+      {
+        "filename": "text",
+        "id": "text",
+        "mimetype": "text",
+        "url": "text"
+      }
+    ],
+    "calendar_id": 1,
+    "can_train_sports": [
+      "text"
+    ],
+    "carbs_per_hour": 1,
+    "carbs_used": 1,
+    "category": "text",
+    "color": "text",
+    "created_by_id": "text",
+    "ctl_days": 1,
+    "description": "text",
+    "distance": 1.5,
+    "distance_target": 1.5,
+    "end_date_local": "text",
+    "entered": true,
+    "external_id": "text",
+    "for_week": true,
+    "hide_from_athlete": true,
+    "icu_atl": 1.5,
+    "icu_ctl": 1.5,
+    "icu_ftp": 1,
+    "icu_intensity": 1.5,
+    "icu_training_load": 1,
+    "id": 1,
+    "indoor": true,
+    "joules": 1,
+    "joules_above_ftp": 1,
+    "load_target": 1,
+    "max_training_time": 1,
+    "moving_time": 1,
+    "name": "text",
+    "not_on_fitness_chart": true,
+    "oauth_client_id": 1,
+    "p_max": 1,
+    "plan_applied": "2000-01-01T00:00:00",
+    "plan_athlete_id": "text",
+    "plan_folder_id": 1,
+    "plan_workout_id": 1,
+    "push_errors": [
+      {
+        "date": "2000-01-01T00:00:00",
+        "message": "text",
+        "service": "text"
+      }
+    ],
+    "shared_event_id": 1,
+    "show_as_note": true,
+    "show_on_ctl_line": true,
+    "ss_cp": 1.5,
+    "ss_p_max": 1.5,
+    "ss_w_prime": 1.5,
+    "start_date_local": "text",
+    "strain_score": 1.5,
+    "structure_read_only": true,
+    "sub_type": "text",
+    "tags": [
+      "text"
+    ],
+    "target": "text",
+    "time_target": 1,
+    "training_availability": "text",
+    "type": "text",
+    "uid": "text",
+    "updated": "2000-01-01T00:00:00",
+    "w_prime": 1,
+    "workout_doc": {}
+  }
+]
+```

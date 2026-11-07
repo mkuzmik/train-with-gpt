@@ -34,9 +34,17 @@ LIST = "GET /athlete/0/activities"
 DETAIL = "GET /activity/{id}?intervals=true"
 STREAMS = "GET /activity/{id}/streams?types=..."
 WELLNESS = "GET /athlete/0/wellness"
+EVENTS = "GET /athlete/0/events?category=WORKOUT&resolve=true"
 
 # Built-in fields the real API returns but the OpenAPI spec leaves out.
 EXTRA_FIELDS = {"valueType"}
+# The spec types an event's workout_doc as a plain object; these are the step
+# fields intervals.icu documents for it (forum guides by its staff).
+WORKOUT_DOC_FIELDS = {
+    "steps", "text", "duration", "distance", "reps", "warmup", "cooldown", "ramp", "freeride",
+    "power", "_power", "cadence", "hr", "_hr", "pace", "_pace", "units", "value", "start", "end",
+    "target", "description",
+}
 # The spec doesn't enumerate stream types. Anything else is reported as unlisted.
 STREAM_TYPES = {
     "altitude", "cadence", "distance", "heartrate", "latlng", "respiration",
@@ -157,13 +165,18 @@ def stream_shapes(responses: list, known: set[str]) -> dict:
     return {label: shapes[label].render() for label in sorted(shapes)}
 
 
-def render_reference(samples: dict[str, list], known: set[str], source: str) -> str:
-    """The reference file. Refuses to produce one with an endpoint missing."""
+def render_reference(
+    samples: dict[str, list], known: set[str], source: str, notes: Optional[dict[str, str]] = None
+) -> str:
+    """The reference file. Refuses to produce one with an endpoint missing.
+    `notes` adds a line under an endpoint's heading."""
+    notes = notes or {}
     sections = {
         LIST: shape_of(samples[LIST], known),
         DETAIL: shape_of(samples[DETAIL], known),
         STREAMS: stream_shapes(samples[STREAMS], known),
         WELLNESS: shape_of(samples[WELLNESS], known),
+        EVENTS: shape_of(samples[EVENTS], known),
     }
     for endpoint, shape in sections.items():
         if not samples[endpoint] or not shape:
@@ -193,7 +206,10 @@ def render_reference(samples: dict[str, list], known: set[str], source: str) -> 
         "entries. An invalid name in `types` makes the whole request fail with HTTP 422.",
     ]
     for endpoint, shape in sections.items():
-        lines += ["", f"## `{endpoint}`", "", "```json", json.dumps(shape, indent=2), "```"]
+        lines += ["", f"## `{endpoint}`", ""]
+        if endpoint in notes:
+            lines += [notes[endpoint], ""]
+        lines += ["```json", json.dumps(shape, indent=2), "```"]
     return "\n".join(lines) + "\n"
 
 
@@ -222,6 +238,13 @@ def fetch_samples(client: httpx.Client, days: int, max_activities: int) -> dict[
         DETAIL: [],
         STREAMS: [],
         WELLNESS: [get_json(client, WELLNESS, f"{BASE_URL}/athlete/0/wellness", window)],
+        # Planned workouts are mostly ahead, so look both ways.
+        EVENTS: [get_json(client, EVENTS, f"{BASE_URL}/athlete/0/events", {
+            "oldest": window["oldest"],
+            "newest": (today + dt.timedelta(days=days)).isoformat(),
+            "category": "WORKOUT",
+            "resolve": "true",
+        })],
     }
 
     for activity in [a for a in activities if a.get("id")][:max_activities]:
@@ -277,13 +300,14 @@ def spec_samples(spec: dict) -> dict[str, list]:
         DETAIL: [build(schemas["ActivityWithIntervals"])],
         STREAMS: [streams],
         WELLNESS: [[build(schemas["Wellness"])]],
+        EVENTS: [[build(schemas["Event"])]],
     }
 
 
 def capture(from_spec: bool, days: int, max_activities: int) -> str:
     with httpx.Client(timeout=60.0) as public:
         spec = get_json(public, "GET OpenAPI spec", SPEC_URL)
-    known = known_fields(spec)
+    known = known_fields(spec) | WORKOUT_DOC_FIELDS
 
     if from_spec:
         source = (
@@ -297,7 +321,13 @@ def capture(from_spec: bool, days: int, max_activities: int) -> str:
         raise CaptureError("INTERVALS_API_KEY is not set (or use --from-spec)")
     with httpx.Client(auth=("API_KEY", api_key), timeout=60.0) as client:
         samples = fetch_samples(client, days, max_activities)
-    return render_reference(samples, known, "live API responses with all values removed.")
+    notes = {}
+    if not any(samples[EVENTS]):
+        # Not everyone plans workouts: describe the spec's Event instead of failing.
+        samples[EVENTS] = spec_samples(spec)[EVENTS]
+        notes[EVENTS] = ("No planned workouts in the sampled range, so this section is built "
+                         "from the public spec (workout_doc's steps are not shown).")
+    return render_reference(samples, known, "live API responses with all values removed.", notes)
 
 
 def main(argv: Optional[list[str]] = None) -> int:

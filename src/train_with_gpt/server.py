@@ -78,6 +78,15 @@ from .tools import (
     build_memory_from_notes_handler,
     self_test_tool,
     self_test_handler,
+    PLANNED_WORKOUT_TOOLS,
+    PLANNING_NOT_CONNECTED_MESSAGE,
+    PLANNING_NOT_OFFERED_MESSAGE,
+    plan_workout_tool,
+    plan_workout_handler,
+    get_planned_workouts_tool,
+    get_planned_workouts_handler,
+    update_planned_workout_tool,
+    update_planned_workout_handler,
 )
 from .tools.self_test import SELF_TEST_PROMPT_NAME, self_test_prompt, self_test_prompt_result
 
@@ -194,6 +203,26 @@ def _activity_client(arguments: dict):
     return None, INTERVALS_NOT_CONNECTED_MESSAGE
 
 
+def _planning_client():
+    """The intervals.icu client for the planned-workout tools, or an error text.
+
+    Planned workouts only exist on intervals.icu: stdio/personal paths use the
+    personal client, hosted users their own connected key (never Strava, never
+    the personal key)."""
+    user_id = current_user_id()
+    if not user_id:
+        return intervals, None
+
+    from . import secret_box
+
+    client = intervals_client_for(user_id)
+    if client:
+        return client, None
+    if not secret_box.is_configured():
+        return None, PLANNING_NOT_OFFERED_MESSAGE
+    return None, PLANNING_NOT_CONNECTED_MESSAGE
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available tools."""
@@ -206,6 +235,9 @@ async def list_tools() -> list[Tool]:
         get_resting_heart_rate_tool(),
         get_weight_data_tool(),
         get_wellness_tool(),
+        get_planned_workouts_tool(),
+        plan_workout_tool(),
+        update_planned_workout_tool(),
         analyze_activity_tool(),
         analyze_lap_tool(),
         setup_training_repo_tool(),
@@ -249,6 +281,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "analyze_activity":
             return await analyze_activity_handler(arguments, client)
         return await analyze_lap_handler(arguments, client)
+
+    if name in PLANNED_WORKOUT_TOOLS:
+        client, error = _planning_client()
+        if error:
+            return [TextContent(type="text", text=error)]
+        if name == "plan_workout":
+            return await plan_workout_handler(arguments, client)
+        if name == "get_planned_workouts":
+            return await get_planned_workouts_handler(arguments, client)
+        return await update_planned_workout_handler(arguments, client)
 
     if name == "setup_training_repo":
         return await setup_training_repo_handler(arguments)

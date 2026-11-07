@@ -78,11 +78,13 @@ READ_ONLY_TOOLS = {
     "get_resting_heart_rate": "the last 3 days (start_date/end_date)",
     "get_weight_data": "the last 3 days (start_date/end_date)",
     "get_wellness": "the last 3 days (start_date/end_date)",
+    "get_planned_workouts": "today as start_date (report only the number of planned workouts)",
 }
 READ_ONLY_TOOLS_NOT_IN_PROMPT = ("analyze_activity", "analyze_lap")
 WRITE_TOOLS = (
     "save_goals", "save_athlete_profile", "save_consultation_notes",
     "save_memory", "update_memory", "delete_memory", "setup_training_repo", "self_test",
+    "plan_workout", "update_planned_workout",
 )
 
 _SAFE_MARKER_NAME = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")
