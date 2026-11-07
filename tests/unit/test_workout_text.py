@@ -139,3 +139,19 @@ def test_no_steps_reads_back_as_nothing():
     assert format_workout_doc(None) == []
     assert format_workout_doc({}) == []
     assert format_workout_doc({"steps": []}) == []
+
+
+def test_fixed_watts_read_back_as_one_value_not_a_range():
+    """With resolve=true, intervals.icu gives a fixed step's resolved target start == end == value."""
+    doc = {"steps": [
+        {"duration": 300, "power": {"value": 220, "units": "w"}, "_power": {"value": 220, "start": 220, "end": 220}},
+        {"duration": 300, "power": {"start": 200, "end": 240, "units": "w"}, "_power": {"start": 200, "end": 240}},
+        {"duration": 600, "ramp": True, "power": {"start": 120, "end": 200, "units": "w"},
+         "_power": {"start": 120, "end": 200}},
+    ]}
+
+    assert format_workout_doc(doc) == [
+        "   - 5m 220 W",
+        "   - 5m 200-240 W",
+        "   - 10m ramp 120-200 W",
+    ]

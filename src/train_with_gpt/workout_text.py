@@ -229,9 +229,13 @@ def _number(value: Any) -> str:
     return str(value)
 
 
-def _span(target: dict) -> Optional[str]:
-    if target.get("start") is not None and target.get("end") is not None:
-        return f"{_number(target['start'])}-{_number(target['end'])}"
+def _span(target: dict, ramp: bool = False) -> Optional[str]:
+    start, end = target.get("start"), target.get("end")
+    # A resolved fixed target (resolve=true) comes back as start == end == value.
+    if start is not None and end is not None and (ramp or start != end):
+        return f"{_number(start)}-{_number(end)}"
+    if start is not None and start == end:
+        return _number(start)
     if target.get("value") is not None:
         return _number(target["value"])
     return None
@@ -241,10 +245,10 @@ _UNIT_LABELS = {"%ftp": "% FTP", "w": " W", "watts": " W", "rpm": " rpm", "%hr":
                 "%lthr": "% LTHR", "%pace": "% pace", "power_zone": "", "hr_zone": " HR"}
 
 
-def _target(target: Any, default_unit: str = "") -> Optional[str]:
+def _target(target: Any, default_unit: str = "", ramp: bool = False) -> Optional[str]:
     if not isinstance(target, dict):
         return None
-    span = _span(target)
+    span = _span(target, ramp)
     if span is None:
         return None
     units = str(target.get("units") or default_unit)
@@ -265,9 +269,10 @@ def _step_text(step: dict) -> str:
         parts.append("free ride")
     else:
         # `_power` is present with resolve=true: the target converted to watts.
-        power = _target(step.get("_power"), "w") or _target(step.get("power"))
+        ramp = bool(step.get("ramp"))
+        power = _target(step.get("_power"), "w", ramp) or _target(step.get("power"), ramp=ramp)
         if power:
-            parts.append(("ramp " if step.get("ramp") else "") + power)
+            parts.append(("ramp " if ramp else "") + power)
         for key in ("hr", "pace"):
             other = _target(step.get(key))
             if other:
