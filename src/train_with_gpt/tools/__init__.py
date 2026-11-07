@@ -36,6 +36,16 @@ from .memory import (
     build_memory_from_notes_handler,
 )
 from .self_test import self_test_tool, self_test_handler
+from .planned_workouts import (
+    PLANNED_WORKOUT_TOOLS,
+    HOSTED_NOT_AVAILABLE_MESSAGE as PLANNED_WORKOUTS_HOSTED_MESSAGE,
+    plan_workout_tool,
+    plan_workout_handler,
+    get_planned_workouts_tool,
+    get_planned_workouts_handler,
+    update_planned_workout_tool,
+    update_planned_workout_handler,
+)
 
 __all__ = [
     "setup_training_repo_tool",
@@ -94,4 +104,12 @@ __all__ = [
     "build_memory_from_notes_handler",
     "self_test_tool",
     "self_test_handler",
+    "PLANNED_WORKOUT_TOOLS",
+    "PLANNED_WORKOUTS_HOSTED_MESSAGE",
+    "plan_workout_tool",
+    "plan_workout_handler",
+    "get_planned_workouts_tool",
+    "get_planned_workouts_handler",
+    "update_planned_workout_tool",
+    "update_planned_workout_handler",
 ]

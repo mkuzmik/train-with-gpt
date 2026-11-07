@@ -5,7 +5,7 @@ import json
 from tests.support import as_oauth_user, git, text_of
 from train_with_gpt.config import config
 from train_with_gpt.server import list_tools
-from train_with_gpt.tools import setup_training_repo_handler
+from train_with_gpt.tools import PLANNED_WORKOUT_TOOLS, setup_training_repo_handler
 
 
 async def test_setup_persists_repo_path_to_config_file(tmp_path):
@@ -63,12 +63,13 @@ async def test_list_tools_offers_setup_training_repo_on_the_personal_path():
     assert "setup_training_repo" in {tool.name for tool in await list_tools()}
 
 
-async def test_list_tools_hides_only_setup_training_repo_from_oauth_users():
+async def test_list_tools_hides_only_setup_training_repo_and_planning_from_oauth_users():
     personal = {tool.name for tool in await list_tools()}
     with as_oauth_user("1001"):
         hosted = {tool.name for tool in await list_tools()}
 
-    assert personal - hosted == {"setup_training_repo"}
+    # Planning workouts is personal-only for now (issue #57).
+    assert personal - hosted == {"setup_training_repo", *PLANNED_WORKOUT_TOOLS}
     assert hosted < personal
 
 

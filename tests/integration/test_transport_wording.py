@@ -17,6 +17,7 @@ from tests.support import push_files, referenced_tool_names
 from train_with_gpt.config import config
 from train_with_gpt.http_server import create_app
 from train_with_gpt.server import app as mcp_server
+from train_with_gpt.tools import PLANNED_WORKOUT_TOOLS
 
 from .conftest import PUBLIC_URL, McpHttpClient, oauth_login
 from .test_personal_server import StdioServer, _text, stdio_env  # noqa: F401 (stdio_env is a fixture)
@@ -40,7 +41,8 @@ async def test_hosted_users_are_not_offered_setup_training_repo(login):
     personal = await _personal_tool_names()
 
     assert "setup_training_repo" not in hosted
-    assert personal - hosted == {"setup_training_repo"}
+    # Planning workouts is personal-only for now (issue #57).
+    assert personal - hosted == {"setup_training_repo", *PLANNED_WORKOUT_TOOLS}
 
 
 async def test_stdio_offers_setup_training_repo(stdio_env):

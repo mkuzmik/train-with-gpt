@@ -78,6 +78,14 @@ from .tools import (
     build_memory_from_notes_handler,
     self_test_tool,
     self_test_handler,
+    PLANNED_WORKOUT_TOOLS,
+    PLANNED_WORKOUTS_HOSTED_MESSAGE,
+    plan_workout_tool,
+    plan_workout_handler,
+    get_planned_workouts_tool,
+    get_planned_workouts_handler,
+    update_planned_workout_tool,
+    update_planned_workout_handler,
 )
 from .tools.self_test import SELF_TEST_PROMPT_NAME, self_test_prompt, self_test_prompt_result
 
@@ -206,6 +214,9 @@ async def list_tools() -> list[Tool]:
         get_resting_heart_rate_tool(),
         get_weight_data_tool(),
         get_wellness_tool(),
+        get_planned_workouts_tool(),
+        plan_workout_tool(),
+        update_planned_workout_tool(),
         analyze_activity_tool(),
         analyze_lap_tool(),
         setup_training_repo_tool(),
@@ -232,6 +243,9 @@ async def list_tools() -> list[Tool]:
     # for tools/list too. Clients with a cached tool list still get the refusal.
     if current_user_id():
         tools = [tool for tool in tools if tool.name != "setup_training_repo"]
+        # Planning writes to intervals.icu, which the hosted connect step
+        # doesn't ask consent for yet (issue #57): personal installs only.
+        tools = [tool for tool in tools if tool.name not in PLANNED_WORKOUT_TOOLS]
         # Hosted users choose where activities come from (activity_source.py).
         tools = [with_source_param(tool) if tool.name in ACTIVITY_TOOLS else tool for tool in tools]
     return tools
@@ -249,6 +263,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "analyze_activity":
             return await analyze_activity_handler(arguments, client)
         return await analyze_lap_handler(arguments, client)
+
+    if name in PLANNED_WORKOUT_TOOLS:
+        # Hosted users don't see these tools; refuse clients with a cached list too.
+        if current_user_id():
+            return [TextContent(type="text", text=PLANNED_WORKOUTS_HOSTED_MESSAGE)]
+        if name == "plan_workout":
+            return await plan_workout_handler(arguments, intervals)
+        if name == "get_planned_workouts":
+            return await get_planned_workouts_handler(arguments, intervals)
+        return await update_planned_workout_handler(arguments, intervals)
 
     if name == "setup_training_repo":
         return await setup_training_repo_handler(arguments)

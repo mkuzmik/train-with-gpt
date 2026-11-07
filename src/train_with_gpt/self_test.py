@@ -79,10 +79,12 @@ READ_ONLY_TOOLS = {
     "get_weight_data": "the last 3 days (start_date/end_date)",
     "get_wellness": "the last 3 days (start_date/end_date)",
 }
-READ_ONLY_TOOLS_NOT_IN_PROMPT = ("analyze_activity", "analyze_lap")
+# get_planned_workouts: personal installs only, so not in the shared prompt.
+READ_ONLY_TOOLS_NOT_IN_PROMPT = ("analyze_activity", "analyze_lap", "get_planned_workouts")
 WRITE_TOOLS = (
     "save_goals", "save_athlete_profile", "save_consultation_notes",
     "save_memory", "update_memory", "delete_memory", "setup_training_repo", "self_test",
+    "plan_workout", "update_planned_workout",
 )
 
 _SAFE_MARKER_NAME = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")

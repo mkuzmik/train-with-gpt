@@ -7,6 +7,7 @@ A Model Context Protocol (MCP) server that turns Claude into your personal endur
 - **Training Analysis**: View and analyze your activities with detailed metrics and zone distribution
 - **Sleep & Health Tracking**: Access wellness data - sleep duration/quality, HRV, resting heart rate, body weight
 - **Training Load**: Fitness, fatigue and form (CTL/ATL/TSB) and ramp rate over up to a year, plus training load (TSS), normalized power and intensity factor per activity (intervals.icu)
+- **Planned turbo workouts** (local install): Claude puts an agreed indoor cycling workout on your intervals.icu calendar (steps with duration, target watts or a ramp, optional cadence, repeats), reads back what's planned for a day, and changes it if plans change
 - **Goal Tracking**: Set training goals and have them persist across conversations
 - **Athlete Profile**: Claude builds a short profile of you with you (background, race results, health patterns, constraints, what works), checks it against your data, and starts every consultation from it
 - **Consultation History**: Claude remembers past conversations and provides continuity
@@ -580,9 +581,10 @@ Claude: ✅ Saved to training-notes/notes/2024-01-28-10-30-15.md
 
 ### Tools
 
-The local stdio server offers 28 tools; the hosted server offers the same
-minus `setup_training_repo` (27), because its notes storage is server
-configuration.
+The local stdio server offers 31 tools. The hosted server offers the same
+minus `setup_training_repo`, because its notes storage is server
+configuration, and minus the three planned-workout tools, because hosted
+users' intervals.icu keys were only given for reading (27).
 
 | Tool | What it's for |
 |---|---|
@@ -590,6 +592,7 @@ configuration.
 | `get_current_date` | Today's date and weekday. |
 | `get_activities`, `analyze_activity`, `analyze_lap` | Activities (intervals.icu locally; Strava on the hosted server, or intervals.icu with `source: "intervals_icu"` when connected) and single-workout analysis. From intervals.icu, `get_activities` also shows each activity's training load (TSS), normalized power and intensity factor, and `analyze_activity` can add left/right power balance, overall and per power zone, with `include_power_balance`. |
 | `get_sleep_data`, `get_hrv_data`, `get_resting_heart_rate`, `get_weight_data`, `get_wellness` | Wellness data from intervals.icu (hosted users only if they connected it at login). `get_weight_data` covers up to a year and returns every weigh-in or, with `mode: "summary"`, only the average, range and change. `get_wellness` (`metrics: "load"`) returns fitness, fatigue, form, ramp rate and daily load for up to a year: every day for ranges up to 14 days (or with `daily: true`), otherwise one row per ISO week, plus a summary. |
+| `get_planned_workouts`, `plan_workout`, `update_planned_workout` | Local only: indoor cycling workouts on the intervals.icu calendar. `plan_workout` takes a date, a name, optional notes and structured steps (duration in seconds; `watts`, or `watts_low`/`watts_high`, optionally as a `ramp`; optional `cadence` or a cadence range; `{repeat, steps}` blocks, not nested) and creates an indoor ride; if the date already has a planned workout it creates nothing unless `add_another` is true. `get_planned_workouts` lists a date or up to 31 days with each step in watts and cadence, duration and load. `update_planned_workout` moves, renames or replaces the steps of a workout by id. intervals.icu works out duration and load; whether a workout reaches a trainer or head unit depends on your own intervals.icu integrations, and some apps ignore ramps or cadence ranges. |
 | `read_goals`, `save_goals` | The athlete's goals: target, date, milestones, current block (saving replaces them). |
 | `build_athlete_profile`, `read_athlete_profile`, `save_athlete_profile` | The athlete profile: the coach's confirmed conclusions about the athlete (background, race results and PBs, tests, health patterns, constraints, strengths and limiters, what works, preferences), no weekly stats. `build_athlete_profile` is guidance for building it (interview, check against 12 months of data with the existing tools, discussion); saving replaces the whole profile (`athlete-profile.md`, or `athlete/<user_id>.md` on a hosted server) and is refused over 8,000 characters. |
 | `get_training_science` | Guidance for basing advice on sport science: how to find and check research on the web, how to present it with a confidence level, safety referrals, and a list of reviewed papers to start from (not a limit). |

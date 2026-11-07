@@ -44,6 +44,12 @@ SPEC = {"components": {"schemas": {
         "weight": {"type": "number"},
         "comments": {"type": "string"},
     }},
+    "Event": {"properties": {
+        "id": {"type": "integer"},
+        "name": {"type": "string"},
+        "start_date_local": {"type": "string"},
+        "workout_doc": {"type": "object", "additionalProperties": {"type": "object"}},
+    }},
 }}}
 
 ACTIVITY_ID = "i99887766"
@@ -51,6 +57,7 @@ SENTINELS = [
     ACTIVITY_ID, "SENTINEL_ACTIVITY_NAME", "2001-02-03", "SENTINEL_NOTE", "SENTINEL_CUSTOM_FIELD",
     "SENTINEL_CUSTOM_VALUE", "SENTINEL_CUSTOM_STREAM", "SENTINEL_UNKNOWN_STREAM",
     "SENTINEL_STREAM_NAME", "SENTINEL_MAP_KEY", "SENTINEL_VALUE_TYPE", "SENTINEL_COMMENT",
+    "SENTINEL_WORKOUT_NAME", "SENTINEL_STEP_CUE", "SENTINEL_DOC_FIELD", "2002-03-04", "76543",
     "987654", "54.321", "4321", "111222",
 ]
 
@@ -81,6 +88,12 @@ def stub_api(http_mock):
     ]
     wellness = [{"id": "2001-02-03", "weight": 54.321, "comments": "SENTINEL_COMMENT",
                  "SENTINEL_CUSTOM_FIELD": 4321, "restingHR": None}]
+    events = [{"id": 76543, "name": "SENTINEL_WORKOUT_NAME", "start_date_local": "2002-03-04T00:00:00",
+               "workout_doc": {"steps": [
+                   {"text": "SENTINEL_STEP_CUE", "duration": 4321, "power": {"value": 54.321, "units": "w"},
+                    "_power": {"value": 54.321}, "SENTINEL_DOC_FIELD": 1},
+                   {"reps": 3, "steps": [{"duration": 4321, "cadence": {"start": 85, "end": 95, "units": "rpm"}}]},
+               ]}}]
 
     http_mock.get(cap.SPEC_URL).mock(return_value=httpx.Response(200, json=SPEC))
     http_mock.get(f"{cap.BASE_URL}/athlete/0/activities").mock(
@@ -91,6 +104,8 @@ def stub_api(http_mock):
         return_value=httpx.Response(200, json=streams))
     http_mock.get(f"{cap.BASE_URL}/athlete/0/wellness").mock(
         return_value=httpx.Response(200, json=wellness))
+    http_mock.get(f"{cap.BASE_URL}/athlete/0/events").mock(
+        return_value=httpx.Response(200, json=events))
     return streams_route
 
 
@@ -130,7 +145,7 @@ def test_output_keeps_the_structure(tmp_path, monkeypatch, http_mock):
     stub_api(http_mock)
     _, output = run(tmp_path, monkeypatch)
     text = output.read_text()
-    activities, detail, streams, wellness = blocks(text)
+    activities, detail, streams, wellness, events = blocks(text)
 
     assert "live API responses" in text
     assert activities[0]["moving_time"] == 1
@@ -142,6 +157,13 @@ def test_output_keeps_the_structure(tmp_path, monkeypatch, http_mock):
     assert wellness[0]["id"] == "2000-01-01"
     assert wellness[0]["weight"] == 1.5
     assert wellness[0]["<unlisted field>"] == "<integer|null>"  # custom field + restingHR
+
+    # Planned workouts keep workout_doc's step structure, not its values.
+    step = events[0]["workout_doc"]["steps"][0]
+    assert events[0]["start_date_local"] == "2000-01-01T00:00:00"
+    assert step["power"] == {"units": "text", "value": 1.5}
+    assert step["steps"] == [{"cadence": {"end": 1, "start": 1, "units": "text"}, "duration": 1}]
+    assert step["<unlisted field>"] == 1
 
     assert set(streams) == {"heartrate", "<unlisted stream>"}
     assert streams["heartrate"]["data"] == ["<integer|null>"]
@@ -219,7 +241,7 @@ def test_committed_reference_holds_structure_only():
     """Also guards future refreshes: a leaked value or id fails here."""
     text = REFERENCE.read_text()
     sections = blocks(text)
-    assert len(sections) == 4
+    assert len(sections) == 5
     assert set(sections[2]) <= cap.STREAM_TYPES | {cap.UNLISTED_STREAM}
     allowed = list(cap.PLACEHOLDERS.values())
     for leaf in leaves(sections):
@@ -247,3 +269,22 @@ def test_object_and_array_at_one_position_keep_both_structures():
     shape.observe({"a": 1}, known)
     shape.observe([{"b": 1.5}], known)
     assert shape.render() == {"a": 1, "<also array>": [{"b": 1.5}]}
+
+
+def test_planned_workouts_window_looks_ahead_and_only_reads_workouts(tmp_path, monkeypatch, http_mock):
+    stub_api(http_mock)
+    events = http_mock.get(f"{cap.BASE_URL}/athlete/0/events").mock(return_value=httpx.Response(200, json=[]))
+    run(tmp_path, monkeypatch, "--days", "10")
+    params = events.calls.last.request.url.params
+    assert params["category"] == "WORKOUT" and params["resolve"] == "true"
+    assert params["newest"] > params["oldest"]
+
+
+def test_no_planned_workouts_falls_back_to_the_spec_for_that_section(tmp_path, monkeypatch, http_mock):
+    stub_api(http_mock)
+    http_mock.get(f"{cap.BASE_URL}/athlete/0/events").mock(return_value=httpx.Response(200, json=[]))
+    code, output = run(tmp_path, monkeypatch)
+    text = output.read_text()
+    assert code == 0
+    assert "No planned workouts in the sampled range" in text
+    assert blocks(text)[4] == [{"id": 1, "name": "text", "start_date_local": "text", "workout_doc": {}}]
