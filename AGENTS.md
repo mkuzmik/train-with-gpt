@@ -46,6 +46,14 @@ rules and working conventions that the README doesn't cover.
   - A PR starts only when the maintainer picks up an issue. It references the
     issue (`Fixes #N`), implements only the phase that was asked for, and
     updates the issue when the implementation diverges from the design.
+- **Confirm external APIs against their official spec.** Any issue or PR
+  that relies on an external API (intervals.icu: the OpenAPI spec at
+  `https://intervals.icu/api/v1/docs`; Strava: its API reference) must fetch
+  that spec and confirm every endpoint, field and behaviour it depends on.
+  Forum posts, search results and memory only add context, and the text must
+  say which claims come from them. Until this is done, an issue isn't planned
+  and a PR isn't ready for review. If the spec can't be reached, say so in
+  the issue or PR, leave it unplanned or in draft, and ask for access.
 - **Bug fixes**: write the failing test first, confirm it fails without the
   fix, then fix.
 - Keep edits to widely shared files small and localised; several PRs are often
