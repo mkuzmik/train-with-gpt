@@ -285,3 +285,64 @@ async def test_update_reports_a_rejected_request(intervals, http_mock):
     output = text_of(await update_planned_workout_handler({"workout_id": 7, "name": "x"}, intervals))
 
     assert "❌ intervals.icu refused the request (HTTP 403): Forbidden" in output
+
+
+# --- overlapping calls ---------------------------------------------------------------
+
+def _slow_calendar(http_mock, stored: list[dict]):
+    """A calendar whose every response takes a moment, so overlapping calls interleave."""
+    import asyncio
+
+    async def list_events(request):
+        await asyncio.sleep(0.01)
+        return Response(200, json=list(stored))
+
+    async def create(request):
+        await asyncio.sleep(0.01)
+        stored.append(saved_event(id=len(stored) + 1, **json.loads(request.content)))
+        return Response(200, json=stored[-1])
+
+    async def get(request):
+        await asyncio.sleep(0.01)
+        return Response(200, json=dict(stored[0]))
+
+    async def put(request):
+        await asyncio.sleep(0.01)
+        stored[0].update(json.loads(request.content))
+        return Response(200, json=stored[0])
+
+    http_mock.get(EVENTS).mock(side_effect=list_events)
+    created = http_mock.post(EVENTS).mock(side_effect=create)
+    http_mock.get(EVENT_7).mock(side_effect=get)
+    http_mock.put(EVENT_7).mock(side_effect=put)
+    return created
+
+
+async def test_overlapping_plans_for_one_day_create_only_one_workout(intervals, http_mock):
+    """E.g. a client sending the same tool call twice in parallel."""
+    import asyncio
+
+    stored: list[dict] = []
+    created = _slow_calendar(http_mock, stored)
+    arguments = {"date": "2030-03-05", "name": "Threshold triples", "steps": STEPS}
+
+    outputs = await asyncio.gather(*(plan_workout_handler(arguments, intervals) for _ in range(2)))
+
+    assert created.call_count == 1
+    assert len(stored) == 1
+    assert sorted("nothing was created" in text_of(o) for o in outputs) == [False, True]
+
+
+async def test_overlapping_updates_to_one_workout_keep_both_changes(intervals, http_mock):
+    import asyncio
+
+    stored = [saved_event()]
+    _slow_calendar(http_mock, stored)
+
+    await asyncio.gather(
+        update_planned_workout_handler({"workout_id": 7, "name": "Renamed"}, intervals),
+        update_planned_workout_handler({"workout_id": 7, "steps": [{"duration_seconds": 1800, "watts": 150}]}, intervals),
+    )
+
+    assert stored[0]["name"] == "Renamed"
+    assert stored[0]["description"] == "- 30m 150w"

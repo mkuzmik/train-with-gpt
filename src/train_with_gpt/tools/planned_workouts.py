@@ -5,13 +5,16 @@ installs use the configured key; hosted users their own connected key (the
 intervals.icu connect page says it's also used for planning workouts).
 """
 
+import asyncio
 import sys
+import weakref
 from datetime import datetime
 from typing import Any, Optional
 
 import httpx
 from mcp.types import TextContent, Tool, ToolAnnotations
 
+from ..helpers import current_user_id
 from ..workout_text import (
     MAX_CADENCE,
     MAX_NAME_LENGTH,
@@ -65,7 +68,9 @@ _STEP_PROPERTIES = {
     "cadence_high": {"type": _INT, "minimum": MIN_CADENCE, "maximum": MAX_CADENCE,
                      "description": "Optional upper end of a cadence range in rpm."},
     "label": {"type": "string",
-              "description": "Optional short cue shown on the step, e.g. 'Warmup' (letters only, no digits)."},
+              "description": ("Optional short cue shown on the step, e.g. 'Warmup'. Letters only, no digits, and "
+                              "no workout words intervals.icu acts on: press lap, ramp, freeride, pace, HR, "
+                              "LTHR, MMP, rpm.")},
 }
 _STEP_SCHEMA = {
     "type": "object",
@@ -99,6 +104,22 @@ _NOTES_SCHEMA = {
         "of the session. Lines must not start with '-' or end with a repeat count like '3x'."
     ),
 }
+
+
+# plan_workout checks the day, then creates; update_planned_workout reads the
+# workout, then writes all its fields back. Overlapping calls for one athlete
+# (e.g. parallel tool calls) must not interleave, or a day gets two workouts or
+# one edit undoes another. The server is a single process, so one asyncio lock
+# per athlete is enough. Locks are kept per event loop, since an asyncio.Lock
+# can't be shared between loops.
+_write_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _write_lock() -> asyncio.Lock:
+    locks = _write_locks.setdefault(asyncio.get_running_loop(), {})
+    return locks.setdefault(current_user_id() or "", asyncio.Lock())
 
 
 def _text(message: str) -> list[TextContent]:
@@ -293,24 +314,25 @@ async def plan_workout_handler(arguments: dict, intervals) -> list[TextContent]:
         if not isinstance(add_another, bool):
             raise WorkoutError("add_another must be true or false")
 
-        if not add_another:
-            existing = await intervals.list_events(date, date)
-            if existing:
-                shown = "\n\n".join(format_event(e) for e in existing)
-                return _text(
-                    f"⚠️ {date} already has {len(existing)} planned workout(s), so nothing was created:\n\n"
-                    f"{shown}\n\nTo change one, use update_planned_workout with its id. To plan another "
-                    "workout on the same day, call plan_workout again with add_another=true."
-                )
+        async with _write_lock():
+            if not add_another:
+                existing = await intervals.list_events(date, date)
+                if existing:
+                    shown = "\n\n".join(format_event(e) for e in existing)
+                    return _text(
+                        f"⚠️ {date} already has {len(existing)} planned workout(s), so nothing was created:\n\n"
+                        f"{shown}\n\nTo change one, use update_planned_workout with its id. To plan another "
+                        "workout on the same day, call plan_workout again with add_another=true."
+                    )
 
-        event = {**NEW_WORKOUT, "name": name, "start_date_local": f"{date}T00:00:00", "description": description}
-        try:
-            saved = await intervals.create_event(event)
-        except httpx.TimeoutException:
-            return _text(
-                "⚠️ intervals.icu didn't answer in time, so the workout may or may not have been created. "
-                f"Check with get_planned_workouts for {date} before trying again."
-            )
+            event = {**NEW_WORKOUT, "name": name, "start_date_local": f"{date}T00:00:00", "description": description}
+            try:
+                saved = await intervals.create_event(event)
+            except httpx.TimeoutException:
+                return _text(
+                    "⚠️ intervals.icu didn't answer in time, so the workout may or may not have been created. "
+                    f"Check with get_planned_workouts for {date} before trying again."
+                )
         return _text(f"✅ Planned on intervals.icu:\n\n{format_event(saved)}{_unparsed_warning(saved)}")
     except Exception as e:
         return _error(e, "planning the workout")
@@ -338,34 +360,35 @@ async def update_planned_workout_handler(arguments: dict, intervals) -> list[Tex
         if date is None and name is None and description is None:
             raise WorkoutError("give at least one of date, name or steps to change")
 
-        current = await intervals.get_event(workout_id)
-        if current is None or current.get("category") != "WORKOUT":
-            return _text(f"❌ No planned workout with id {workout_id}. Find it with get_planned_workouts.")
-        if description is not None and current.get("type") not in CYCLING_TYPES:
-            return _text(
-                f"❌ Workout {workout_id} is a {current.get('type') or 'non-cycling'} workout; "
-                "only cycling workouts' steps can be replaced. Nothing was changed."
-            )
+        async with _write_lock():
+            current = await intervals.get_event(workout_id)
+            if current is None or current.get("category") != "WORKOUT":
+                return _text(f"❌ No planned workout with id {workout_id}. Find it with get_planned_workouts.")
+            if description is not None and current.get("type") not in CYCLING_TYPES:
+                return _text(
+                    f"❌ Workout {workout_id} is a {current.get('type') or 'non-cycling'} workout; "
+                    "only cycling workouts' steps can be replaced. Nothing was changed."
+                )
 
-        start = str(current.get("start_date_local") or "")
-        if date is not None:
-            # Keep a planned time of day, if it had one.
-            start = date + (start[10:] if len(start) > 10 else "T00:00:00")
-        # Send every field this tool manages, so the result is the same whether
-        # intervals.icu treats PUT as a partial or a full update of them.
-        update = {
-            "category": "WORKOUT",
-            "type": current.get("type"),
-            "name": name if name is not None else current.get("name"),
-            "start_date_local": start,
-            "description": description if description is not None else current.get("description"),
-        }
-        if current.get("indoor") is not None:
-            update["indoor"] = current["indoor"]
+            start = str(current.get("start_date_local") or "")
+            if date is not None:
+                # Keep a planned time of day, if it had one.
+                start = date + (start[10:] if len(start) > 10 else "T00:00:00")
+            # Send every field this tool manages, so the result is the same whether
+            # intervals.icu treats PUT as a partial or a full update of them.
+            update = {
+                "category": "WORKOUT",
+                "type": current.get("type"),
+                "name": name if name is not None else current.get("name"),
+                "start_date_local": start,
+                "description": description if description is not None else current.get("description"),
+            }
+            if current.get("indoor") is not None:
+                update["indoor"] = current["indoor"]
 
-        saved = await intervals.update_event(workout_id, update)
-        if saved is None:
-            return _text(f"❌ No planned workout with id {workout_id}. Find it with get_planned_workouts.")
+            saved = await intervals.update_event(workout_id, update)
+            if saved is None:
+                return _text(f"❌ No planned workout with id {workout_id}. Find it with get_planned_workouts.")
         warning = _unparsed_warning(saved) if description is not None else ""
         return _text(f"✅ Updated on intervals.icu:\n\n{format_event(saved)}{warning}")
     except Exception as e:

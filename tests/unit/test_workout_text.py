@@ -92,6 +92,21 @@ def test_invalid_steps_are_refused_with_a_clear_message(steps, message):
     assert message in str(error.value)
 
 
+@pytest.mark.parametrize("label", [
+    "Press lap when ready", "PRESS LAP", "Ramp up", "Freeride", "Easy pace", "Low HR", "Hold rpm",
+])
+def test_labels_with_workout_builder_keywords_are_refused(label):
+    """intervals.icu reads these anywhere in a step: 'press lap' makes the step wait for the
+    lap button on Garmin, others change the target."""
+    with pytest.raises(WorkoutError, match="reserved"):
+        render_steps([{"duration_seconds": 600, "watts": 200, "label": label}])
+
+
+@pytest.mark.parametrize("label", ["Warmup", "Main set", "Over-unders", "Lapland", "Shred", "Cooldown"])
+def test_ordinary_labels_are_kept(label):
+    assert render_steps([{"duration_seconds": 600, "watts": 200, "label": label}])[0] == [f"- {label} 10m 200w"]
+
+
 @pytest.mark.parametrize("notes", ["Warm up well\n- 5m easy", "Do this 3x", "Main set 4X  "])
 def test_notes_that_would_parse_as_steps_or_repeats_are_refused(notes):
     with pytest.raises(WorkoutError, match="would be read as a workout step or repeat"):

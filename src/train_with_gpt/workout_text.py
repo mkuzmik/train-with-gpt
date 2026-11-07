@@ -29,6 +29,12 @@ MAX_NOTES_LENGTH = 2000
 # Letters, spaces and light punctuation only: digits, % or ^ in a cue could be
 # read by intervals.icu as a duration, target or timed prompt.
 _LABEL_RE = re.compile(r"^[^\W\d_](?:[^\W\d_]|[ '&/(),.!?-])*$")
+# Workout-builder keywords intervals.icu reads anywhere in a step, so a label
+# containing one would change the step: "press lap" makes it last until the lap
+# button is pressed (Garmin), the others change or switch off the target.
+_RESERVED_LABEL_RE = re.compile(
+    r"\b(press\s+lap|ramp|free\s*ride|pace|hr|lthr|mmp|rpm)\b", re.IGNORECASE
+)
 # A notes line that intervals.icu would read as a step or a repeat header.
 _STEP_LINE_RE = re.compile(r"^\s*-")
 _REPEAT_LINE_RE = re.compile(r"\d+\s*x\s*$", re.IGNORECASE)
@@ -103,6 +109,12 @@ def _step_line(step: Any, where: str) -> tuple[str, int]:
             raise WorkoutError(
                 f"{where}: label must be up to {MAX_LABEL_LENGTH} letters, spaces and simple punctuation, "
                 "with no digits, % or ^ (intervals.icu would read those as part of the step)"
+            )
+        reserved = _RESERVED_LABEL_RE.search(label)
+        if reserved:
+            raise WorkoutError(
+                f"{where}: label contains {reserved.group(0)!r}, a reserved workout word that intervals.icu "
+                "would act on (e.g. 'press lap' waits for the lap button); choose other words"
             )
         parts.append(label)
     parts += [format_duration(seconds), target]
